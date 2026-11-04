@@ -73,7 +73,7 @@ Add the others the same way. Each template's `template.yaml` lists the values it
 | `system/uptime-kuma` | `uptime-kuma` | `DOMAIN`, `KUMA_USERNAME` + `secret set … KUMA_PASSWORD` |
 | `system/homepage` | `homepage` | `DOMAIN` |
 | `system/volume-backup` | `volume-backup` | `AGE_RECIPIENTS` (your public key); for a Storage Box `SSH_HOST_NAME`, `SSH_USER`, `SSH_HOST_PUBLIC_KEY` + `secret set … SSH_PASSWORD` |
-| `system/neptide` | `neptide` | `DOCKER_GID` (`getent group docker \| cut -d: -f3`), `MONITOR_ONLY: "true"` to start safely; add the label `neptide.snapshot=true` to containers with databases, so a failed update also rolls their data back |
+| `system/neptide` | `neptide` | `DOCKER_GID` (`getent group docker \| cut -d: -f3`), `MONITOR_ONLY: "true"` to start safely; add the label `neptide.snapshot=true` to containers with databases, so a failed update also rolls their named volumes back (bind mounts only with `neptide.snapshot.binds=true`) |
 
 Once Uptime Kuma runs and you have created its admin account, let NepFleet put monitors into maintenance while it changes a stack ([details](maintenance.md)):
 
