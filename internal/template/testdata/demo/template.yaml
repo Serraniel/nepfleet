@@ -11,6 +11,7 @@ spec:
   images:
     - name: nginx
       track: minor
+  supports: { ingress: true }
   inputs:
     - name: DOMAIN
       type: hostname

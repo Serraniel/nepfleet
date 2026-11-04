@@ -302,7 +302,8 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 	}
 	var doc struct {
 		Services map[string]struct {
-			Image string `yaml:"image"`
+			Image  string `yaml:"image"`
+			Labels any    `yaml:"labels"`
 		} `yaml:"services"`
 	}
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
@@ -335,6 +336,40 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		}
 	}
 
+	// Integration badges must be true: a flag needs its labels, labels need their flag.
+	keys := map[string]bool{}
+	for _, svc := range doc.Services {
+		for _, k := range labelKeys(svc.Labels) {
+			keys[k] = true
+		}
+	}
+	for _, in := range []struct {
+		flag   string
+		on     bool
+		match  func(string) bool
+		labels string
+	}{
+		{"ingress", t.Spec.Supports.Ingress, func(k string) bool {
+			return k == "caddy" || strings.HasPrefix(k, "caddy.") || strings.HasPrefix(k, "caddy_")
+		}, "caddy"},
+		{"monitoring", t.Spec.Supports.Monitoring, func(k string) bool { return strings.HasPrefix(k, "kuma.") }, "kuma.*"},
+		{"dashboard", t.Spec.Supports.Dashboard, func(k string) bool { return strings.HasPrefix(k, "homepage.") }, "homepage.*"},
+	} {
+		has := false
+		for k := range keys {
+			if in.match(k) {
+				has = true
+				break
+			}
+		}
+		switch {
+		case in.on && !has:
+			errs = append(errs, fmt.Errorf("supports.%s is true, but no service has %s labels", in.flag, in.labels))
+		case !in.on && has:
+			errs = append(errs, fmt.Errorf("services have %s labels, but supports.%s is false", in.labels, in.flag))
+		}
+	}
+
 	seen := map[string]bool{}
 	for _, m := range composeRe.FindAllSubmatchIndex(raw, -1) {
 		if m[0] > 0 && raw[m[0]-1] == '$' {
@@ -346,6 +381,25 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		}
 	}
 	return errs
+}
+
+// labelKeys accepts both compose label forms: a map or a "k=v" list.
+func labelKeys(labels any) []string {
+	var out []string
+	switch l := labels.(type) {
+	case map[string]any:
+		for k := range l {
+			out = append(out, k)
+		}
+	case []any:
+		for _, item := range l {
+			if s, ok := item.(string); ok {
+				k, _, _ := strings.Cut(s, "=")
+				out = append(out, k)
+			}
+		}
+	}
+	return out
 }
 
 // ImageName strips tag and digest from an image reference.
