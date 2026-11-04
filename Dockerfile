@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 
 # NepFleet drives the Docker and Compose CLIs instead of re-implementing them,
 # and git for the fleet repository, so the runtime image ships all three.
-FROM alpine:3.23@sha256:ff7f0c727dd796aa36787bfcd9a64bf35a6ce72a73451b3359fde849b6703d63
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 RUN apk add --no-cache ca-certificates git openssh-client docker-cli docker-cli-compose age sops \
  && adduser -D -u 65532 nepfleet
 COPY --from=build /out/nepfleet /usr/local/bin/nepfleet
