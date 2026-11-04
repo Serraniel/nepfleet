@@ -35,6 +35,7 @@ const usage = `nepfleet - manage Linux hosts and Docker deployments from git
 
 Usage:
   nepfleet init [dir]                   create a fleet repository
+  nepfleet doctor                       check that this host can run what is planned for it
   nepfleet plan [stack...] [--json]     show what apply would change
   nepfleet apply [stack...]             apply, health-gated, rolls back on failure
   nepfleet render <stack>               print rendered files (secrets masked)
@@ -86,6 +87,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return validateTemplates(args[2:], stdout)
 	case "serve":
 		return serve(args[1:], stderr)
+	case "doctor":
+		return cmdDoctor(args[1:], stdout, stderr)
 	case "plan":
 		return cmdPlan(args[1:], stdout, stderr)
 	case "apply":

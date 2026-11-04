@@ -16,15 +16,18 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/term"
 
 	"github.com/Serraniel/neptide/pkg/registry"
 
 	"github.com/Serraniel/nepfleet/internal/deploy"
+	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/importer"
 	"github.com/Serraniel/nepfleet/internal/lock"
@@ -701,4 +704,99 @@ func orNone(s []string) string {
 		return "none"
 	}
 	return strings.Join(s, ", ")
+}
+
+func cmdDoctor(args []string, stdout, stderr io.Writer) error {
+	var c common
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	c.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	e, err := c.open()
+	if err != nil {
+		return err
+	}
+	stacks, err := e.stacks(nil)
+	if err != nil {
+		return err
+	}
+	in := doctor.Input{Recipients: e.fleet.Spec.Secrets.Age, AgeKeyFile: ageKeyFile()}
+	seen := map[string]bool{}
+	var renderErrs []error
+	for _, s := range stacks {
+		p, err := e.prepare(s)
+		if err != nil {
+			renderErrs = append(renderErrs, err)
+			continue
+		}
+		imgs, publishes := composeImages(p.out)
+		in.Ingress = in.Ingress || publishes
+		for _, img := range imgs {
+			if !seen[img] {
+				seen[img] = true
+				in.Images = append(in.Images, img)
+			}
+		}
+	}
+	checks := doctor.Run(context.Background(), doctor.Host(), in)
+	for _, err := range renderErrs {
+		checks = append(checks, doctor.Check{Name: "Stacks", Status: doctor.Fail, Detail: err.Error(), Fix: "fix the stack, then run doctor again"})
+	}
+	fmt.Fprintf(stdout, "Host %s, %d stack(s) planned here\n\n", c.host, len(stacks))
+	for _, ch := range checks {
+		fmt.Fprintf(stdout, " %s %-20s %s\n", ch.Status, ch.Name, ch.Detail)
+		if ch.Fix != "" && ch.Status != doctor.OK {
+			fmt.Fprintf(stdout, "   %-20s → %s\n", "", ch.Fix)
+		}
+	}
+	if doctor.Failed(checks) {
+		return errors.New("some checks failed")
+	}
+	return nil
+}
+
+func ageKeyFile() string {
+	if f := os.Getenv("SOPS_AGE_KEY_FILE"); f != "" {
+		return f
+	}
+	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
+		return filepath.Join(d, "sops", "age", "keys.txt")
+	}
+	h, _ := os.UserHomeDir()
+	return filepath.Join(h, ".config", "sops", "age", "keys.txt")
+}
+
+// composeImages lists the image references of a rendered stack (env values
+// substituted) and whether it publishes port 80 or 443.
+func composeImages(out *render.Output) (images []string, publishesWeb bool) {
+	env := map[string]string{}
+	for _, line := range strings.Split(string(out.Files[render.EnvFile]), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(k, "#") {
+			env[k] = strings.Trim(v, "'")
+		}
+	}
+	var doc struct {
+		Services map[string]struct {
+			Image string `yaml:"image"`
+			Ports []any  `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	if yaml.Unmarshal(out.Files[render.ComposeFile], &doc) != nil {
+		return nil, false
+	}
+	for _, s := range doc.Services {
+		if s.Image != "" {
+			images = append(images, os.Expand(s.Image, func(k string) string { return env[k] }))
+		}
+		for _, port := range s.Ports {
+			p := fmt.Sprint(port)
+			if strings.Contains(p, "80:80") || strings.Contains(p, "443:443") {
+				publishesWeb = true
+			}
+		}
+	}
+	sort.Strings(images)
+	return images, publishesWeb
 }
