@@ -60,14 +60,20 @@ func MonitorRefs(compose []byte, env map[string]string) []MonitorRef {
 // another host's monitor with the same name is never silenced.
 func match(all []Monitor, refs []MonitorRef) (ids []int, ambiguous []string) {
 	byTag := map[string][]int{}
-	byName := map[string][]int{}
+	byName := map[string][]int{} // only monitors AutoKuma does not manage
 	for _, m := range all {
+		tagged := false
 		for _, t := range m.Tags {
 			if t.Name == AutoKumaTag && t.Value != "" {
 				byTag[t.Value] = append(byTag[t.Value], m.ID)
+				tagged = true
 			}
 		}
-		byName[m.Name] = append(byName[m.Name], m.ID)
+		// A monitor with an AutoKuma id belongs to that id; matching it by
+		// name could silence another host's monitor.
+		if !tagged {
+			byName[m.Name] = append(byName[m.Name], m.ID)
+		}
 	}
 	for _, r := range refs {
 		switch {

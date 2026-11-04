@@ -47,8 +47,9 @@ func TestMatch(t *testing.T) {
 		{ID: 2, Name: "Vault"}, // same name on another host, untagged
 		{ID: 3, Name: "Logs"},  // unique name, untagged
 		{ID: 4, Name: "Dup"}, {ID: 5, Name: "Dup"},
+		{ID: 6, Name: "Media", Tags: tag("jellyfin-otherhost")}, // unique name, but another id
 	}
-	ids, amb := match(all, []MonitorRef{{"vaultwarden", "Vault"}, {"dozzle", "Logs"}, {"x", "Dup"}, {"gone", "Missing"}})
+	ids, amb := match(all, []MonitorRef{{"vaultwarden", "Vault"}, {"dozzle", "Logs"}, {"x", "Dup"}, {"gone", "Missing"}, {"jellyfin", "Media"}})
 	if fmt.Sprint(ids) != "[1 3]" || fmt.Sprint(amb) != "[x]" {
 		t.Errorf("ids=%v ambiguous=%v", ids, amb)
 	}
