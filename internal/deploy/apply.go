@@ -115,9 +115,24 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 		}
 		pins = o.Lock.Images
 	}
-	// What each local tag points at now, so a rollback can put it back even
-	// for images the previous manifest did not pin.
+	// What runs now, so a rollback restores it even for images the previous
+	// manifest did not pin: local tags for compose, service digests for swarm
+	// (a plain-tag stack deploy would resolve the moved tag at the registry).
 	tagsBefore := localTags(ctx, r, imgs)
+	rollbackPins := map[string]string{}
+	if prev != nil {
+		for img, d := range prev.Images {
+			rollbackPins[img] = d
+		}
+		if p.Mode == "swarm" {
+			running := (&runningFirst{r: r, stack: p.Stack, swarm: true}).collect(ctx)
+			for img, d := range running {
+				if _, pinned := rollbackPins[img]; !pinned {
+					rollbackPins[img] = d
+				}
+			}
+		}
+	}
 	err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
 	if err == nil {
 		return res, writeManifest(p.Dir, out.Files, pins, o)
@@ -139,7 +154,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 			}
 		}
 	}
-	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, prev.Images, o.WaitTimeout); rerr != nil {
+	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, rollbackPins, o.WaitTimeout); rerr != nil {
 		return res, fmt.Errorf("%w; the previous version did not come back up either: %w", err, rerr)
 	}
 	return res, fmt.Errorf("%w: %w", ErrRolledBack, err)

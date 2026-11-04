@@ -185,3 +185,56 @@ func TestRollbackRestoresTagWithoutRecordedDigests(t *testing.T) {
 		t.Error("a failed apply must not ask to commit the lock")
 	}
 }
+
+// swarmRunner reports a running service digest and fails the first deploy.
+type swarmRunner struct {
+	deploys []string
+	failed  bool
+}
+
+func (f *swarmRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	call := strings.Join(args, " ")
+	switch {
+	case strings.Contains(call, "config --images"):
+		return []byte("app:1\n"), nil
+	case strings.Contains(call, "config --format yaml"):
+		return []byte("services:\n  a:\n    image: app:1\n"), nil
+	case strings.HasPrefix(call, "service ls"):
+		return []byte("st_a\n"), nil
+	case strings.HasPrefix(call, "service inspect"):
+		return []byte("app:1@sha256:" + strings.Repeat("a", 64) + "\n"), nil
+	case strings.HasPrefix(call, "stack deploy"):
+		raw, _ := os.ReadFile(args[len(args)-2])
+		f.deploys = append(f.deploys, string(raw))
+		if !f.failed && len(f.deploys) == 2 {
+			f.failed = true
+			return nil, errors.New("update failed")
+		}
+	}
+	return nil, nil
+}
+
+// TestSwarmRollbackPinsRunningDigest: a swarm stack applied without pins,
+// then a failing --update-lock: the rollback deploy must pin the digest the
+// service ran before, not the moved tag.
+func TestSwarmRollbackPinsRunningDigest(t *testing.T) {
+	dir := t.TempDir()
+	r := &swarmRunner{}
+	ctx := context.Background()
+	v1 := output("services:\n  a: {image: 'app:1'}\n", "X='1'\n")
+	p, _ := PlanStack("st", "swarm", dir, v1, nil)
+	if _, err := Apply(ctx, r, p, v1, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	v2 := output("services:\n  a: {image: 'app:1', environment: {Y: '2'}}\n", "X='1'\n")
+	p, _ = PlanStack("st", "swarm", dir, v2, nil)
+	newDigest := "sha256:" + strings.Repeat("b", 64)
+	_, err := Apply(ctx, r, p, v2, Options{Lock: &lock.Lock{Images: map[string]string{}}, Resolver: fixed{"app:1": newDigest}, UpdateLock: true})
+	if !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("expected rollback, got %v", err)
+	}
+	last := r.deploys[len(r.deploys)-1]
+	if !strings.Contains(last, "app:1@sha256:"+strings.Repeat("a", 64)) {
+		t.Fatalf("rollback deploy does not pin the previously running digest:\n%s", last)
+	}
+}

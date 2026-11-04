@@ -217,7 +217,7 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 		if *updateLock {
-			if _, err := e.previewUpdate(context.Background(), p); err != nil {
+			if _, err := e.previewUpdate(context.Background(), p, stderr); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -278,7 +278,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		var updated *lock.Lock
 		if *updateLock {
 			// Resolve before confirming, so the plan shows the image changes.
-			if updated, err = e.previewUpdate(ctx, p); err != nil {
+			if updated, err = e.previewUpdate(ctx, p, stderr); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -352,7 +352,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 
 // previewUpdate resolves current digests for a prepared stack and re-plans
 // with them, so the plan lists every image that would move.
-func (e *env) previewUpdate(ctx context.Context, p *prepared) (*lock.Lock, error) {
+func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) (*lock.Lock, error) {
 	current, err := lock.Load(p.stack.Dir)
 	if err != nil {
 		return nil, err
@@ -362,7 +362,7 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared) (*lock.Lock, error
 		return nil, fmt.Errorf("%s: resolving image updates: %w", p.stack.Metadata.Name, err)
 	}
 	for _, s := range skipped {
-		fmt.Fprintf(os.Stderr, "%s: ⚠ cannot resolve %s, its pin stays as is\n", p.stack.Metadata.Name, s)
+		fmt.Fprintf(stderr, "%s: ⚠ cannot resolve %s, its pin stays as is\n", p.stack.Metadata.Name, s)
 	}
 	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
 	return updated, err
