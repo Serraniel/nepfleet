@@ -21,3 +21,16 @@ func TestParseInterspersed(t *testing.T) {
 		t.Fatalf("pos=%v target=%s set=%v", pos, *target, set)
 	}
 }
+
+func TestDoubleDashEndsFlags(t *testing.T) {
+	fs := flag.NewFlagSet("t", flag.ContinueOnError)
+	set := setFlags{}
+	fs.Var(set, "set", "")
+	pos, err := parseInterspersed(fs, []string{"caddy", "--", "-weird", "--set", "A=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(pos, " ") != "caddy -weird --set A=1" || len(set) != 0 {
+		t.Fatalf("pos=%v set=%v", pos, set)
+	}
+}

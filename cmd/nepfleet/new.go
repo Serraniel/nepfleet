@@ -42,7 +42,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	source := fs.String("source", "official", "template source from fleet.yaml")
 	target := fs.String("target", "local", "spec.target of the new stack")
 	set := setFlags{}
-	fs.Var(set, "set", "input value KEY=VALUE (repeatable); missing inputs are asked for")
+	fs.Var(set, "set", "input value KEY=VALUE (repeatable); missing inputs are asked for. Prefer the prompt for secrets: --set ends up in shell history")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
@@ -96,11 +96,23 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	values, secretVals := map[string]string{}, map[string]string{}
 	for _, inp := range tpl.Spec.Inputs {
 		v, given := set[inp.Name]
-		delete(set, inp.Name)
-		if !given && interactive {
+		if given && v != "" {
+			if err := render.CheckInput(inp, v); err != nil {
+				return fmt.Errorf("%s: %w", inp.Name, err)
+			}
+		}
+		for !given && interactive {
 			if v, err = askInput(stdout, in, inp); err != nil {
 				return err
 			}
+			if v == "" {
+				break
+			}
+			if err := render.CheckInput(inp, v); err != nil {
+				fmt.Fprintf(stdout, "  ✗ %v, try again\n", err)
+				continue
+			}
+			break
 		}
 		if v == "" {
 			if inp.Required && inp.Default == "" {

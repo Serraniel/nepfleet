@@ -8,6 +8,14 @@ import "flag"
 // which flag.Parse alone does not: it stops at the first positional.
 // It returns the positional arguments in order; "--" ends flag parsing.
 func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	// Everything after a literal "--" is positional, whatever it looks like.
+	var rest []string
+	for i, a := range args {
+		if a == "--" {
+			args, rest = args[:i], args[i+1:]
+			break
+		}
+	}
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -15,10 +23,7 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 		}
 		args = fs.Args()
 		if len(args) == 0 {
-			return pos, nil
-		}
-		if args[0] == "--" {
-			return append(pos, args[1:]...), nil
+			return append(pos, rest...), nil
 		}
 		pos = append(pos, args[0])
 		args = args[1:]
