@@ -73,7 +73,7 @@ git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR |
       esac
       content=$(git show ":$f")
       # SOPS leaves empty values ("") unencrypted; everything else must be ENC[...].
-      plain=$(printf '%s\n' "$content" | grep -vE '^(sops:|[[:space:]]|#|$)' | grep -vE '^[^:]+: *(ENC\[|""[[:space:]]*$|$)')
+      plain=$(printf '%s\n' "$content" | grep -vE '^(sops:|[[:space:]]|#|$)' | grep -vE '^[^:]+: *(ENC\[|""[[:space:]]*$)')
       if ! printf '%s\n' "$content" | grep -q '^sops:' || [ -n "$plain" ]; then
         echo "refusing to commit $f: it is not (fully) SOPS-encrypted (use: nepfleet secret set)" >&2
         status=1

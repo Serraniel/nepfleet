@@ -51,6 +51,22 @@ func TestHookBlocksPlaintextSecrets(t *testing.T) {
 	if err := run("commit", "-qm", "partly plaintext"); err == nil {
 		t.Fatal("hook let a partly plaintext, non-ASCII-named secret through")
 	}
+	if err := run("reset", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(odd); err != nil {
+		t.Fatal(err)
+	}
+	// A value on the next, indented line is still a plaintext value.
+	if err := os.WriteFile(secret, []byte("KEY:\n  hunter2\nsops:\n  version: 3.11.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("commit", "-qm", "multiline plaintext"); err == nil {
+		t.Fatal("hook let a value on the next line through")
+	}
 }
 
 func TestUnencryptedSecrets(t *testing.T) {
