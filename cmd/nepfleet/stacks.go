@@ -723,6 +723,11 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	in := doctor.Input{Recipients: e.fleet.Spec.Secrets.Age, AgeKeyFile: ageKeyFile()}
+	for _, k := range []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_CMD"} {
+		if os.Getenv(k) != "" {
+			in.KeyFromEnv = k
+		}
+	}
 	seen := map[string]bool{}
 	var renderErrs []error
 	for _, s := range stacks {
@@ -755,6 +760,21 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		return errors.New("some checks failed")
 	}
 	return nil
+}
+
+// hostPort returns the published host port of a compose ports entry, in
+// short ("[ip:]host:container[/proto]") or long ({published: …}) syntax.
+func hostPort(port any, env map[string]string) string {
+	if m, ok := port.(map[string]any); ok {
+		return os.Expand(fmt.Sprint(m["published"]), func(k string) string { return env[k] })
+	}
+	s := os.Expand(fmt.Sprint(port), func(k string) string { return env[k] })
+	s, _, _ = strings.Cut(s, "/")
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 {
+		return "" // container port only: Docker picks a random host port
+	}
+	return parts[len(parts)-2]
 }
 
 func ageKeyFile() string {
@@ -791,8 +811,7 @@ func composeImages(out *render.Output) (images []string, publishesWeb bool) {
 			images = append(images, os.Expand(s.Image, func(k string) string { return env[k] }))
 		}
 		for _, port := range s.Ports {
-			p := fmt.Sprint(port)
-			if strings.Contains(p, "80:80") || strings.Contains(p, "443:443") {
+			if h := hostPort(port, env); h == "80" || h == "443" {
 				publishesWeb = true
 			}
 		}

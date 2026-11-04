@@ -77,6 +77,7 @@ func TestProblemsAreReported(t *testing.T) {
 	d := fakeDocker{
 		"info":                 `{"ServerVersion":"24.0.1","Architecture":"aarch64","DockerRootDir":"/var/lib/docker","CgroupVersion":"2"}`,
 		"compose version":      "2.20.0\n",
+		"version --format":     "arm64\n",
 		"manifest inspect":     amdOnly,
 		"ps --filter publish=": "nginx-legacy (nginx:1)\n",
 	}
@@ -104,5 +105,23 @@ func TestWrongAgeKey(t *testing.T) {
 	cs := byName(Run(context.Background(), env(d, map[string]string{"/key": "k"}), Input{Recipients: []string{"age1other"}, AgeKeyFile: "/key"}))
 	if c := cs["age key"]; c.Status != Fail || !strings.Contains(c.Detail, "not a recipient") {
 		t.Errorf("age key: %+v", c)
+	}
+}
+
+func TestPlatforms(t *testing.T) {
+	pi32 := platform{"arm", variant("aarch64", "arm")} // 32-bit userland, 64-bit kernel
+	zero := platform{"arm", variant("armv6l", "arm")}
+	for _, c := range []struct {
+		host    platform
+		arch, v string
+		want    bool
+	}{
+		{pi32, "arm", "v7", true}, {pi32, "arm", "v6", true}, {pi32, "arm64", "", false},
+		{zero, "arm", "v7", false}, {zero, "arm", "v6", true},
+		{platform{"amd64", ""}, "amd64", "", true}, {platform{"arm64", ""}, "arm64", "v8", true},
+	} {
+		if got := c.host.runs(c.arch, c.v); got != c.want {
+			t.Errorf("%s runs %s/%s = %v, want %v", c.host, c.arch, c.v, got, c.want)
+		}
 	}
 }
