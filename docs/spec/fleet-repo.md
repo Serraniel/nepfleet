@@ -38,7 +38,18 @@ spec:
   updates: notify             # off | notify | auto
 ```
 
-A plain compose stack is a valid stack. You can paste any `compose.yaml` and NepFleet versions it just the same. `nepfleet import` writes stacks in this form from running Compose projects, Swarm stacks or Portainer.
+A plain compose stack is a valid stack. You can paste any `compose.yaml` and NepFleet versions it just the same.
+
+## Importing running projects
+
+`nepfleet import compose` lists the Compose projects on the host. `nepfleet import compose <project>` adopts one as a plain stack:
+
+- The compose file is normalised, so relative bind mounts become absolute paths and keep pointing at the existing data. `${VAR}` references are kept.
+- Variables from the project's env files go to `values`. Names that look secret (`*PASSWORD*`, `*TOKEN*`, `*KEY*`, `*_URL` and so on) go encrypted to `values.secret.yaml`.
+- The project name stays the same, so the first apply adopts the running containers without recreating them. CI tests this (`test/integration/import.sh`).
+- Warnings cover what cannot be carried over: local builds, `env_file` references, and variables that came from the shell.
+
+Swarm stacks and Portainer follow with their own issues.
 
 ## Rules
 
