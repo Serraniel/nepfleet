@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -98,5 +100,41 @@ func TestInit(t *testing.T) {
 	}
 	if err := Init(dir); !errors.Is(err, ErrExists) {
 		t.Fatalf("second Init = %v, want ErrExists", err)
+	}
+}
+
+// The schema tags (internal/schema) must list what the parser accepts.
+func TestSchemaTagsMatchValidation(t *testing.T) {
+	enum := func(v any, path ...string) []string {
+		ty := reflect.TypeOf(v)
+		var f reflect.StructField
+		for _, p := range path {
+			f, _ = ty.FieldByName(p)
+			ty = f.Type
+		}
+		for part := range strings.SplitSeq(f.Tag.Get("schema"), ";") {
+			if v, ok := strings.CutPrefix(part, "enum="); ok {
+				return strings.Split(v, "|")
+			}
+		}
+		return nil
+	}
+	for _, c := range []struct {
+		got, want []string
+		name      string
+	}{
+		{enum(StackSpec{}, "Mode"), modes, "spec.mode"},
+		{enum(StackSpec{}, "Apply"), applyPolicies, "spec.apply"},
+		{enum(StackSpec{}, "Updates"), updatePolicies, "spec.updates"},
+		{enum(Spec{}, "Updates", "Images"), updatePolicies, "fleet spec.updates.images"},
+		{enum(Spec{}, "Updates", "Host"), updatePolicies, "fleet spec.updates.host"},
+	} {
+		if !slices.Equal(c.got, c.want) {
+			t.Errorf("%s: schema enum %v, parser accepts %v", c.name, c.got, c.want)
+		}
+	}
+	f, _ := reflect.TypeOf(Source{}).FieldByName("Name")
+	if !strings.Contains(f.Tag.Get("schema"), "pattern="+nameRe.String()) {
+		t.Errorf("source name pattern differs from %s", nameRe)
 	}
 }

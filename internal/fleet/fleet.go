@@ -16,7 +16,8 @@ import (
 
 // skeleton is written by Init. Directories get a .gitkeep so git tracks them.
 var skeleton = map[string]string{
-	"fleet.yaml": `# NepFleet fleet repository. Every change here is a commit, every commit
+	"fleet.yaml": `# yaml-language-server: $schema=` + SchemaBase + `fleet.schema.json
+# NepFleet fleet repository. Every change here is a commit, every commit
 # can be rolled back. See https://github.com/Serraniel/nepfleet/blob/main/docs/spec/fleet-repo.md
 apiVersion: nepfleet/v1alpha1
 kind: Fleet

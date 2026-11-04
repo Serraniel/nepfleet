@@ -148,7 +148,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
-	if err := os.WriteFile(filepath.Join(dir, "stack.yaml"), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "stack.yaml"), append([]byte(fleet.StackModeline), raw...), 0o600); err != nil {
 		cleanup()
 		return err
 	}

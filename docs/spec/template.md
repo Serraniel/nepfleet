@@ -11,6 +11,14 @@ vaultwarden/
 
 `nepfleet template validate <dir>` checks everything below. Unknown fields are errors. Every compose image must have a pinned tag (never `:latest`) and an entry in `spec.images`.
 
+For autocompletion and validation in your editor, start `template.yaml` with:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Serraniel/nepfleet/main/schemas/template.schema.json
+```
+
+The schema checks the structure. `template validate` also checks the compose file, the image policies and the integration labels, which a schema cannot express.
+
 ```yaml
 apiVersion: nepfleet/v1alpha1
 kind: Template

@@ -5,6 +5,9 @@ package template
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -144,4 +147,45 @@ func appendFile(t *testing.T, path, s string) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The schema tags (internal/schema) must list what Validate accepts.
+func TestSchemaTagsMatchValidation(t *testing.T) {
+	for _, c := range []struct {
+		v     any
+		field string
+		want  []string
+	}{
+		{Metadata{}, "Tier", tiers},
+		{Image{}, "Track", tracks},
+		{Input{}, "Type", inputTypes},
+		{Generate{}, "Encoding", encodings[1:]},
+	} {
+		f, _ := reflect.TypeOf(c.v).FieldByName(c.field)
+		if got := schemaEnum(f.Tag.Get("schema")); !slices.Equal(got, c.want) {
+			t.Errorf("%T.%s: schema enum %v, Validate accepts %v", c.v, c.field, got, c.want)
+		}
+	}
+	for _, c := range []struct {
+		v     any
+		field string
+		re    *regexp.Regexp
+	}{
+		{Metadata{}, "Name", nameRe}, {Volume{}, "Name", nameRe}, {Input{}, "Name", envRe},
+		{Generate{}, "Name", envRe}, {Spec{}, "Version", semverRe}, {Migration{}, "To", semverRe},
+	} {
+		f, _ := reflect.TypeOf(c.v).FieldByName(c.field)
+		if !strings.Contains(f.Tag.Get("schema"), "pattern="+c.re.String()) {
+			t.Errorf("%T.%s: schema pattern differs from %s", c.v, c.field, c.re)
+		}
+	}
+}
+
+func schemaEnum(tag string) []string {
+	for part := range strings.SplitSeq(tag, ";") {
+		if v, ok := strings.CutPrefix(part, "enum="); ok {
+			return strings.Split(v, "|")
+		}
+	}
+	return nil
 }

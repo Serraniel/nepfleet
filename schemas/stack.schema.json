@@ -1,0 +1,103 @@
+{
+  "$id": "https://raw.githubusercontent.com/Serraniel/nepfleet/main/schemas/stack.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Stack is stacks/<name>/stack.yaml (or system/<name>/stack.yaml).",
+  "properties": {
+    "apiVersion": {
+      "const": "nepfleet/v1alpha1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Stack",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "description": "StackSpec says where and how a stack runs.",
+      "properties": {
+        "apply": {
+          "default": "manual",
+          "description": "manual | auto",
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "type": "string"
+        },
+        "mode": {
+          "default": "compose",
+          "description": "compose | swarm",
+          "enum": [
+            "compose",
+            "swarm"
+          ],
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "template": {
+          "additionalProperties": false,
+          "description": "TemplateRef selects a template from a source.",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "source"
+          ],
+          "type": "object"
+        },
+        "updates": {
+          "default": "notify",
+          "description": "off | notify | auto",
+          "enum": [
+            "off",
+            "notify",
+            "auto"
+          ],
+          "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata"
+  ],
+  "title": "NepFleet stack.yaml",
+  "type": "object"
+}

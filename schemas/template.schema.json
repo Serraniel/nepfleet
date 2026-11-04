@@ -1,0 +1,354 @@
+{
+  "$id": "https://raw.githubusercontent.com/Serraniel/nepfleet/main/schemas/template.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Template is the parsed template.yaml.",
+  "properties": {
+    "apiVersion": {
+      "const": "nepfleet/v1alpha1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Template",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "description": "Metadata describes the template for catalogues and the UI.",
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "homepage": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tier": {
+          "description": "system | app",
+          "enum": [
+            "system",
+            "app"
+          ],
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "name",
+        "tier",
+        "title"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "description": "Spec is what NepFleet needs to install, update and migrate the stack.",
+      "properties": {
+        "compose": {
+          "type": "string"
+        },
+        "files": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "dest": {
+                "type": "string"
+              },
+              "src": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "dest",
+              "src"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generate": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "encoding": {
+                "enum": [
+                  "base64url",
+                  "hex",
+                  "alnum"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "description": "secret",
+                "enum": [
+                  "secret"
+                ],
+                "type": "string"
+              },
+              "length": {
+                "maximum": 256,
+                "minimum": 16,
+                "type": "integer"
+              },
+              "name": {
+                "pattern": "^[A-Z][A-Z0-9_]*$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "length",
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "images": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "Name is the image without tag, as written in the compose file.",
+                "pattern": "^[^:@]+$",
+                "type": "string"
+              },
+              "track": {
+                "description": "Track is the widest update NepFleet applies without a template change: patch, minor or major. Anything wider opens an issue in the template repo.",
+                "enum": [
+                  "patch",
+                  "minor",
+                  "major"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "track"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "inputs": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "default": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "name": {
+                "pattern": "^[A-Z][A-Z0-9_]*$",
+                "type": "string"
+              },
+              "options": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "title": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "string",
+                  "text",
+                  "secret",
+                  "hostname",
+                  "url",
+                  "email",
+                  "int",
+                  "bool",
+                  "enum",
+                  "path"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "migrations": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "backup": {
+                "description": "required | recommended | none",
+                "enum": [
+                  "required",
+                  "recommended",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "rollback": {
+                "description": "restore | revert",
+                "enum": [
+                  "restore",
+                  "revert"
+                ],
+                "type": "string"
+              },
+              "steps": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "deploy": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "run": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "wait": {
+                      "description": "healthy",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "to": {
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "backup",
+              "from",
+              "rollback",
+              "steps",
+              "to"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "supports": {
+          "additionalProperties": false,
+          "description": "Supports flags which NepFleet integrations a template wires up.",
+          "properties": {
+            "arm64": {
+              "type": "boolean"
+            },
+            "autoUpdate": {
+              "type": "boolean"
+            },
+            "backup": {
+              "type": "boolean"
+            },
+            "dashboard": {
+              "type": "boolean"
+            },
+            "ingress": {
+              "type": "boolean"
+            },
+            "logs": {
+              "type": "boolean"
+            },
+            "monitoring": {
+              "type": "boolean"
+            },
+            "sso": {
+              "type": "boolean"
+            },
+            "statusPage": {
+              "type": "boolean"
+            },
+            "swarm": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "version": {
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$",
+          "type": "string"
+        },
+        "volumes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "backup": {
+                "type": "boolean"
+              },
+              "name": {
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+                "type": "string"
+              },
+              "shared": {
+                "description": "Shared marks data that must follow the service across swarm nodes.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "compose",
+        "images",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "title": "NepFleet template.yaml",
+  "type": "object"
+}
