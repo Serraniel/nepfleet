@@ -21,7 +21,8 @@ List one entry per Kuma, for example a global instance and a stack's own instanc
 ## When a window is opened
 
 - `apply` changes a stack's compose file, env file or image pins, and the stack has AutoKuma monitors (`kuma.<id>.<type>.name` labels). The window covers exactly those monitors.
-- It opens before `docker compose up` and closes after the health gate passes or the rollback finishes.
+- It opens before `docker compose up` and closes after the health gate passes or the rollback finishes. It is scheduled to expire by itself (health-gate timeout + 10 minutes), so monitors never stay silenced if NepFleet is killed.
+- Monitors are matched by their AutoKuma id (the `AutoKuma` tag), not by name. A name is used only if exactly one monitor has it, so the same template on another host is never silenced.
 - A Kuma that is unreachable or misconfigured only produces a warning. It never blocks a deployment.
 - `nepfleet.maintenance: "false"` on a service keeps its monitors out of windows.
 

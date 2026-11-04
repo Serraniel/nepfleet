@@ -324,14 +324,20 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 		// Monitors of a stack whose containers change go into maintenance in
 		// every configured Uptime Kuma; problems only warn.
-		window := e.openMaintenance(ctx, stdout, p)
+		// Scheduled to expire after the health gate plus a margin, so it ends
+		// even if this process dies; closed as soon as the apply is done.
+		window := e.openMaintenance(ctx, stdout, p, *wait+10*time.Minute)
 		var res deploy.Result
-		res, err = deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, opts)
-		if window != nil {
-			for _, w := range window.Close(context.WithoutCancel(ctx), nil) {
-				fmt.Fprintf(stdout, "%s: ⚠ %s\n", name, w)
-			}
-		}
+		res, err = func() (deploy.Result, error) {
+			defer func() {
+				if window != nil {
+					for _, w := range window.Close(context.WithoutCancel(ctx), nil) {
+						fmt.Fprintf(stdout, "%s: ⚠ %s\n", name, w)
+					}
+				}
+			}()
+			return deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, opts)
+		}()
 		for _, u := range res.Unpinned {
 			fmt.Fprintf(stdout, "%s: ⚠ not pinned, runs by tag: %s\n", name, u)
 		}
@@ -382,7 +388,7 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 
 // openMaintenance opens Uptime Kuma maintenance windows when the plan
 // changes what runs (compose file, env file or image pins).
-func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared) *kuma.Window {
+func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared, maxDuration time.Duration) *kuma.Window {
 	if len(e.fleet.Spec.UptimeKuma) == 0 {
 		return nil
 	}
@@ -398,8 +404,8 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 			env[k] = strings.Trim(v, "'")
 		}
 	}
-	names := kuma.MonitorNames(p.out.Files[render.ComposeFile], env)
-	if !runtime || len(names) == 0 {
+	refs := kuma.MonitorRefs(p.out.Files[render.ComposeFile], env)
+	if !runtime || len(refs) == 0 {
 		return nil
 	}
 	fleetSecrets, err := e.store.Load(filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile))
@@ -417,7 +423,7 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 	}
 	title := fmt.Sprintf("NepFleet: %s of %s", what, p.stack.Metadata.Name)
 	desc := fmt.Sprintf("Started by nepfleet apply on %s. Ends automatically when the stack is healthy or rolled back.", e.host)
-	w, warnings := kuma.Open(ctx, targets, names, title, desc, nil)
+	w, warnings := kuma.Open(ctx, targets, refs, title, desc, maxDuration, nil)
 	for _, msg := range warnings {
 		fmt.Fprintf(stdout, "%s: %s\n", p.stack.Metadata.Name, msg)
 	}

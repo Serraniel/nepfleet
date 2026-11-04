@@ -81,4 +81,18 @@ func TestAgainstKuma(t *testing.T) {
 	if err := k.EndMaintenance(ctx, s); err != nil {
 		t.Fatal(err)
 	}
+
+	// The window Open creates: scheduled around now, so it is active at once
+	// and expires by itself.
+	now := time.Now()
+	a, err := k.StartMaintenance(ctx, MaintenanceWindow{Title: "NepFleet: apply", Start: now.Add(-time.Minute), End: now.Add(10 * time.Minute), Monitors: []int{added.MonitorID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := k.Status(ctx, a); err != nil || st != "under-maintenance" {
+		t.Fatalf("status of a window around now = %q, %v; want under-maintenance", st, err)
+	}
+	if err := k.EndMaintenance(ctx, a); err != nil {
+		t.Fatal(err)
+	}
 }

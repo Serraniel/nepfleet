@@ -50,6 +50,10 @@ func (k *Client) Close() { k.c.close() }
 type Monitor struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+	Tags []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"tags"`
 }
 
 // Monitors returns every monitor (pushed by Kuma after login).
@@ -146,7 +150,7 @@ func (k *Client) StartMaintenance(ctx context.Context, w MaintenanceWindow) (Mai
 		}
 		raw, err := k.c.call(ctx, "addMonitorMaintenance", out.ID, ids)
 		if _, err := decodeResult("addMonitorMaintenance", raw, err); err != nil {
-			_ = k.EndMaintenance(ctx, out)
+			k.cleanup(ctx, out)
 			return Maintenance{}, err
 		}
 	}
@@ -157,11 +161,41 @@ func (k *Client) StartMaintenance(ctx context.Context, w MaintenanceWindow) (Mai
 		}
 		raw, err := k.c.call(ctx, "addMaintenanceStatusPage", out.ID, ids)
 		if _, err := decodeResult("addMaintenanceStatusPage", raw, err); err != nil {
-			_ = k.EndMaintenance(ctx, out)
+			k.cleanup(ctx, out)
 			return Maintenance{}, err
 		}
 	}
 	return out, nil
+}
+
+// cleanup removes a half-created window with its own deadline: the
+// caller's context may be what just expired.
+func (k *Client) cleanup(ctx context.Context, m Maintenance) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	_ = k.EndMaintenance(cctx, m)
+}
+
+// Status returns Kuma's status of a window (e.g. "under-maintenance", "scheduled").
+func (k *Client) Status(ctx context.Context, m Maintenance) (string, error) {
+	raw, err := k.c.call(ctx, "getMaintenance", m.ID)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		OK          bool   `json:"ok"`
+		Msg         string `json:"msg"`
+		Maintenance struct {
+			Status string `json:"status"`
+		} `json:"maintenance"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", fmt.Errorf("getMaintenance: %w", err)
+	}
+	if !r.OK {
+		return "", fmt.Errorf("getMaintenance: %s", r.Msg)
+	}
+	return r.Maintenance.Status, nil
 }
 
 // EndMaintenance removes the window; monitors return to normal immediately.

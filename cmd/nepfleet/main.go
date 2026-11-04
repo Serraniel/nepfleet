@@ -40,6 +40,7 @@ Usage:
   nepfleet apply [stack...]             apply, health-gated, rolls back on failure
   nepfleet render <stack>               print rendered files (secrets masked)
   nepfleet secret set <stack> <KEY>     store a secret (encrypted, read from stdin)
+  nepfleet secret set --global <KEY>    store a fleet-wide secret (fleet.secret.yaml)
   nepfleet secret check                 fail if any *.secret.yaml is not encrypted
   nepfleet history <stack>              versions of a stack in the fleet repository
   nepfleet rollback <stack> [commit]    restore an earlier version, commit and apply

@@ -3,6 +3,7 @@
 package kuma
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -21,8 +22,34 @@ func TestMonitorNames(t *testing.T) {
       kuma.q.http.name: Quiet
       nepfleet.maintenance: "false"
 `)
-	got := MonitorNames(compose, map[string]string{"NEPFLEET_STACK": "shop"})
-	if strings.Join(got, ",") != "Database,Web shop" {
-		t.Errorf("got %v", got)
+	got := MonitorRefs(compose, map[string]string{"NEPFLEET_STACK": "shop"})
+	var s []string
+	for _, r := range got {
+		s = append(s, r.ID+"="+r.Name)
+	}
+	if strings.Join(s, ",") != "db=Database,web=Web shop" {
+		t.Errorf("got %v", s)
+	}
+}
+
+func TestMatch(t *testing.T) {
+	tag := func(v string) []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} {
+		return []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		}{{Name: AutoKumaTag, Value: v}}
+	}
+	all := []Monitor{
+		{ID: 1, Name: "Vault", Tags: tag("vaultwarden")},
+		{ID: 2, Name: "Vault"}, // same name on another host, untagged
+		{ID: 3, Name: "Logs"},  // unique name, untagged
+		{ID: 4, Name: "Dup"}, {ID: 5, Name: "Dup"},
+	}
+	ids, amb := match(all, []MonitorRef{{"vaultwarden", "Vault"}, {"dozzle", "Logs"}, {"x", "Dup"}, {"gone", "Missing"}})
+	if fmt.Sprint(ids) != "[1 3]" || fmt.Sprint(amb) != "[x]" {
+		t.Errorf("ids=%v ambiguous=%v", ids, amb)
 	}
 }
