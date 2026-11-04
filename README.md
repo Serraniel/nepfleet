@@ -51,6 +51,7 @@ Or run it as a container: `ghcr.io/serraniel/nepfleet:latest` (`:edge` for the n
 - [Swarm: storage, ingress, DNS](docs/swarm.md)
 - [Host updates](docs/host-updates.md)
 - [Notifications](docs/notifications.md): Discord, Slack, Telegram, ntfy, webhooks …
+- [Maintenance windows](docs/maintenance.md): Uptime Kuma during applies
 - [Releases](docs/releases.md) and [supply chain / SBOMs](docs/supply-chain.md)
 
 ## License

@@ -37,7 +37,10 @@ type Spec struct {
 		Channels map[string]map[string]any `yaml:"channels"`
 		Routes   []map[string]any          `yaml:"routes"`
 	} `yaml:"notifications"`
-	Updates struct {
+	// UptimeKuma instances get maintenance windows while stacks with their
+	// monitors are being changed (docs/maintenance.md).
+	UptimeKuma []KumaInstance `yaml:"uptimeKuma"`
+	Updates    struct {
 		Images string `yaml:"images"`
 		Host   string `yaml:"host"`
 	} `yaml:"updates"`
@@ -46,6 +49,18 @@ type Spec struct {
 	// TZ is passed to stacks as ${TZ}.
 	TZ string `yaml:"tz"`
 }
+
+// KumaInstance is an Uptime Kuma NepFleet may open maintenance windows in.
+type KumaInstance struct {
+	Name     string `yaml:"name"`
+	URL      string `yaml:"url"`
+	Username string `yaml:"username"`
+	// PasswordSecret names the key in fleet.secret.yaml holding the password.
+	PasswordSecret string `yaml:"passwordSecret"`
+}
+
+// FleetSecretsFile holds fleet-wide secrets (SOPS-encrypted).
+const FleetSecretsFile = "fleet.secret.yaml"
 
 // Source is a template catalogue: a git repository or a local directory.
 type Source struct {
