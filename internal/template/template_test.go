@@ -63,6 +63,28 @@ func TestImagePolicyMustMatchCompose(t *testing.T) {
 	}
 }
 
+func TestSupportsMustMatchLabels(t *testing.T) {
+	dir := copyDemo(t)
+	path := filepath.Join(dir, "template.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "supports: { ingress: true }", "supports: { monitoring: true }", 1))
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tpl, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tpl.Validate()
+	if err == nil || !strings.Contains(err.Error(), "supports.monitoring is true, but no service has kuma.* labels") ||
+		!strings.Contains(err.Error(), "caddy labels, but supports.ingress is false") {
+		t.Fatalf("expected both directions to fail, got %v", err)
+	}
+}
+
 func TestImageName(t *testing.T) {
 	for in, want := range map[string]string{"nginx:1": "nginx", "localhost:5000/a:1@sha256:x": "localhost:5000/a", "ghcr.io/a/b": "ghcr.io/a/b"} {
 		if got := ImageName(in); got != want {
