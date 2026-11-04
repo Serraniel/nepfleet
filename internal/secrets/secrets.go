@@ -157,7 +157,8 @@ func allEncrypted(v any) bool {
 		}
 		return true
 	case string:
-		return strings.HasPrefix(t, "ENC[")
+		// SOPS leaves empty strings as they are; there is nothing to protect.
+		return t == "" || strings.HasPrefix(t, "ENC[")
 	case nil:
 		return true
 	}

@@ -65,9 +65,15 @@ status=0
 # POSIX sh (dash too): one name per line, unquoted so non-ASCII names match.
 git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR |
   { while IFS= read -r f; do
-      case "$f" in *.secret.yaml|*.secret.yml) ;; *) continue ;; esac
+      case "$f" in
+        \"*) echo "refusing to commit $f: git quotes this name, so it cannot be checked; rename it" >&2
+             status=1; continue ;;
+        *.secret.yaml|*.secret.yml) ;;
+        *) continue ;;
+      esac
       content=$(git show ":$f")
-      plain=$(printf '%s\n' "$content" | grep -vE '^(sops:|[[:space:]]|#|$)' | grep -vE '^[^:]+: *ENC\[')
+      # SOPS leaves empty values ("") unencrypted; everything else must be ENC[...].
+      plain=$(printf '%s\n' "$content" | grep -vE '^(sops:|[[:space:]]|#|$)' | grep -vE '^[^:]+: *(ENC\[|""[[:space:]]*$|$)')
       if ! printf '%s\n' "$content" | grep -q '^sops:' || [ -n "$plain" ]; then
         echo "refusing to commit $f: it is not (fully) SOPS-encrypted (use: nepfleet secret set)" >&2
         status=1

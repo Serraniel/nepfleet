@@ -67,6 +67,7 @@ func TestIsEncrypted(t *testing.T) {
 		"A: plaintext\nsops: {}\n":                                              false,
 		"A: hunter2\n":                                                          false,
 		"A: 5\nsops:\n  version: 3.11.0\n":                                      false,
+		"A: ENC[AES256_GCM,data:x]\nEMPTY: \"\"\nsops:\n  version: 3.11.0\n":    true,
 	} {
 		if got := IsEncrypted([]byte(doc)); got != want {
 			t.Errorf("IsEncrypted(%q) = %v, want %v", doc, got, want)
