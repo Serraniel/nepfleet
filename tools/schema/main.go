@@ -18,7 +18,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if err := os.MkdirAll("schemas", 0o755); err != nil {
+	if err := os.MkdirAll("schemas", 0o750); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
