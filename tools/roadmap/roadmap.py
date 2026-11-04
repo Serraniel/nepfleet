@@ -5,6 +5,7 @@ NepFleet repositories. Run from the repo root: python3 tools/roadmap/roadmap.py
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -14,9 +15,18 @@ OWNER = "Serraniel"
 REPOS = ["nepfleet", "nepfleet-ui", "nepfleet-templates", "neptide"]
 root = Path(__file__).resolve().parents[2]
 issues = {}
+def gh_json(*args):
+    for attempt in range(5):  # the GitHub API is occasionally unreachable for a moment
+        r = subprocess.run(["gh", *args], capture_output=True, text=True)
+        if r.returncode == 0:
+            return r.stdout
+        time.sleep(3 * (attempt + 1))
+    raise SystemExit(f"gh {' '.join(args)}: {r.stderr}")
+
+
 for repo in REPOS:
-    out = subprocess.run(["gh", "issue", "list", "-R", f"{OWNER}/{repo}", "--state", "all", "--limit", "500",
-                          "--json", "number,title,state,milestone"], capture_output=True, text=True, check=True).stdout
+    out = gh_json("issue", "list", "-R", f"{OWNER}/{repo}", "--state", "all", "--limit", "500",
+                  "--json", "number,title,state,milestone")
     for i in json.loads(out):
         issues[(repo, i["title"])] = i
 

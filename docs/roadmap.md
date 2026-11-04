@@ -14,6 +14,7 @@ Milestones: [nepfleet](https://github.com/Serraniel/nepfleet/milestones) · [nep
 | One frontend for several backends (home and cloud), backends can be linked | ⬜ [nepfleet-ui#7](https://github.com/Serraniel/nepfleet-ui/issues/7) (v0.2) · ⬜ [nepfleet#66](https://github.com/Serraniel/nepfleet/issues/66) (v0.5) · ⬜ [nepfleet#43](https://github.com/Serraniel/nepfleet/issues/43) (v0.5) |
 | Secure enough to expose to the internet | ⬜ [nepfleet#32](https://github.com/Serraniel/nepfleet/issues/32) (v0.4) · ⬜ [nepfleet#33](https://github.com/Serraniel/nepfleet/issues/33) (v0.4) · ⬜ [nepfleet#40](https://github.com/Serraniel/nepfleet/issues/40) (v0.4) · ⬜ [nepfleet#65](https://github.com/Serraniel/nepfleet/issues/65) (v0.4) |
 | Minimise the risk of destroying things | 📄 [decisions.md](decisions.md#d4-plan-before-apply) · ⬜ [nepfleet-ui#11](https://github.com/Serraniel/nepfleet-ui/issues/11) (v0.2) |
+| Review every step before changes are applied (CLI and web UI) | ✅ [nepfleet#89](https://github.com/Serraniel/nepfleet/issues/89) (v0.1) · ⬜ [nepfleet-ui#29](https://github.com/Serraniel/nepfleet-ui/issues/29) (v0.2) |
 | Backend deployable with Docker | ⬜ [nepfleet#16](https://github.com/Serraniel/nepfleet/issues/16) (v0.2) · ⬜ [nepfleet#17](https://github.com/Serraniel/nepfleet/issues/17) (v0.2) |
 
 ## Host OS
@@ -21,18 +22,21 @@ Milestones: [nepfleet](https://github.com/Serraniel/nepfleet/milestones) · [nep
 | Requirement | Delivered by |
 |---|---|
 | Easy setup of fresh servers without Docker | ⬜ [nepfleet#15](https://github.com/Serraniel/nepfleet/issues/15) (v0.2) |
-| Adopt existing servers: running containers, compose projects, swarm, Portainer | ⬜ [nepfleet#13](https://github.com/Serraniel/nepfleet/issues/13) (v0.2) · ⬜ [nepfleet#14](https://github.com/Serraniel/nepfleet/issues/14) (v0.2) · ⬜ [nepfleet#47](https://github.com/Serraniel/nepfleet/issues/47) (v0.6) · ⬜ [nepfleet-ui#13](https://github.com/Serraniel/nepfleet-ui/issues/13) (v0.2) |
+| Adopt existing servers: running containers, compose projects, swarm, Portainer | ✅ [nepfleet#13](https://github.com/Serraniel/nepfleet/issues/13) (v0.2) · ⬜ [nepfleet#14](https://github.com/Serraniel/nepfleet/issues/14) (v0.2) · ⬜ [nepfleet#47](https://github.com/Serraniel/nepfleet/issues/47) (v0.6) · ⬜ [nepfleet-ui#13](https://github.com/Serraniel/nepfleet-ui/issues/13) (v0.2) |
 | Opt-in host OS updates with reboot, schedule, faster security fixes; Arch first | ⬜ [nepfleet#55](https://github.com/Serraniel/nepfleet/issues/55) (v0.7) · ⬜ [nepfleet#56](https://github.com/Serraniel/nepfleet/issues/56) (v0.7) · ⬜ [nepfleet#57](https://github.com/Serraniel/nepfleet/issues/57) (v0.7) |
 | Rolling host updates across a swarm | ⬜ [nepfleet#58](https://github.com/Serraniel/nepfleet/issues/58) (v0.7) |
 | Other distributions (lower priority) | ⬜ [nepfleet#60](https://github.com/Serraniel/nepfleet/issues/60) (v0.7) · ⬜ [nepfleet#67](https://github.com/Serraniel/nepfleet/issues/67) (v0.7) · ⬜ [nepfleet#68](https://github.com/Serraniel/nepfleet/issues/68) (v0.7) |
-| Ensure the host can run the images (architecture, emulation) | ⬜ [nepfleet#61](https://github.com/Serraniel/nepfleet/issues/61) (v0.2) · ⬜ [nepfleet#18](https://github.com/Serraniel/nepfleet/issues/18) (v0.2) |
+| Ensure the host can run the images (architecture, emulation) | ✅ [nepfleet#61](https://github.com/Serraniel/nepfleet/issues/61) (v0.2) · ⬜ [nepfleet#18](https://github.com/Serraniel/nepfleet/issues/18) (v0.2) |
+| Announce host update downtime as Uptime Kuma maintenance in advance | ⬜ [nepfleet#86](https://github.com/Serraniel/nepfleet/issues/86) (v0.7) |
 
 ## Docker
 
 | Requirement | Delivered by |
 |---|---|
-| Portainer-like stack management, every config versioned in git | ✅ [nepfleet#4](https://github.com/Serraniel/nepfleet/issues/4) (v0.1) · ✅ [nepfleet#5](https://github.com/Serraniel/nepfleet/issues/5) (v0.1) · ⬜ [nepfleet#10](https://github.com/Serraniel/nepfleet/issues/10) (v0.2) |
-| Backups of configs and volumes; move a whole fleet to a new backend | ⬜ [nepfleet#22](https://github.com/Serraniel/nepfleet/issues/22) (v0.3) · ⬜ [nepfleet#64](https://github.com/Serraniel/nepfleet/issues/64) (v0.3) · ⬜ [nepfleet#63](https://github.com/Serraniel/nepfleet/issues/63) (v0.3) |
+| Portainer-like stack management, every config versioned in git | ✅ [nepfleet#4](https://github.com/Serraniel/nepfleet/issues/4) (v0.1) · ✅ [nepfleet#5](https://github.com/Serraniel/nepfleet/issues/5) (v0.1) · ✅ [nepfleet#10](https://github.com/Serraniel/nepfleet/issues/10) (v0.2) |
+| Backups of configs and volumes; move a whole fleet to a new backend | ⬜ [nepfleet#22](https://github.com/Serraniel/nepfleet/issues/22) (v0.3) · ⬜ [nepfleet#87](https://github.com/Serraniel/nepfleet/issues/87) (v0.3) · ✅ [nepfleet-templates#34](https://github.com/Serraniel/nepfleet-templates/issues/34) (v0.2) · ✅ [nepfleet-templates#7](https://github.com/Serraniel/nepfleet-templates/issues/7) (v0.2) · ⬜ [nepfleet#64](https://github.com/Serraniel/nepfleet/issues/64) (v0.3) · ⬜ [nepfleet#63](https://github.com/Serraniel/nepfleet/issues/63) (v0.3) |
+| Rollbacks restore data too (no half-migrated versions) | ⬜ [neptide#18](https://github.com/Serraniel/neptide/issues/18) (v0.2) · ⬜ [nepfleet#88](https://github.com/Serraniel/nepfleet/issues/88) (v0.3) |
+| Maintenance windows in Uptime Kuma (global and per stack) for downtime or degraded performance | ✅ [nepfleet#82](https://github.com/Serraniel/nepfleet/issues/82) (v0.3) · ✅ [nepfleet#83](https://github.com/Serraniel/nepfleet/issues/83) (v0.3) · ⬜ [nepfleet#84](https://github.com/Serraniel/nepfleet/issues/84) (v0.3) · ⬜ [neptide#17](https://github.com/Serraniel/neptide/issues/17) (v0.2) |
 | Automated rolling image updates (Compose and Swarm), with rollback | ✅ [neptide#2](https://github.com/Serraniel/neptide/issues/2) (v0.1) · ✅ [neptide#3](https://github.com/Serraniel/neptide/issues/3) (v0.1) · ⬜ [nepfleet#24](https://github.com/Serraniel/nepfleet/issues/24) (v0.3) |
 | Logs (Dozzle) and uptime (Uptime Kuma, global or per stack), set up automatically | ⬜ [nepfleet#21](https://github.com/Serraniel/nepfleet/issues/21) (v0.3) · ⬜ [nepfleet-templates#10](https://github.com/Serraniel/nepfleet-templates/issues/10) (v0.2) |
 | Encrypted tunnels from home to cloud (frp), config in the repo | ⬜ [nepfleet#44](https://github.com/Serraniel/nepfleet/issues/44) (v0.5) |
@@ -54,10 +58,11 @@ Milestones: [nepfleet](https://github.com/Serraniel/nepfleet/milestones) · [nep
 | Template repo with stack files, defaults, wizards and generated secrets; system vs app tier | 📄 [template.md](spec/template.md) · ⬜ [nepfleet-ui#16](https://github.com/Serraniel/nepfleet-ui/issues/16) (v0.3) |
 | Additional template repositories | ⬜ [nepfleet#20](https://github.com/Serraniel/nepfleet/issues/20) (v0.3) |
 | Issue automatically when an image publishes a new major version | 📄 [image-updates.yml](https://github.com/Serraniel/nepfleet-templates/blob/main/.github/workflows/image-updates.yml) |
-| Integration flags, and every template supports every applicable integration | ⬜ [nepfleet-templates#6](https://github.com/Serraniel/nepfleet-templates/issues/6) (v0.1) · ⬜ [nepfleet-templates#19](https://github.com/Serraniel/nepfleet-templates/issues/19) (v0.3) |
+| Integration flags, and every template supports every applicable integration | ✅ [nepfleet-templates#6](https://github.com/Serraniel/nepfleet-templates/issues/6) (v0.1) · ⬜ [nepfleet-templates#19](https://github.com/Serraniel/nepfleet-templates/issues/19) (v0.3) |
 | Safe migrations with rollback and update paths, also user-defined | ⬜ [nepfleet#69](https://github.com/Serraniel/nepfleet/issues/69) (v0.8) · ⬜ [nepfleet#70](https://github.com/Serraniel/nepfleet/issues/70) (v0.8) · ⬜ [nepfleet-templates#18](https://github.com/Serraniel/nepfleet-templates/issues/18) (v0.3) |
 | Wizards from foreign compose files, template hints, diffs and upstream PRs | ⬜ [nepfleet#72](https://github.com/Serraniel/nepfleet/issues/72) (v0.8) · ⬜ [nepfleet#71](https://github.com/Serraniel/nepfleet/issues/71) (v0.8) · ⬜ [nepfleet#73](https://github.com/Serraniel/nepfleet/issues/73) (v0.8) · ⬜ [nepfleet-ui#19](https://github.com/Serraniel/nepfleet-ui/issues/19) (v0.3) |
-| Staples beyond the services already used | ⬜ [nepfleet-templates#20](https://github.com/Serraniel/nepfleet-templates/issues/20) (v0.4) |
+| Your services: Immich (+Power Tools), Homebox, Tdarr, Navidrome, yt-dlp, Open WebUI + Ollama/LiteLLM | ✅ [nepfleet-templates#20](https://github.com/Serraniel/nepfleet-templates/issues/20) (v0.4) · ✅ [nepfleet-templates#35](https://github.com/Serraniel/nepfleet-templates/issues/35) (v0.4) · ✅ [nepfleet-templates#36](https://github.com/Serraniel/nepfleet-templates/issues/36) (v0.4) · ✅ [nepfleet-templates#26](https://github.com/Serraniel/nepfleet-templates/issues/26) (v0.4) · ✅ [nepfleet-templates#37](https://github.com/Serraniel/nepfleet-templates/issues/37) (v0.4) · ✅ [nepfleet-templates#38](https://github.com/Serraniel/nepfleet-templates/issues/38) (v0.4) |
+| Staples beyond the services already used | ⬜ [nepfleet-templates#24](https://github.com/Serraniel/nepfleet-templates/issues/24) (v0.4) |
 
 ## UI
 
