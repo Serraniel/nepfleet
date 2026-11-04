@@ -42,6 +42,7 @@ Or run it as a container: `ghcr.io/serraniel/nepfleet:latest` (`:edge` for the n
 
 ## Documentation
 
+- [Roadmap](docs/roadmap.md): every requirement and the issues that deliver it
 - [Install](docs/install.md): native or as a container
 - [Architecture](docs/architecture.md): components and how they interact
 - [Decisions](docs/decisions.md): what we chose and why
