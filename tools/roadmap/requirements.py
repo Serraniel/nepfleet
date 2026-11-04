@@ -27,6 +27,9 @@ R = [
     ("Product", "Minimise the risk of destroying things", [
         ("doc", "docs/decisions.md#d4-plan-before-apply"),
         ("nepfleet-ui", "Plan dialog before every apply")]),
+    ("Product", "Review every step before changes are applied (CLI and web UI)", [
+        ("nepfleet", "Plan steps: the ordered list of everything apply will do"),
+        ("nepfleet-ui", "Change review: step-by-step overview before applying edits or new stacks")]),
     ("Product", "Backend deployable with Docker", [("nepfleet", "Run NepFleet as a container (compose.yaml)"),
         ("nepfleet", "Containerized self-update via a hand-off helper")]),
     # --- Host OS
@@ -44,6 +47,8 @@ R = [
     ("Host OS", "Ensure the host can run the images (architecture, emulation)", [
         ("nepfleet", "`nepfleet doctor`: check that a host can run what is planned"),
         ("nepfleet", "Architecture check before deploy, with optional binfmt")]),
+    ("Host OS", "Announce host update downtime as Uptime Kuma maintenance in advance", [
+        ("nepfleet", "Announce scheduled host updates as Uptime Kuma maintenance in advance")]),
     # --- Docker
     ("Docker", "Portainer-like stack management, every config versioned in git", [
         ("nepfleet", "Stack spec: load and validate stacks/<name>/stack.yaml"),
@@ -51,8 +56,19 @@ R = [
         ("nepfleet", "Pin image digests in lock.yaml")]),
     ("Docker", "Backups of configs and volumes; move a whole fleet to a new backend", [
         ("nepfleet", "Backups: restic for volumes marked backup: true"),
+        ("nepfleet", "Continuous volume backups by default (docker-volume-backup)"),
+        ("nepfleet-templates", "volume-backup template (offen/docker-volume-backup)"),
+        ("nepfleet-templates", "restic backup template"),
         ("nepfleet", "Off-host backup of the fleet repository and age key"),
         ("nepfleet", "Move a fleet to a new backend installation")]),
+    ("Docker", "Rollbacks restore data too (no half-migrated versions)", [
+        ("neptide", "Snapshot volumes before an update, restore them on rollback"),
+        ("nepfleet", "Data-safe rollback: snapshot volumes before image changes, restore on rollback")]),
+    ("Docker", "Maintenance windows in Uptime Kuma (global and per stack) for downtime or degraded performance", [
+        ("nepfleet", "Uptime Kuma maintenance: client for Kuma's Socket.IO API"),
+        ("nepfleet", "Uptime Kuma maintenance: wrap applies that cause downtime"),
+        ("nepfleet", "Uptime Kuma maintenance: degraded performance as status-page incident"),
+        ("neptide", "Uptime Kuma maintenance around container updates")]),
     ("Docker", "Automated rolling image updates (Compose and Swarm), with rollback", [
         ("neptide", "Integration test: compose update and rollback against a local registry"),
         ("neptide", "Integration test: swarm service update and rollback in Docker-in-Docker"),
@@ -96,7 +112,11 @@ R = [
         ("nepfleet", "Diff an installed or imported stack against its template"),
         ("nepfleet", "Submit a tested template as a PR to a template repository"),
         ("nepfleet-ui", "Template hints and diff for imported stacks")]),
-    ("Templates", "Staples beyond the services already used", [("nepfleet-templates", "Template: Immich")]),
+    ("Templates", "Your services: Immich (+Power Tools), Homebox, Tdarr, Navidrome, yt-dlp, Open WebUI + Ollama/LiteLLM", [
+        ("nepfleet-templates", "Template: Immich"), ("nepfleet-templates", "Template: Homebox"),
+        ("nepfleet-templates", "Template: Tdarr"), ("nepfleet-templates", "Template: Navidrome"),
+        ("nepfleet-templates", "Template: yt-dlp web UI (MeTube)"), ("nepfleet-templates", "Template: Open WebUI + Ollama + LiteLLM")]),
+    ("Templates", "Staples beyond the services already used", [("nepfleet-templates", "Template: Beszel")]),
     # --- UI
     ("UI", "Raw YAML editing is always possible, plus a visual split view", [
         ("nepfleet-ui", "YAML editor (CodeMirror 6) with schema validation"),
