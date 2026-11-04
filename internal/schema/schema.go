@@ -27,8 +27,9 @@ import (
 	"github.com/Serraniel/nepfleet/internal/template"
 )
 
-// BaseURL is where the schemas are published, one file per document type.
-const BaseURL = fleet.SchemaBase
+// BaseURL is the $id prefix of the generated schemas (main; releases attach
+// the same files, and written files link to their release's tag).
+const BaseURL = "https://raw.githubusercontent.com/Serraniel/nepfleet/main/schemas/"
 
 // File is one generated schema.
 type File struct {
