@@ -185,10 +185,11 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 	// Secrets written literally into the compose file would otherwise land in
 	// git in plaintext: move them to the encrypted values, referenced as
 	// ${NAME}. The container gets the same value, so nothing is recreated.
-	cfg, moved, err := extractLiteralSecrets(cfg, env, o.EncryptAll)
+	cfg, moved, moveWarnings, err := extractLiteralSecrets(cfg, env, o.EncryptAll)
 	if err != nil {
 		return nil, err
 	}
+	res.Warnings = append(res.Warnings, moveWarnings...)
 	for name, m := range moved {
 		env[name] = m.value
 		res.Warnings = append(res.Warnings, fmt.Sprintf("service %s had %s written into the compose file; it is now stored encrypted as ${%s}", m.service, m.key, name))
@@ -252,10 +253,13 @@ type movedSecret struct{ service, key, value string }
 // looks secret (or all, with all) and whose value is a literal into ${NAME}
 // references. NAME is the key itself unless the env files already define it
 // differently; then <SERVICE>_<KEY>.
-func extractLiteralSecrets(cfg []byte, env map[string]string, all bool) ([]byte, map[string]movedSecret, error) {
+var varName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func extractLiteralSecrets(cfg []byte, env map[string]string, all bool) ([]byte, map[string]movedSecret, []string, error) {
+	var warnings []string
 	var doc yaml.Node
 	if err := yaml.Unmarshal(cfg, &doc); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	moved := map[string]movedSecret{}
 	root := doc.Content[0]
@@ -274,22 +278,35 @@ func extractLiteralSecrets(cfg []byte, env map[string]string, all bool) ([]byte,
 			if !all && !secretName.MatchString(key) {
 				continue
 			}
+			// Only keys that are valid variable names can become ${NAME};
+			// others (spring.datasource.password) stay and are reported.
+			if !varName.MatchString(key) {
+				warnings = append(warnings, fmt.Sprintf("service %s has %s written into the compose file; it cannot be moved to secrets automatically, so it is stored in plaintext. Move it by hand", svc, key))
+				continue
+			}
+			taken := func(n string) bool {
+				if have, ok := env[n]; ok && have != val.Value {
+					return true
+				}
+				m, ok := moved[n]
+				return ok && m.value != val.Value
+			}
 			name := key
-			if have, ok := env[name]; ok && have != val.Value {
+			if taken(name) {
 				name = strings.ToUpper(regexp.MustCompile(`[^A-Za-z0-9]+`).ReplaceAllString(svc, "_")) + "_" + key
 			}
-			if m, ok := moved[name]; ok && m.value != val.Value {
-				return nil, nil, fmt.Errorf("cannot store %s of service %s: %s is already used for a different value", key, svc, name)
+			for i := 2; taken(name); i++ {
+				name = fmt.Sprintf("%s_%d", strings.TrimRight(name, "_0123456789"), i)
 			}
 			moved[name] = movedSecret{service: svc, key: key, value: val.Value}
 			val.Value, val.Style = "${"+name+"}", 0
 		}
 	}
 	if len(moved) == 0 {
-		return cfg, nil, nil
+		return cfg, nil, warnings, nil
 	}
 	out, err := yaml.Marshal(&doc)
-	return out, moved, err
+	return out, moved, warnings, err
 }
 
 func child(m *yaml.Node, key string) *yaml.Node {

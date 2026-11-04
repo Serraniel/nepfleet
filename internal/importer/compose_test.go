@@ -113,7 +113,7 @@ func TestLiteralSecretsAreMoved(t *testing.T) {
 	root := t.TempDir()
 	f := &fleet.Fleet{Dir: root}
 	store := secrets.Memory{}
-	cfg := "name: db\nservices:\n  postgres:\n    image: postgres:18\n    environment:\n      POSTGRES_PASSWORD: s3cr3t\n      POSTGRES_DB: app\n      FROM_FILE: ${FROM_FILE}\n"
+	cfg := "name: db\nservices:\n  postgres:\n    image: postgres:18\n    environment:\n      POSTGRES_PASSWORD: s3cr3t\n      POSTGRES_DB: app\n      FROM_FILE: ${FROM_FILE}\n      spring.datasource.password: x\n  replica:\n    image: postgres:18\n    environment:\n      POSTGRES_PASSWORD: other\n"
 	res, err := ImportCompose(context.Background(), fakeRunner{config: cfg}, f, store, Project{Name: "db", ConfigFiles: []string{"c"}}, Options{Target: "local"})
 	if err != nil {
 		t.Fatal(err)
@@ -122,8 +122,12 @@ func TestLiteralSecretsAreMoved(t *testing.T) {
 	if strings.Contains(string(raw), "s3cr3t") || !strings.Contains(string(raw), "POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}") || !strings.Contains(string(raw), "POSTGRES_DB: app") {
 		t.Fatalf("compose.yaml:\n%s", raw)
 	}
-	if store[filepath.Join(res.Dir, fleet.SecretsFile)]["POSTGRES_PASSWORD"] != "s3cr3t" {
-		t.Error("moved secret not stored")
+	sec := store[filepath.Join(res.Dir, fleet.SecretsFile)]
+	if sec["POSTGRES_PASSWORD"] != "s3cr3t" || sec["REPLICA_POSTGRES_PASSWORD"] != "other" {
+		t.Errorf("moved secrets = %v", sec)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, "\n"), "spring.datasource.password") {
+		t.Error("unmovable key not reported")
 	}
 }
 
