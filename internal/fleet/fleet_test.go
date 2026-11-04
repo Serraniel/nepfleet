@@ -40,6 +40,17 @@ func TestHookBlocksPlaintextSecrets(t *testing.T) {
 	if err := run("commit", "-qm", "encrypted"); err != nil {
 		t.Fatalf("hook rejected an encrypted file: %v", err)
 	}
+	// A plaintext key added to an encrypted file, under a non-ASCII name with a space.
+	odd := filepath.Join(dir, "stacks", "ä b.secret.yaml")
+	if err := os.WriteFile(odd, []byte("PASSWORD: ENC[AES256_GCM,data:x]\nNEW: plaintext\nsops:\n  version: 3.11.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("commit", "-qm", "partly plaintext"); err == nil {
+		t.Fatal("hook let a partly plaintext, non-ASCII-named secret through")
+	}
 }
 
 func TestUnencryptedSecrets(t *testing.T) {

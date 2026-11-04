@@ -59,14 +59,21 @@ const hookPath = ".githooks/pre-commit"
 // Plain sh, so it works on hosts without nepfleet on PATH.
 const preCommitHook = `#!/bin/sh
 # Installed by nepfleet init: never commit a plaintext secrets file.
+# A file passes only if it has SOPS metadata and every top-level value is
+# encrypted (ENC[...]); nepfleet secret check applies the same rule in CI.
 status=0
-for f in $(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.secret\.ya?ml$'); do
-  if ! git show ":$f" | grep -q '^sops:'; then
-    echo "refusing to commit $f: it is not SOPS-encrypted (use: nepfleet secret set)" >&2
-    status=1
-  fi
-done
-exit $status
+# POSIX sh (dash too): one name per line, unquoted so non-ASCII names match.
+git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR |
+  { while IFS= read -r f; do
+      case "$f" in *.secret.yaml|*.secret.yml) ;; *) continue ;; esac
+      content=$(git show ":$f")
+      plain=$(printf '%s\n' "$content" | grep -vE '^(sops:|[[:space:]]|#|$)' | grep -vE '^[^:]+: *ENC\[')
+      if ! printf '%s\n' "$content" | grep -q '^sops:' || [ -n "$plain" ]; then
+        echo "refusing to commit $f: it is not (fully) SOPS-encrypted (use: nepfleet secret set)" >&2
+        status=1
+      fi
+    done
+    exit $status; }
 `
 
 // ErrExists is returned when Init would overwrite an existing fleet.
@@ -105,6 +112,10 @@ func Init(dir string) error {
 		if err := git(dir, "init", "--quiet", "--initial-branch=main"); err != nil {
 			return err
 		}
+	}
+	// Never replace hooks the user already configured.
+	if out, err := exec.Command("git", "-C", dir, "config", "--get", "core.hooksPath").Output(); err == nil && len(out) > 0 {
+		return nil
 	}
 	return git(dir, "config", "core.hooksPath", ".githooks")
 }

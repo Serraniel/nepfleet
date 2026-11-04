@@ -124,12 +124,44 @@ func (s SOPS) Save(path string, values map[string]string) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// IsEncrypted reports whether raw looks like a SOPS document.
+// IsEncrypted reports whether raw is a SOPS document in which every value
+// (outside the sops metadata) is encrypted. A plaintext key added by hand
+// to an encrypted file makes it fail.
 func IsEncrypted(raw []byte) bool {
-	var probe struct {
-		SOPS map[string]any `yaml:"sops"`
+	var doc map[string]any
+	if yaml.Unmarshal(raw, &doc) != nil {
+		return false
 	}
-	return yaml.Unmarshal(raw, &probe) == nil && probe.SOPS != nil
+	meta, ok := doc["sops"].(map[string]any)
+	if !ok || len(meta) == 0 {
+		return false
+	}
+	delete(doc, "sops")
+	return allEncrypted(doc)
+}
+
+func allEncrypted(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		for _, x := range t {
+			if !allEncrypted(x) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, x := range t {
+			if !allEncrypted(x) {
+				return false
+			}
+		}
+		return true
+	case string:
+		return strings.HasPrefix(t, "ENC[")
+	case nil:
+		return true
+	}
+	return false // numbers, booleans: SOPS would have encrypted them
 }
 
 // Memory is an in-memory Store for tests.
