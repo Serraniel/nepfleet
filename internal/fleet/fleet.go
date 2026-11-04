@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // skeleton is written by Init. Directories get a .gitkeep so git tracks them.
@@ -45,11 +46,28 @@ spec:
 	".gitignore": `*.decrypted.*
 .env.local
 `,
+	hookPath:           preCommitHook,
 	"hosts/.gitkeep":   "",
 	"stacks/.gitkeep":  "",
 	"tunnels/.gitkeep": "",
 	"system/.gitkeep":  "",
 }
+
+const hookPath = ".githooks/pre-commit"
+
+// preCommitHook refuses commits of secret files that are not SOPS-encrypted.
+// Plain sh, so it works on hosts without nepfleet on PATH.
+const preCommitHook = `#!/bin/sh
+# Installed by nepfleet init: never commit a plaintext secrets file.
+status=0
+for f in $(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.secret\.ya?ml$'); do
+  if ! git show ":$f" | grep -q '^sops:'; then
+    echo "refusing to commit $f: it is not SOPS-encrypted (use: nepfleet secret set)" >&2
+    status=1
+  fi
+done
+exit $status
+`
 
 // ErrExists is returned when Init would overwrite an existing fleet.
 var ErrExists = errors.New("a fleet.yaml already exists here")
@@ -67,7 +85,11 @@ func Init(dir string) error {
 		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			return err
 		}
-		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		mode := os.FileMode(0o600)
+		if name == hookPath {
+			mode = 0o700
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 		if err != nil {
 			return fmt.Errorf("refusing to overwrite: %w", err)
 		}
@@ -79,13 +101,53 @@ func Init(dir string) error {
 			return werr
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		return nil
+	if _, err := os.Stat(filepath.Join(dir, ".git")); errors.Is(err, fs.ErrNotExist) {
+		if err := git(dir, "init", "--quiet", "--initial-branch=main"); err != nil {
+			return err
+		}
 	}
-	cmd := exec.Command("git", "init", "--quiet", "--initial-branch=main")
+	return git(dir, "config", "core.hooksPath", ".githooks")
+}
+
+func git(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
 	cmd.Dir = dir // not an argument, so a path starting with "-" cannot become a flag
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git init: %w: %s", err, out)
+		return fmt.Errorf("git %s: %w: %s", args[0], err, out)
 	}
 	return nil
+}
+
+// UnencryptedSecrets lists *.secret.yaml files under dir that are not
+// SOPS-encrypted. It is what the pre-commit hook enforces, for CI.
+func UnencryptedSecrets(dir string, encrypted func([]byte) bool) ([]string, error) {
+	// os.Root keeps the walk inside dir: symlinks cannot point it elsewhere.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	fsys := root.FS()
+	var bad []string
+	err = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return fs.SkipDir
+		}
+		name := d.Name()
+		if d.IsDir() || (!strings.HasSuffix(name, ".secret.yaml") && !strings.HasSuffix(name, ".secret.yml")) {
+			return nil
+		}
+		raw, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		if !encrypted(raw) {
+			bad = append(bad, filepath.FromSlash(p))
+		}
+		return nil
+	})
+	return bad, err
 }

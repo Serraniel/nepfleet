@@ -9,6 +9,7 @@ NepFleet controls Docker, and **Docker access is root access** to the host. A co
 - The server holds no Docker socket unless it is also an agent.
 - Templates cannot execute host commands (see [decisions](decisions.md#d10-templates-are-data-not-code)).
 - Secrets are stored only encrypted (SOPS and age). The decryption key lives on the server, not in the repository.
+- `nepfleet init` installs a pre-commit hook that rejects `*.secret.yaml` files that are not SOPS-encrypted. `nepfleet secret check` performs the same check in CI.
 
 ## Exposing the API to the internet
 

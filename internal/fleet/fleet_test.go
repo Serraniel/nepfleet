@@ -5,9 +5,53 @@ package fleet
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestHookBlocksPlaintextSecrets runs the real hook in a real repository.
+func TestHookBlocksPlaintextSecrets(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(dir); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) error {
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		return cmd.Run()
+	}
+	secret := filepath.Join(dir, "stacks", "values.secret.yaml")
+	if err := os.WriteFile(secret, []byte("PASSWORD: hunter2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("commit", "-qm", "plaintext"); err == nil {
+		t.Fatal("hook let a plaintext secret through")
+	}
+	if err := os.WriteFile(secret, []byte("PASSWORD: ENC[AES256_GCM,data:x]\nsops:\n  version: 3.11.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("commit", "-qm", "encrypted"); err != nil {
+		t.Fatalf("hook rejected an encrypted file: %v", err)
+	}
+}
+
+func TestUnencryptedSecrets(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "stacks", "a"), 0o750)
+	_ = os.WriteFile(filepath.Join(dir, "stacks", "a", "values.secret.yaml"), []byte("X: y\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "stacks", "a", "other.yaml"), []byte("X: y\n"), 0o600)
+	bad, err := UnencryptedSecrets(dir, func(b []byte) bool { return strings.Contains(string(b), "sops:") })
+	if err != nil || len(bad) != 1 || bad[0] != filepath.Join("stacks", "a", "values.secret.yaml") {
+		t.Fatalf("got %v, %v", bad, err)
+	}
+}
 
 func TestInit(t *testing.T) {
 	dir := t.TempDir()
@@ -18,6 +62,12 @@ func TestInit(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
+	}
+	if info, err := os.Stat(filepath.Join(dir, hookPath)); err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Errorf("pre-commit hook missing or not executable: %v", err)
+	}
+	if out, _ := exec.Command("git", "-C", dir, "config", "core.hooksPath").Output(); strings.TrimSpace(string(out)) != ".githooks" {
+		t.Errorf("core.hooksPath = %q", out)
 	}
 	if err := Init(dir); !errors.Is(err, ErrExists) {
 		t.Fatalf("second Init = %v, want ErrExists", err)
