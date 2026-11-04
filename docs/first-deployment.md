@@ -34,7 +34,18 @@ Fix everything marked ✗. Run it again after adding stacks: it also checks that
 
 ## 4. System stacks
 
-Each system stack is a directory with a `stack.yaml`. `target: local` means this host. Start with ingress:
+The wizard asks for each template's inputs, stores secrets encrypted and checks the values before writing anything:
+
+```sh
+nepfleet new caddy            # ACME e-mail, DNS provider, token (hidden)
+nepfleet new dozzle
+nepfleet new uptime-kuma
+nepfleet new homepage
+nepfleet new volume-backup
+nepfleet new neptide
+```
+
+Each stack is just a directory with a `stack.yaml`, so you can also write it by hand. `target: local` means this host. For example, ingress:
 
 ```yaml
 # system/caddy/stack.yaml
@@ -62,7 +73,7 @@ Add the others the same way. Each template's `template.yaml` lists the values it
 | `system/uptime-kuma` | `uptime-kuma` | `DOMAIN`, `KUMA_USERNAME` + `secret set … KUMA_PASSWORD` |
 | `system/homepage` | `homepage` | `DOMAIN` |
 | `system/volume-backup` | `volume-backup` | `AGE_RECIPIENTS` (your public key); for a Storage Box `SSH_HOST_NAME`, `SSH_USER`, `SSH_HOST_PUBLIC_KEY` + `secret set … SSH_PASSWORD` |
-| `system/neptide` | `neptide` | `DOCKER_GID` (`getent group docker \| cut -d: -f3`), `MONITOR_ONLY: "true"` to start safely |
+| `system/neptide` | `neptide` | `DOCKER_GID` (`getent group docker \| cut -d: -f3`), `MONITOR_ONLY: "true"` to start safely; add the label `neptide.snapshot=true` to containers with databases, so a failed update also rolls their data back |
 
 Once Uptime Kuma runs and you have created its admin account, let NepFleet put monitors into maintenance while it changes a stack ([details](maintenance.md)):
 
@@ -86,6 +97,13 @@ nepfleet import compose tdarr          # adopts one; nothing is restarted
 The import moves secrets into `values.secret.yaml` (encrypted), keeps bind mounts pointing at the existing data, and records the running containers as the applied state. The first plan is therefore empty. Read the warnings it prints.
 
 ## 6. New apps
+
+```sh
+nepfleet new vaultwarden
+nepfleet new immich --set UPLOAD_PATH=/srv/photos
+```
+
+By hand, this is all it takes:
 
 ```yaml
 # stacks/vaultwarden/stack.yaml
@@ -119,4 +137,4 @@ git add -A && git commit -m "feat: initial fleet" && git push
 
 ## Known limits of this version
 
-Single host only. There is no web UI yet. Host OS updates, Swarm, tunnels, scheduled maintenance announcements and volume snapshots before updates are planned; see the [roadmap](roadmap.md). Until volume snapshots exist, keep `volume-backup` enabled, and run neptide in monitor-only mode for stacks with databases.
+Single host only. There is no web UI yet. Host OS updates, Swarm, tunnels, scheduled maintenance announcements and data snapshots in `nepfleet apply` itself are planned; see the [roadmap](roadmap.md). `nepfleet apply` rolls back files and images, not volume data, so keep `volume-backup` enabled. For image updates, neptide with `neptide.snapshot=true` rolls back data as well.
