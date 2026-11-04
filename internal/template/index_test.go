@@ -36,4 +36,8 @@ func TestIndex(t *testing.T) {
 	if regexp.MustCompile(`:null`).Match(raw) {
 		t.Errorf("null in JSON: %s", raw)
 	}
+	twin := &Template{Metadata: Metadata{Name: "zz-system", Tier: "app"}, Dir: filepath.Join("testdata", "y", "zz-system")}
+	if _, err := Index("testdata", []*Template{sys, twin}); err == nil {
+		t.Error("two templates with the same name must be refused")
+	}
 }

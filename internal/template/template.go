@@ -99,10 +99,10 @@ type Input struct {
 
 // Generate is a value NepFleet creates once at install time.
 type Generate struct {
-	Name     string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$"`
-	Kind     string `yaml:"kind" schema:"required;enum=secret"` // secret
-	Length   int    `yaml:"length" schema:"required;minimum=16;maximum=256"`
-	Encoding string `yaml:"encoding" schema:"enum=base64url|hex|alnum"`
+	Name     string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$" json:"name,omitempty"`
+	Kind     string `yaml:"kind" schema:"required;enum=secret" json:"kind,omitempty"` // secret
+	Length   int    `yaml:"length" schema:"required;minimum=16;maximum=256" json:"length,omitempty"`
+	Encoding string `yaml:"encoding" schema:"enum=base64url|hex|alnum" json:"encoding,omitempty"`
 }
 
 // File is an extra file rendered into the stack directory.

@@ -3,6 +3,7 @@
 package template
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 )
@@ -25,23 +26,34 @@ type Entry struct {
 	Images   []Image  `json:"images"`
 	Supports Supports `json:"supports"`
 	Inputs   []Input  `json:"inputs"`
-	Volumes  []Volume `json:"volumes"`
+	// Generate lists the secrets created once at install, so a wizard can
+	// say what it will create; values never appear in the index.
+	Generate []Generate `json:"generate"`
+	Volumes  []Volume   `json:"volumes"`
 	// Migrations lists the from → to pairs a template can migrate.
 	Migrations []MigrationRef `json:"migrations"`
 }
 
 // MigrationRef names one migration without its steps.
 type MigrationRef struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Backup string `json:"backup"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Description string `json:"description,omitempty"`
+	Backup      string `json:"backup"`
+	Rollback    string `json:"rollback"`
 }
 
 // Index builds the catalogue of templates found under root, sorted by tier
-// (system first) and name. Templates must already be valid.
+// (system first) and name. Templates must already be valid. Names must be
+// unique within a catalogue: frontends and stack.yaml refer to them by name.
 func Index(root string, ts []*Template) (*Catalogue, error) {
 	c := &Catalogue{APIVersion: APIVersion, Kind: "Catalogue", Templates: []Entry{}}
+	seen := map[string]string{}
 	for _, t := range ts {
+		if prev, ok := seen[t.Metadata.Name]; ok {
+			return nil, fmt.Errorf("template name %q is used twice: %s and %s", t.Metadata.Name, prev, t.Dir)
+		}
+		seen[t.Metadata.Name] = t.Dir
 		rel, err := filepath.Rel(root, t.Dir)
 		if err != nil {
 			return nil, err
@@ -49,14 +61,14 @@ func Index(root string, ts []*Template) (*Catalogue, error) {
 		e := Entry{
 			Metadata: t.Metadata, Path: filepath.ToSlash(rel), Version: t.Spec.Version,
 			Images: nonNil(t.Spec.Images), Supports: t.Spec.Supports,
-			Inputs: nonNil(t.Spec.Inputs), Volumes: nonNil(t.Spec.Volumes), Migrations: []MigrationRef{},
+			Inputs: nonNil(t.Spec.Inputs), Generate: nonNil(t.Spec.Generate), Volumes: nonNil(t.Spec.Volumes), Migrations: []MigrationRef{},
 		}
 		for _, m := range t.Spec.Migrations {
-			e.Migrations = append(e.Migrations, MigrationRef{m.From, m.To, m.Backup})
+			e.Migrations = append(e.Migrations, MigrationRef{m.From, m.To, m.Description, m.Backup, m.Rollback})
 		}
 		c.Templates = append(c.Templates, e)
 	}
-	sort.Slice(c.Templates, func(i, j int) bool {
+	sort.SliceStable(c.Templates, func(i, j int) bool {
 		a, b := c.Templates[i], c.Templates[j]
 		if a.Tier != b.Tier {
 			return a.Tier == "system"
