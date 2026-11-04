@@ -52,6 +52,9 @@ type Plan struct {
 	Generated   []string `json:"generated,omitempty"` // secrets created by this apply
 	// Steps is everything apply will do, in order (see steps.go).
 	Steps []Step `json:"steps,omitempty"`
+	// Approximate means the per-service steps were derived without asking
+	// compose (no docker available); compose may recreate more.
+	Approximate bool `json:"approximate,omitempty"`
 }
 
 // Empty reports whether nothing would change.

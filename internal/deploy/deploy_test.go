@@ -279,3 +279,43 @@ func TestSteps(t *testing.T) {
 		t.Errorf("empty plan has steps: %+v", p.Steps)
 	}
 }
+
+// hashRunner answers `config --hash` from the rendered .env in the directory.
+type hashRunner struct{ calls int }
+
+func (h *hashRunner) Run(_ context.Context, dir string, args ...string) ([]byte, error) {
+	if !strings.Contains(strings.Join(args, " "), "config --hash") {
+		return nil, nil
+	}
+	h.calls++
+	env, _ := os.ReadFile(filepath.Join(dir, ".env"))
+	// web's hash follows the env file (as compose's would for $TAG), side's never changes.
+	return []byte("web " + fingerprint(string(env)) + "\nside fixed\n"), nil
+}
+
+func TestRefineServicesUsesComposeHashes(t *testing.T) {
+	dir := t.TempDir()
+	v1 := output("services:\n  web: {image: 'nginx:$TAG'}\n  side: {image: 'x:1'}\n", "TAG='1'\n")
+	p, _ := PlanStack("app", "compose", dir, v1, nil)
+	if _, err := Apply(context.Background(), &fakeRunner{}, p, v1, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	v2 := output("services:\n  web: {image: 'nginx:$TAG'}\n  side: {image: 'x:1'}\n", "TAG='2'\n")
+	p, _ = PlanStack("app", "compose", dir, v2, nil)
+	if !p.Approximate {
+		t.Error("steps without compose must be marked approximate")
+	}
+	r := &hashRunner{}
+	if err := p.RefineServices(context.Background(), r, v2); err != nil {
+		t.Fatal(err)
+	}
+	var svc []string
+	for _, s := range p.Steps {
+		if s.Kind == "service" {
+			svc = append(svc, s.Text)
+		}
+	}
+	if p.Approximate || r.calls != 2 || len(svc) != 1 || !strings.HasPrefix(svc[0], "recreate web") {
+		t.Fatalf("approximate=%v calls=%d service steps=%v", p.Approximate, r.calls, svc)
+	}
+}

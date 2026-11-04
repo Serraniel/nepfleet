@@ -165,6 +165,8 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Exact per-service steps from compose; without docker they stay marked approximate.
+	_ = p.RefineServices(context.Background(), deploy.Docker{}, out)
 	return &prepared{stack: s, out: out, plan: p, secrets: sec}, nil
 }
 
@@ -193,7 +195,11 @@ func printPlan(w io.Writer, p *deploy.Plan) {
 		fmt.Fprintf(w, "  ⚠ DESTRUCTIVE: %s\n", d)
 	}
 	if len(p.Steps) > 0 {
-		fmt.Fprintln(w, "  steps:")
+		if p.Approximate {
+			fmt.Fprintln(w, "  steps (approximate: docker was not reachable to compute them exactly):")
+		} else {
+			fmt.Fprintln(w, "  steps:")
+		}
 		for i, s := range p.Steps {
 			mark := ""
 			if s.Destructive {
@@ -393,6 +399,9 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 		fmt.Fprintf(stderr, "%s: ⚠ cannot resolve %s, its pin stays as is\n", p.stack.Metadata.Name, s)
 	}
 	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
+	if err == nil {
+		_ = p.plan.RefineServices(ctx, deploy.Docker{}, p.out)
+	}
 	return updated, err
 }
 

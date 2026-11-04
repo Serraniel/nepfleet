@@ -3,7 +3,10 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -59,15 +62,126 @@ func (p *Plan) addSteps(oldCompose, oldEnv []byte, out *render.Output, pinChange
 		case !isThere:
 			p.Steps = append(p.Steps, Step{Kind: "service", Service: name, Text: "remove " + name, Destructive: true})
 		case !reflect.DeepEqual(o, n) || pinChanges[image(n)]:
-			p.Steps = append(p.Steps, Step{Kind: "service", Service: name, Text: "recreate " + name + " (short downtime unless it runs more than one replica)"})
+			p.Steps = append(p.Steps, recreateStep(p.Mode, name))
 		}
 	}
 	if p.Mode == "swarm" {
-		p.Steps = append(p.Steps, Step{Kind: "health", Text: "docker stack deploy; swarm rolls services one task at a time and rolls back on failure"})
+		p.Steps = append(p.Steps, Step{Kind: "health", Text: "docker stack deploy; swarm updates as each service's update_config says and rolls back on failure (volume data is not rolled back)"})
 	} else {
-		p.Steps = append(p.Steps, Step{Kind: "health", Text: "wait until every service is healthy; on failure restore the previous files and images and apply them again"})
+		p.Steps = append(p.Steps, Step{Kind: "health", Text: "wait until every service is healthy; on failure restore the previous files and images and apply them again (volume data is not rolled back)"})
 	}
+	p.Approximate = true // until RefineServices asked compose
 	p.Steps = append(p.Steps, Step{Kind: "record", Text: "record this revision as applied"})
+}
+
+func recreateStep(mode, name string) Step {
+	if mode == "swarm" {
+		return Step{Kind: "service", Service: name, Text: "update " + name + " (rolling or stop-first, as its update_config says)"}
+	}
+	return Step{Kind: "service", Service: name, Text: "recreate " + name + " (it is down while it restarts)"}
+}
+
+// RefineServices replaces the per-service steps with compose's own
+// decision: the old and the new version are rendered into the same
+// private directory and `docker compose config --hash` is compared per
+// service, which covers every interpolation form, env_file contents and
+// anything else compose hashes. Without docker the approximation stays.
+func (p *Plan) RefineServices(ctx context.Context, r Runner, out *render.Output) error {
+	if p.Empty() {
+		return nil
+	}
+	tmp, err := os.MkdirTemp("", "nepfleet-plan-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }() // 0700: rendered env files hold secrets
+	oldHashes := map[string]string{}
+	if !p.First {
+		old := map[string][]byte{}
+		if man, err := readManifest(p.Dir); err == nil && man != nil {
+			for _, f := range man.Files {
+				if b, err := os.ReadFile(filepath.Join(p.Dir, f)); err == nil {
+					old[f] = b
+				}
+			}
+		}
+		if oldHashes, err = hashes(ctx, r, p.Stack, tmp, old); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(tmp); err != nil {
+			return err
+		}
+		if err := os.Mkdir(tmp, 0o700); err != nil {
+			return err
+		}
+	}
+	newHashes, err := hashes(ctx, r, p.Stack, tmp, out.Files)
+	if err != nil {
+		return err
+	}
+	pinned := map[string]bool{}
+	for _, c := range p.Changes {
+		if img, ok := strings.CutPrefix(c.Path, "image "); ok {
+			pinned[img] = true
+		}
+	}
+	newSvc := services(out.Files[render.ComposeFile], out.Files[render.EnvFile])
+	var steps []Step
+	inserted := false
+	for _, s := range p.Steps {
+		if s.Kind == "service" {
+			continue
+		}
+		if s.Kind == "health" && !inserted {
+			inserted = true
+			for _, name := range sortedKeys(unionS(oldHashes, newHashes)) {
+				o, wasThere := oldHashes[name]
+				n, isThere := newHashes[name]
+				switch {
+				case !wasThere:
+					steps = append(steps, Step{Kind: "service", Service: name, Text: "create " + name})
+				case !isThere:
+					steps = append(steps, Step{Kind: "service", Service: name, Text: "remove " + name, Destructive: true})
+				case o != n || pinned[image(newSvc[name])]:
+					steps = append(steps, recreateStep(p.Mode, name))
+				}
+			}
+		}
+		steps = append(steps, s)
+	}
+	p.Steps, p.Approximate = steps, false
+	return nil
+}
+
+func hashes(ctx context.Context, r Runner, stack, dir string, files map[string][]byte) (map[string]string, error) {
+	out := map[string]string{}
+	if len(files[render.ComposeFile]) == 0 {
+		return out, nil
+	}
+	if err := writeFiles(dir, files, nil); err != nil {
+		return nil, err
+	}
+	raw, err := r.Run(ctx, dir, compose(stack, dir, "config", "--hash", "*")...)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if name, h, ok := strings.Cut(strings.TrimSpace(line), " "); ok {
+			out[name] = h
+		}
+	}
+	return out, nil
+}
+
+func unionS(a, b map[string]string) map[string]bool {
+	out := map[string]bool{}
+	for k := range a {
+		out[k] = true
+	}
+	for k := range b {
+		out[k] = true
+	}
+	return out
 }
 
 // services parses a compose file with its env file applied, so services
