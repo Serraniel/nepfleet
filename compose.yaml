@@ -34,6 +34,9 @@ services:
       # Template-source cache and registry logins, kept across runs.
       XDG_CACHE_HOME: /srv/nepfleet/cache
       DOCKER_CONFIG: /srv/nepfleet/docker
+      # Registered emulators (system/binfmt), so apply can tell which images
+      # for other CPUs will run. The container's own /proc does not have it.
+      NEPFLEET_BINFMT_DIR: /host/binfmt_misc
       SOPS_AGE_KEY_FILE: /srv/nepfleet/age.key
       # Identity for the commits that rollback makes.
       GIT_AUTHOR_NAME: "${NEPFLEET_GIT_NAME:-NepFleet}"
@@ -48,6 +51,7 @@ services:
       # relative bind mounts on the host, so the paths must match. Holds the
       # fleet repository, state, caches and age.key.
       - /srv/nepfleet:/srv/nepfleet
+      - /proc/sys/fs/binfmt_misc:/host/binfmt_misc:ro
     working_dir: /srv/nepfleet/fleet
     # Loopback only. Expose the API through the Caddy system stack (TLS) instead.
     ports:

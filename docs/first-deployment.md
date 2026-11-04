@@ -128,7 +128,7 @@ nepfleet apply                # asks per stack with apply: manual; waits for hea
 git add -A && git commit -m "feat: initial fleet" && git push
 ```
 
-`apply` writes `lock.yaml` (the image digests) and stores generated secrets encrypted. Commit both. If a stack does not become healthy, `apply` restores its previous version automatically.
+`apply` writes `lock.yaml` (the image digests) and stores generated secrets encrypted. Commit both. If a stack does not become healthy, `apply` restores its previous version automatically. Before it touches a stack, `apply` checks that every image is built for this host's CPU and refuses the stack otherwise. With the `binfmt` system stack installed, images for other architectures run under emulation (slower) and are only reported.
 
 ## 8. Day two
 

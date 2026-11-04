@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/Serraniel/nepfleet/internal/deploy"
 )
@@ -52,6 +51,8 @@ type Env struct {
 	// InContainer is true when nepfleet itself runs in a container, where
 	// the host's listeners and Docker's data directory are not visible.
 	InContainer bool
+	// BinfmtDir overrides where binfmt_misc is read (NEPFLEET_BINFMT_DIR).
+	BinfmtDir string
 }
 
 // Host returns an Env backed by the real host.
@@ -71,6 +72,7 @@ func Host() Env {
 			return exec.CommandContext(ctx, name, args...).Output()
 		},
 		InContainer: inContainer(),
+		BinfmtDir:   os.Getenv("NEPFLEET_BINFMT_DIR"),
 	}
 }
 
@@ -173,13 +175,7 @@ func Run(ctx context.Context, e Env, in Input) []Check {
 		}
 	}
 
-	// Architectures: the platform the daemon pulls for (a 32-bit userland on
-	// a 64-bit kernel pulls arm/v7, although uname says aarch64).
-	arch := normaliseArch(info.Architecture)
-	if v, err := e.Docker.Run(ctx, "", "version", "--format", "{{.Server.Arch}}"); err == nil && strings.TrimSpace(string(v)) != "" {
-		arch = normaliseArch(strings.TrimSpace(string(v)))
-	}
-	out = append(out, archCheck(ctx, e, platform{arch, variant(info.Architecture, arch)}, in.Images)...)
+	out = append(out, archChecks(ctx, e, hostPlatform(ctx, e, info.Architecture), in.Images)...)
 	return out
 }
 
@@ -339,52 +335,4 @@ func normaliseArch(a string) string {
 		return "arm"
 	}
 	return a
-}
-
-// archCheck asks the registry (docker manifest inspect) which platforms an
-// image is built for.
-func archCheck(ctx context.Context, e Env, host platform, images []string) []Check {
-	var out []Check
-	var missing, unknown []string
-	for _, img := range images {
-		ictx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		raw, err := e.Docker.Run(ictx, "", "manifest", "inspect", img)
-		cancel()
-		if err != nil {
-			unknown = append(unknown, img)
-			continue
-		}
-		var m struct {
-			Manifests []struct {
-				Platform struct {
-					Architecture string `json:"architecture"`
-					OS           string `json:"os"`
-					Variant      string `json:"variant"`
-				} `json:"platform"`
-			} `json:"manifests"`
-		}
-		if json.Unmarshal(raw, &m) != nil || len(m.Manifests) == 0 {
-			unknown = append(unknown, img+" (single-platform)")
-			continue
-		}
-		found := false
-		for _, p := range m.Manifests {
-			if p.Platform.OS == "linux" && host.runs(p.Platform.Architecture, p.Platform.Variant) {
-				found = true
-			}
-		}
-		if !found {
-			missing = append(missing, img)
-		}
-	}
-	if len(missing) > 0 {
-		out = append(out, Check{"Image architectures", Fail, fmt.Sprintf("not built for %s: %s", host, strings.Join(missing, ", ")),
-			"use another image, or enable emulation with the system/binfmt template (slower)"})
-	} else if len(images) > 0 {
-		out = append(out, Check{"Image architectures", OK, fmt.Sprintf("%d image(s) available for %s", len(images)-len(unknown), host), ""})
-	}
-	if len(unknown) > 0 {
-		out = append(out, Check{"Image architectures", Warn, "could not verify: " + strings.Join(unknown, ", "), "private registry without credentials, or a single-platform image"})
-	}
-	return out
 }
