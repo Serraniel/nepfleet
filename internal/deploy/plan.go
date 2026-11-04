@@ -60,6 +60,8 @@ type Manifest struct {
 	Files  []string `json:"files"`
 	Commit string   `json:"commit,omitempty"`
 	Dirty  bool     `json:"dirty,omitempty"`
+	// Images are the digests that ran; a rollback re-pins them.
+	Images map[string]string `json:"images,omitempty"`
 }
 
 const metaDir = ".nepfleet"
@@ -81,7 +83,9 @@ func readManifest(dir string) (*Manifest, error) {
 }
 
 // PlanStack compares rendered output with the stack's working directory.
-func PlanStack(name, mode, dir string, out *render.Output) (*Plan, error) {
+// pins (lock.yaml) are compared with the digests of the last apply; nil
+// skips that comparison.
+func PlanStack(name, mode, dir string, out *render.Output, pins map[string]string) (*Plan, error) {
 	p := &Plan{Stack: name, Dir: dir, Mode: mode}
 	for k := range out.Generated {
 		p.Generated = append(p.Generated, k)
@@ -116,6 +120,20 @@ func PlanStack(name, mode, dir string, out *render.Output) (*Plan, error) {
 		}
 		oldCompose, _ := os.ReadFile(filepath.Join(dir, render.ComposeFile))
 		p.Destructive = destructive(oldCompose, out.Files[render.ComposeFile])
+		imgs := make([]string, 0, len(pins))
+		for img := range pins {
+			imgs = append(imgs, img)
+		}
+		sort.Strings(imgs)
+		for _, img := range imgs {
+			if was := man.Images[img]; was != pins[img] {
+				d := "+ " + pins[img] + "\n"
+				if was != "" {
+					d = "- " + was + "\n" + d
+				}
+				p.Changes = append(p.Changes, Change{Path: "image " + img, Kind: Changed, Diff: d})
+			}
+		}
 	}
 	return p, nil
 }

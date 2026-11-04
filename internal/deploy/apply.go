@@ -15,6 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Serraniel/neptide/pkg/registry"
+
+	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/render"
 )
 
@@ -52,44 +55,265 @@ type Options struct {
 	Dirty  bool
 	// IngressNetwork is created if missing.
 	IngressNetwork string
+	// Lock pins images to digests; nil disables pinning. Sync adds missing
+	// images (resolved with Resolver) and drops unused ones; UpdateLock
+	// re-resolves every image.
+	Lock       *lock.Lock
+	Resolver   lock.Resolver
+	UpdateLock bool
+}
+
+// Result reports side effects the caller has to persist.
+type Result struct {
+	// LockChanged means Options.Lock differs and should be saved and committed.
+	LockChanged bool
+	// Unpinned lists images that could not be resolved and run by tag.
+	Unpinned []string
 }
 
 // Apply writes the rendered files and brings the stack up. If the stack
 // does not become healthy, the previous files are restored and re-applied.
-func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options) error {
+func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options) (Result, error) {
+	var res Result
 	if o.WaitTimeout <= 0 {
 		o.WaitTimeout = 3 * time.Minute
 	}
 	if o.IngressNetwork != "" {
 		if err := ensureNetwork(ctx, r, o.IngressNetwork, p.Mode == "swarm"); err != nil {
-			return err
+			return res, err
 		}
 	}
 	prev, err := readManifest(p.Dir)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if err := backup(p.Dir, prev); err != nil {
-		return fmt.Errorf("back up previous version: %w", err)
+		return res, fmt.Errorf("back up previous version: %w", err)
 	}
 	if err := writeFiles(p.Dir, out.Files, prev); err != nil {
-		return err
+		return res, err
 	}
-	err = up(ctx, r, p.Stack, p.Mode, p.Dir, o.WaitTimeout)
+	var pins map[string]string
+	var imgs []string
+	if o.Lock != nil && o.Resolver != nil {
+		imgs, err = images(ctx, r, p.Stack, p.Dir)
+		if err == nil {
+			resolver := o.Resolver
+			if !o.UpdateLock {
+				// New entries lock what is running now, so adopting or first
+				// locking a stack never changes its images.
+				resolver = &runningFirst{r: r, stack: p.Stack, swarm: p.Mode == "swarm", remote: o.Resolver}
+			}
+			res.LockChanged, res.Unpinned, err = o.Lock.Sync(ctx, resolver, imgs, o.UpdateLock)
+		}
+		if err != nil {
+			res.LockChanged = false
+			if prev != nil {
+				_ = restore(p.Dir, out.Files, prev)
+			}
+			return res, fmt.Errorf("pin images: %w", err)
+		}
+		pins = o.Lock.Images
+	}
+	// What runs now, so a rollback restores it even for images the previous
+	// manifest did not pin: local tags for compose, service digests for swarm
+	// (a plain-tag stack deploy would resolve the moved tag at the registry).
+	tagsBefore := localTags(ctx, r, imgs)
+	rollbackPins := map[string]string{}
+	if prev != nil {
+		for img, d := range prev.Images {
+			rollbackPins[img] = d
+		}
+		if p.Mode == "swarm" {
+			running := (&runningFirst{r: r, stack: p.Stack, swarm: true}).collect(ctx)
+			for img, d := range running {
+				if _, pinned := rollbackPins[img]; !pinned {
+					rollbackPins[img] = d
+				}
+			}
+		}
+	}
+	err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
 	if err == nil {
-		return writeManifest(p.Dir, out.Files, o)
+		return res, writeManifest(p.Dir, out.Files, pins, o)
 	}
+	res.LockChanged = false // the new pins did not run successfully; never ask to commit them
 	if prev == nil {
 		// Nothing to go back to. Leave it as is for inspection.
-		return fmt.Errorf("first deploy of %s failed (left running for inspection, `docker compose -p %s logs`): %w", p.Stack, p.Stack, err)
+		return res, fmt.Errorf("first deploy of %s failed (left as is for inspection, `docker compose -p %s logs`): %w", p.Stack, p.Stack, err)
 	}
 	if rerr := restore(p.Dir, out.Files, prev); rerr != nil {
-		return fmt.Errorf("%w; restoring the previous files also failed: %w", err, rerr)
+		return res, fmt.Errorf("%w; restoring the previous files also failed: %w", err, rerr)
 	}
-	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, o.WaitTimeout); rerr != nil {
-		return fmt.Errorf("%w; the previous version did not come back up either: %w", err, rerr)
+	// The failed attempt may have moved local tags: put back what they were,
+	// then re-pin the previous digests on top.
+	for img, id := range tagsBefore {
+		if _, pinned := prev.Images[img]; !pinned {
+			if _, terr := r.Run(ctx, "", "tag", id, img); terr != nil {
+				return res, fmt.Errorf("%w; restoring the previous image of %s failed: %w", err, img, terr)
+			}
+		}
 	}
-	return fmt.Errorf("%w: %w", ErrRolledBack, err)
+	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, rollbackPins, o.WaitTimeout); rerr != nil {
+		return res, fmt.Errorf("%w; the previous version did not come back up either: %w", err, rerr)
+	}
+	return res, fmt.Errorf("%w: %w", ErrRolledBack, err)
+}
+
+// ResolveUpdate returns a copy of l with every image of the rendered stack
+// re-resolved to its current registry digest, without touching the stack:
+// the files are rendered into a private temporary directory to let compose
+// interpolate the image references. Used to show updates before confirming.
+func ResolveUpdate(ctx context.Context, r Runner, stack string, out *render.Output, l *lock.Lock, resolver lock.Resolver) (*lock.Lock, []string, error) {
+	tmp, err := os.MkdirTemp("", "nepfleet-resolve-")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }() // MkdirTemp creates it 0700: the env file stays private
+	if err := writeFiles(tmp, out.Files, nil); err != nil {
+		return nil, nil, err
+	}
+	imgs, err := images(ctx, r, stack, tmp)
+	if err != nil {
+		return nil, nil, err
+	}
+	next := &lock.Lock{Images: map[string]string{}}
+	for k, v := range l.Images {
+		next.Images[k] = v
+	}
+	_, skipped, err := next.Sync(ctx, resolver, imgs, true)
+	return next, skipped, err
+}
+
+// localTags maps each image reference to the image ID its local tag points at.
+func localTags(ctx context.Context, r Runner, imgs []string) map[string]string {
+	out := map[string]string{}
+	for _, img := range imgs {
+		if id, err := r.Run(ctx, "", "image", "inspect", "--format", "{{.Id}}", img); err == nil {
+			if s := strings.TrimSpace(string(id)); s != "" {
+				out[img] = s
+			}
+		}
+	}
+	return out
+}
+
+// runningFirst resolves an image to the digest that is running now: for
+// swarm the digest in the service spec (the manager's local images may be
+// stale), for compose the image of the stack's running containers, then the
+// local tag, and only then the registry.
+type runningFirst struct {
+	r       Runner
+	stack   string
+	swarm   bool
+	remote  lock.Resolver
+	running map[string]string
+}
+
+func (l *runningFirst) Digest(ctx context.Context, img string) (string, error) {
+	if l.running == nil {
+		l.running = l.collect(ctx)
+	}
+	if d, ok := l.running[img]; ok {
+		return d, nil
+	}
+	if !l.swarm {
+		if d := repoDigest(ctx, l.r, img, img); d != "" {
+			return d, nil
+		}
+	}
+	return l.remote.Digest(ctx, img)
+}
+
+func (l *runningFirst) collect(ctx context.Context) map[string]string {
+	out := map[string]string{}
+	if l.swarm {
+		names, err := l.r.Run(ctx, "", "service", "ls", "--filter", "label=com.docker.stack.namespace="+l.stack, "--format", "{{.Name}}")
+		if err != nil {
+			return out
+		}
+		for _, svc := range strings.Fields(string(names)) {
+			spec, err := l.r.Run(ctx, "", "service", "inspect", "--format", "{{.Spec.TaskTemplate.ContainerSpec.Image}}", svc)
+			if err != nil {
+				continue
+			}
+			if name, d, ok := strings.Cut(strings.TrimSpace(string(spec)), "@"); ok {
+				out[name] = d
+			}
+		}
+		return out
+	}
+	ids, err := l.r.Run(ctx, "", "ps", "--all", "--quiet", "--filter", "label=com.docker.compose.project="+l.stack)
+	if err != nil {
+		return out
+	}
+	for _, id := range strings.Fields(string(ids)) {
+		info, err := l.r.Run(ctx, "", "inspect", "--format", "{{.Config.Image}}|{{.Image}}", id)
+		if err != nil {
+			continue
+		}
+		img, imageID, _ := strings.Cut(strings.TrimSpace(string(info)), "|")
+		if d := repoDigest(ctx, l.r, imageID, img); d != "" {
+			out[img] = d
+		}
+	}
+	return out
+}
+
+// repoDigest returns the RepoDigest of image (ID or reference) for ref's repository.
+func repoDigest(ctx context.Context, r Runner, image, ref string) string {
+	want, err := registry.ParseRef(ref)
+	if err != nil {
+		return ""
+	}
+	raw, err := r.Run(ctx, "", "image", "inspect", "--format", "{{json .RepoDigests}}", image)
+	if err != nil {
+		return ""
+	}
+	var digests []string
+	if json.Unmarshal(raw, &digests) != nil {
+		return ""
+	}
+	for _, rd := range digests {
+		if got, err := registry.ParseRef(rd); err == nil && got.Host == want.Host && got.Repo == want.Repo {
+			return got.Digest
+		}
+	}
+	return ""
+}
+
+// images lists the interpolated image references of a stack.
+func images(ctx context.Context, r Runner, stack, dir string) ([]string, error) {
+	out, err := r.Run(ctx, dir, compose(stack, dir, "config", "--images")...)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
+}
+
+// pinLocal makes the local tag img point at digest, pulling it if needed.
+// Compose then runs exactly that image while its config (and hash) still
+// says img, so pinning never recreates containers by itself.
+func pinLocal(ctx context.Context, r Runner, img, digest string) error {
+	ref, err := registry.ParseRef(img)
+	if err != nil {
+		return err
+	}
+	byDigest := ref.Name() + "@" + digest
+	want, err := r.Run(ctx, "", "image", "inspect", "--format", "{{.Id}}", byDigest)
+	if err != nil {
+		if _, err := r.Run(ctx, "", "pull", "--quiet", byDigest); err != nil {
+			return err
+		}
+		if want, err = r.Run(ctx, "", "image", "inspect", "--format", "{{.Id}}", byDigest); err != nil {
+			return err
+		}
+	}
+	if have, err := r.Run(ctx, "", "image", "inspect", "--format", "{{.Id}}", img); err == nil && bytes.Equal(have, want) {
+		return nil
+	}
+	_, err = r.Run(ctx, "", "tag", byDigest, img)
+	return err
 }
 
 func compose(stack, dir string, args ...string) []string {
@@ -97,8 +321,13 @@ func compose(stack, dir string, args ...string) []string {
 		"--file", filepath.Join(dir, render.ComposeFile), "--env-file", filepath.Join(dir, render.EnvFile)}, args...)
 }
 
-func up(ctx context.Context, r Runner, stack, mode, dir string, wait time.Duration) error {
+func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]string, wait time.Duration) error {
 	if mode != "swarm" {
+		for img, d := range pins {
+			if err := pinLocal(ctx, r, img, d); err != nil {
+				return fmt.Errorf("pin %s: %w", img, err)
+			}
+		}
 		_, err := r.Run(ctx, dir, compose(stack, dir, "up", "--detach", "--remove-orphans", "--wait",
 			"--wait-timeout", fmt.Sprint(int(wait.Seconds())))...)
 		return err
@@ -110,6 +339,9 @@ func up(ctx context.Context, r Runner, stack, mode, dir string, wait time.Durati
 	}
 	swarmCfg, err := render.ForSwarm(cfg)
 	if err != nil {
+		return err
+	}
+	if swarmCfg, err = render.PinImages(swarmCfg, pins); err != nil {
 		return err
 	}
 	path := filepath.Join(dir, metaDir, "stack.yaml")
@@ -210,8 +442,8 @@ func restore(dir string, current map[string][]byte, prev *Manifest) error {
 	return writeFiles(dir, files, currentManifest)
 }
 
-func writeManifest(dir string, files map[string][]byte, o Options) error {
-	m := Manifest{Commit: o.Commit, Dirty: o.Dirty}
+func writeManifest(dir string, files map[string][]byte, pins map[string]string, o Options) error {
+	m := Manifest{Commit: o.Commit, Dirty: o.Dirty, Images: pins}
 	for path := range files {
 		m.Files = append(m.Files, path)
 	}
@@ -238,7 +470,7 @@ func Adopt(dir string, out *render.Output) error {
 	if err := writeFiles(dir, out.Files, nil); err != nil {
 		return err
 	}
-	return writeManifest(dir, out.Files, Options{})
+	return writeManifest(dir, out.Files, nil, Options{}) // pins come from the running containers on the first apply
 }
 
 // Applied returns the manifest of the last successful apply, or nil.

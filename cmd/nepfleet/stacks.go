@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,9 +22,12 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/Serraniel/neptide/pkg/registry"
+
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/importer"
+	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/secrets"
 	"github.com/Serraniel/nepfleet/internal/source"
@@ -74,6 +78,7 @@ type env struct {
 	fleet    *fleet.Fleet
 	store    secrets.SOPS
 	resolver *source.Resolver
+	reg      *registry.Client
 }
 
 func (c common) open() (*env, error) {
@@ -90,6 +95,24 @@ func (c common) open() (*env, error) {
 }
 
 // stacks returns the named stacks, or all stacks for this host.
+// resolverOnce builds the registry resolver with Docker's credentials.
+func (e *env) resolverOnce() lock.Resolver {
+	if e.reg == nil {
+		c := registry.New()
+		c.UserAgent = "nepfleet/" + version
+		cfgPath := filepath.Join(os.Getenv("DOCKER_CONFIG"), "config.json")
+		if os.Getenv("DOCKER_CONFIG") == "" {
+			h, _ := os.UserHomeDir()
+			cfgPath = filepath.Join(h, ".docker", "config.json")
+		}
+		if creds, err := registry.LoadDockerConfig(cfgPath); err == nil {
+			c.Creds = creds.Lookup
+		}
+		e.reg = c
+	}
+	return lock.Registry{Client: e.reg}
+}
+
 func (e *env) stacks(names []string) ([]*fleet.Stack, error) {
 	if len(names) > 0 {
 		var out []*fleet.Stack
@@ -130,7 +153,11 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
-	p, err := deploy.PlanStack(s.Metadata.Name, s.Spec.Mode, deploy.StackDir(e.stateDir, s.Metadata.Name), out)
+	l, err := lock.Load(s.Dir)
+	if err != nil {
+		return nil, err
+	}
+	p, err := deploy.PlanStack(s.Metadata.Name, s.Spec.Mode, deploy.StackDir(e.stateDir, s.Metadata.Name), out, l.Images)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +196,7 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	asJSON := fs.Bool("json", false, "print the plan as JSON")
+	updateLock := fs.Bool("update-lock", false, "include image updates that apply --update-lock would make")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -187,6 +215,12 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		if *updateLock {
+			if _, err := e.previewUpdate(context.Background(), p, stderr); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 		}
 		plans = append(plans, p.plan)
 	}
@@ -213,8 +247,13 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	var confirm multiFlag
 	fs.Var(&confirm, "confirm", "allow destructive changes for this stack (repeatable)")
 	wait := fs.Duration("wait", 3*time.Minute, "health gate timeout per stack")
+	noLock := fs.Bool("no-lock", false, "do not pin images to digests (lock.yaml)")
+	updateLock := fs.Bool("update-lock", false, "re-resolve every image tag to its current digest (shown in the plan before confirming)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *noLock && *updateLock {
+		return errors.New("--update-lock and --no-lock contradict each other")
 	}
 	e, err := c.open()
 	if err != nil {
@@ -235,6 +274,14 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		var updated *lock.Lock
+		if *updateLock {
+			// Resolve before confirming, so the plan shows the image changes.
+			if updated, err = e.previewUpdate(ctx, p, stderr); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 		}
 		printPlan(stdout, p.plan)
 		if p.plan.Empty() {
@@ -259,9 +306,36 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 			}
 			fmt.Fprintf(stdout, "%s: generated secrets saved; commit %s\n", name, filepath.Join(s.Dir, fleet.SecretsFile))
 		}
-		err = deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, deploy.Options{
+		opts := deploy.Options{
 			WaitTimeout: *wait, Commit: commit, Dirty: dirty, IngressNetwork: e.fleet.Spec.IngressNetwork,
-		})
+		}
+		if !*noLock {
+			if updated != nil {
+				opts.Lock = updated
+			} else if opts.Lock, err = lock.Load(s.Dir); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			opts.Resolver = e.resolverOnce()
+		}
+		var res deploy.Result
+		res, err = deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, opts)
+		for _, u := range res.Unpinned {
+			fmt.Fprintf(stdout, "%s: ⚠ not pinned, runs by tag: %s\n", name, u)
+		}
+		if err == nil && updated != nil {
+			// The preview already moved the pins; persist them now that they ran.
+			if before, lerr := lock.Load(s.Dir); lerr == nil && !maps.Equal(before.Images, updated.Images) {
+				res.LockChanged = true
+			}
+		}
+		if res.LockChanged {
+			if serr := opts.Lock.Save(s.Dir); serr != nil {
+				errs = append(errs, serr)
+			} else {
+				fmt.Fprintf(stdout, "%s: image digests pinned; commit %s\n", name, filepath.Join(s.Dir, lock.File))
+			}
+		}
 		switch {
 		case errors.Is(err, deploy.ErrRolledBack):
 			fmt.Fprintf(stdout, "%s: ✗ %v\n", name, err)
@@ -274,6 +348,24 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// previewUpdate resolves current digests for a prepared stack and re-plans
+// with them, so the plan lists every image that would move.
+func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) (*lock.Lock, error) {
+	current, err := lock.Load(p.stack.Dir)
+	if err != nil {
+		return nil, err
+	}
+	updated, skipped, err := deploy.ResolveUpdate(ctx, deploy.Docker{}, p.stack.Metadata.Name, p.out, current, e.resolverOnce())
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolving image updates: %w", p.stack.Metadata.Name, err)
+	}
+	for _, s := range skipped {
+		fmt.Fprintf(stderr, "%s: ⚠ cannot resolve %s, its pin stays as is\n", p.stack.Metadata.Name, s)
+	}
+	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
+	return updated, err
 }
 
 func cmdRender(args []string, stdout, stderr io.Writer) error {
