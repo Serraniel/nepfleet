@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -48,6 +49,7 @@ Usage:
   nepfleet rollback <stack> [commit]    restore an earlier version, commit and apply
   nepfleet import compose [project...]  adopt running Compose projects (lists them without args)
   nepfleet template validate <path>...  validate templates (searches recursively)
+  nepfleet template index <root>        print index.json, the catalogue of the templates under root
   nepfleet serve [flags]                run the optional HTTP API
   nepfleet version                      print the version
 
@@ -90,10 +92,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "fleet repository created in %s\n", dir)
 		return nil
 	case "template":
-		if len(args) < 3 || args[1] != "validate" {
-			return errors.New("usage: nepfleet template validate <path>")
+		switch {
+		case len(args) >= 3 && args[1] == "validate":
+			return validateTemplates(args[2:], stdout)
+		case len(args) == 3 && args[1] == "index":
+			return indexTemplates(args[2], stdout, stderr)
 		}
-		return validateTemplates(args[2:], stdout)
+		return errors.New("usage: nepfleet template validate <path>... | nepfleet template index <root>")
 	case "serve":
 		return serve(args[1:], stderr)
 	case "doctor":
@@ -119,7 +124,36 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return fmt.Errorf("unknown command %q", args[0])
 }
 
-func validateTemplates(roots []string, out io.Writer) error {
+// indexTemplates prints the catalogue of every template under root. It
+// refuses to index an invalid template.
+func indexTemplates(root string, stdout, stderr io.Writer) error {
+	dirs, err := findTemplates([]string{root})
+	if err != nil {
+		return err
+	}
+	var ts []*template.Template
+	for _, dir := range dirs {
+		t, err := template.Load(dir)
+		if err == nil {
+			err = t.Validate()
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "FAIL %s\n  %s\n", dir, strings.ReplaceAll(err.Error(), "\n", "\n  "))
+			return errors.New("not indexing invalid templates; see nepfleet template validate")
+		}
+		ts = append(ts, t)
+	}
+	c, err := template.Index(root, ts)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(c)
+}
+
+func findTemplates(roots []string) ([]string, error) {
 	var dirs []string
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -132,11 +166,19 @@ func validateTemplates(roots []string, out io.Writer) error {
 			return nil
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if len(dirs) == 0 {
-		return errors.New("no template.yaml found")
+		return nil, errors.New("no template.yaml found")
+	}
+	return dirs, nil
+}
+
+func validateTemplates(roots []string, out io.Writer) error {
+	dirs, err := findTemplates(roots)
+	if err != nil {
+		return err
 	}
 	failed := 0
 	for _, dir := range dirs {
