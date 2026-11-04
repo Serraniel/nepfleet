@@ -127,7 +127,7 @@ func values(in Input, env map[string]string, out *Output) error {
 			env[inp.Name] = ""
 			continue
 		}
-		if err := check(inp, v); err != nil {
+		if err := CheckInput(inp, v); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", inp.Name, err))
 		}
 		env[inp.Name] = v
@@ -161,6 +161,23 @@ func values(in Input, env map[string]string, out *Output) error {
 var (
 	hostnameRe = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
 )
+
+// CheckInput validates one value against its input definition. Errors about
+// secret inputs never contain the value.
+func CheckInput(inp template.Input, v string) error {
+	err := check(inp, v)
+	if err != nil && inp.Type == "secret" {
+		return fmt.Errorf("the value does not have the expected format%s", patternHint(inp))
+	}
+	return err
+}
+
+func patternHint(inp template.Input) string {
+	if inp.Pattern != "" {
+		return " (" + inp.Pattern + ")"
+	}
+	return ""
+}
 
 func check(inp template.Input, v string) error {
 	switch inp.Type {

@@ -104,6 +104,9 @@ type TemplateRef struct {
 // SecretsFile is the encrypted values file next to stack.yaml.
 const SecretsFile = "values.secret.yaml"
 
+// ValidName reports whether s is a valid stack or source name.
+func ValidName(s string) bool { return nameRe.MatchString(s) }
+
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`) // Compose project names allow _
 
 func decodeStrict(path string, out any) error {
