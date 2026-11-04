@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+// Package render turns a stack (template + values + secrets) into the files
+// that are deployed: compose.yaml, .env and the template's extra files.
+package render
+
+import (
+	"errors"
+	"fmt"
+	"net/mail"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/template"
+)
+
+// Input is everything rendering needs.
+type Input struct {
+	Fleet *fleet.Fleet
+	Stack *fleet.Stack
+	// Template is nil for a plain compose stack.
+	Template *template.Template
+	// Secrets are the decrypted values.secret.yaml.
+	Secrets map[string]string
+}
+
+// Output is the rendered stack.
+type Output struct {
+	// Files maps paths relative to the stack's working directory to content.
+	Files map[string][]byte
+	// Generated holds values created by this render; persist them to the
+	// secrets file before deploying, or they change on every render.
+	Generated map[string]string
+	// Secret names, for masking in plans and logs.
+	Secret map[string]bool
+}
+
+// EnvFile and ComposeFile are the names used in the working directory.
+const (
+	EnvFile     = ".env"
+	ComposeFile = "compose.yaml"
+)
+
+// Render produces the stack's files. It never writes to disk.
+func Render(in Input) (*Output, error) {
+	out := &Output{Files: map[string][]byte{}, Generated: map[string]string{}, Secret: map[string]bool{}}
+	env := map[string]string{
+		"NEPFLEET_STACK":           in.Stack.Metadata.Name,
+		"NEPFLEET_INGRESS_NETWORK": in.Fleet.Spec.IngressNetwork,
+		"TZ":                       in.Fleet.Spec.TZ,
+	}
+	var compose []byte
+	var err error
+
+	if in.Template == nil {
+		// Plain stack: the compose file is the user's; values and secrets pass through.
+		compose, err = os.ReadFile(filepath.Join(in.Stack.Dir, ComposeFile))
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range in.Stack.Spec.Values {
+			env[k] = v
+		}
+		for k, v := range in.Secrets {
+			env[k] = v
+			out.Secret[k] = true
+		}
+	} else {
+		if err := values(in, env, out); err != nil {
+			return nil, err
+		}
+		compose, err = os.ReadFile(filepath.Join(in.Template.Dir, in.Template.Spec.Compose))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range in.Template.Spec.Files {
+			raw, err := os.ReadFile(filepath.Join(in.Template.Dir, f.Src))
+			if err != nil {
+				return nil, err
+			}
+			out.Files[f.Dest] = substitute(raw, env)
+		}
+	}
+	if _, ok := out.Files[ComposeFile]; ok {
+		return nil, errors.New("a template file may not be called " + ComposeFile)
+	}
+	out.Files[ComposeFile] = compose
+	envFile, err := dotenv(env)
+	if err != nil {
+		return nil, err
+	}
+	out.Files[EnvFile] = envFile
+	return out, nil
+}
+
+// values validates stack values against the template's inputs and fills env.
+func values(in Input, env map[string]string, out *Output) error {
+	t := in.Template
+	var errs []error
+	known := map[string]bool{}
+	for _, inp := range t.Spec.Inputs {
+		known[inp.Name] = true
+		v, given := in.Stack.Spec.Values[inp.Name]
+		if inp.Type == "secret" {
+			if given {
+				errs = append(errs, fmt.Errorf("%s is a secret: set it with `nepfleet secret set %s %s`, not in stack.yaml",
+					inp.Name, in.Stack.Metadata.Name, inp.Name))
+				continue
+			}
+			v, given = in.Secrets[inp.Name]
+			out.Secret[inp.Name] = true
+		}
+		if !given {
+			v = inp.Default
+		}
+		if v == "" {
+			if inp.Required {
+				errs = append(errs, fmt.Errorf("%s is required", inp.Name))
+			}
+			env[inp.Name] = ""
+			continue
+		}
+		if err := check(inp, v); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", inp.Name, err))
+		}
+		env[inp.Name] = v
+	}
+	for _, g := range t.Spec.Generate {
+		known[g.Name] = true
+		out.Secret[g.Name] = true
+		v, ok := in.Secrets[g.Name]
+		if !ok {
+			var err error
+			if v, err = g.Value(); err != nil {
+				return err
+			}
+			out.Generated[g.Name] = v
+		}
+		env[g.Name] = v
+	}
+	var unknown []string
+	for k := range in.Stack.Spec.Values {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	sort.Strings(unknown)
+	for _, k := range unknown {
+		errs = append(errs, fmt.Errorf("%s is not an input of template %s", k, t.Metadata.Name))
+	}
+	return errors.Join(errs...)
+}
+
+var (
+	hostnameRe = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+)
+
+func check(inp template.Input, v string) error {
+	switch inp.Type {
+	case "hostname":
+		if len(v) > 253 || !hostnameRe.MatchString(v) {
+			return fmt.Errorf("%q is not a host name", v)
+		}
+	case "url":
+		u, err := url.Parse(v)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("%q is not an http(s) URL", v)
+		}
+	case "email":
+		if a, err := mail.ParseAddress(v); err != nil || a.Address != v {
+			return fmt.Errorf("%q is not an e-mail address", v)
+		}
+	case "int":
+		if _, err := strconv.Atoi(v); err != nil {
+			return fmt.Errorf("%q is not an integer", v)
+		}
+	case "bool":
+		if v != "true" && v != "false" {
+			return fmt.Errorf("%q must be true or false", v)
+		}
+	case "enum":
+		if !slices.Contains(inp.Options, v) {
+			return fmt.Errorf("%q must be one of %v", v, inp.Options)
+		}
+	case "path":
+		if !filepath.IsAbs(v) && !strings.HasPrefix(v, "./") {
+			return fmt.Errorf("%q must be absolute or start with ./", v)
+		}
+	}
+	if inp.Pattern != "" {
+		if ok, _ := regexp.MatchString(inp.Pattern, v); !ok {
+			return fmt.Errorf("%q does not match %s", v, inp.Pattern)
+		}
+	}
+	return nil
+}
+
+// dotenv writes KEY='value' lines. Single quotes keep every character
+// literal in Compose (no $ interpolation), so values that contain a single
+// quote or a newline cannot be represented and are rejected.
+func dotenv(env map[string]string) ([]byte, error) {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("# Rendered by NepFleet. Do not edit: changes are overwritten on apply.\n")
+	for _, k := range keys {
+		v := env[k]
+		if strings.ContainsAny(v, "'\n\r") {
+			return nil, fmt.Errorf("%s contains a single quote or newline, which an env file cannot hold literally", k)
+		}
+		fmt.Fprintf(&b, "%s='%s'\n", k, v)
+	}
+	return []byte(b.String()), nil
+}
+
+// substitute replaces ${NAME} for known names; $${ becomes a literal ${.
+func substitute(raw []byte, env map[string]string) []byte {
+	pairs := []string{"$${", "\x00"}
+	for k, v := range env {
+		pairs = append(pairs, "${"+k+"}", v)
+	}
+	s := strings.NewReplacer(pairs...).Replace(string(raw))
+	return []byte(strings.ReplaceAll(s, "\x00", "${"))
+}
+
+// Masked returns the env file with secret values replaced, for display.
+func (o *Output) Masked(name string) []byte {
+	if name != EnvFile {
+		return o.Files[name]
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(string(o.Files[EnvFile]), "\n") {
+		if k, _, ok := strings.Cut(line, "="); ok && o.Secret[k] {
+			line = k + "='••••••'\n"
+		}
+		b.WriteString(line)
+	}
+	return []byte(b.String())
+}

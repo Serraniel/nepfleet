@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# NepFleet as a container. See docs/install.md.
+#
+#   DOCKER_GID=$(getent group docker | cut -d: -f3) docker compose up -d
+
+name: nepfleet
+
+services:
+  nepfleet:
+    image: ghcr.io/serraniel/nepfleet:latest   # or :edge
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    # Membership in the host's docker group is what grants socket access;
+    # the process itself stays unprivileged (uid 65532).
+    group_add: ["${DOCKER_GID:?set DOCKER_GID to the host docker group id}"]
+    environment:
+      SOPS_AGE_KEY_FILE: /run/secrets/age-key
+    command: ["serve", "--listen", ":7480"]
+    volumes:
+      # Root-equivalent access to this host. Read docs/security.md first.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path inside and out: the Docker daemon resolves the stacks'
+      # relative bind mounts on the host, so the paths must match.
+      - /srv/nepfleet:/srv/nepfleet
+      - ${HOME}/.ssh/nepfleet_deploy:/run/secrets/ssh-key:ro   # pushes the fleet repo
+    working_dir: /srv/nepfleet/fleet
+    secrets: [age-key]
+    # Loopback only. Expose the API through the Caddy system stack (TLS) instead.
+    ports:
+      - "127.0.0.1:7480:7480"
+
+secrets:
+  age-key:
+    file: /srv/nepfleet/age.key

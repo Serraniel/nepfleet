@@ -1,0 +1,14 @@
+services:
+  web:
+    image: nginx:1.29-alpine
+    environment:
+      HOST: ${DOMAIN}
+      KEY: ${SECRET_KEY}
+      LITERAL: $${NOT_A_VARIABLE}
+    labels:
+      caddy: ${DOMAIN}
+    networks: [ingress]
+networks:
+  ingress:
+    name: ${NEPFLEET_INGRESS_NETWORK}
+    external: true

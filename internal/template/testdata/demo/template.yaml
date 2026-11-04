@@ -1,0 +1,22 @@
+apiVersion: nepfleet/v1alpha1
+kind: Template
+metadata:
+  name: demo
+  title: Demo
+  description: A template used by the tests.
+  tier: app
+spec:
+  version: 1.0.0
+  compose: compose.yaml
+  images:
+    - name: nginx
+      track: minor
+  inputs:
+    - name: DOMAIN
+      type: hostname
+      required: true
+  generate:
+    - name: SECRET_KEY
+      kind: secret
+      length: 32
+      encoding: hex
