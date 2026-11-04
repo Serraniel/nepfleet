@@ -190,13 +190,7 @@ func services(compose, env []byte) map[string]any {
 	if len(compose) == 0 {
 		return map[string]any{}
 	}
-	vars := map[string]string{}
-	for _, line := range strings.Split(string(env), "\n") {
-		if k, v, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(k, "#") {
-			vars[k] = strings.TrimSuffix(strings.TrimPrefix(v, "'"), "'")
-		}
-	}
-	expanded := interpolate(string(compose), vars)
+	expanded := interpolate(string(compose), render.EnvValues(env))
 	var doc struct {
 		Services map[string]any `yaml:"services"`
 	}
