@@ -54,7 +54,7 @@ docker compose -f /srv/nepfleet/compose.yaml up -d
 
 Things to know:
 
-- **Mount paths must match.** NepFleet calls `docker compose` with the host's Docker daemon, and the daemon resolves bind mounts on the host. That is why `compose.yaml` mounts `/srv/nepfleet` at the same path inside the container, and keeps the state directory (`/srv/nepfleet/state`), the template cache and registry logins (`docker login` through the function) there.
+- **Mount paths must match.** NepFleet calls `docker compose` with the host's Docker daemon, and the daemon resolves bind mounts on the host. That is why `compose.yaml` mounts `/srv/nepfleet` at the same path inside the container, and keeps the state directory (`/srv/nepfleet/state`), the template cache and registry logins there. For a private registry, log in once with `docker compose -f /srv/nepfleet/compose.yaml run --rm --entrypoint docker nepfleet login ghcr.io`.
 - **It runs as you.** The container runs as `NEPFLEET_UID:NEPFLEET_GID`, so the files it writes stay editable on the host.
 - **The Docker socket is root access.** The container is read-only and unprivileged and reaches Docker only through group membership. Never expose port 7480 directly; put the Caddy system stack in front of it.
 - **`doctor` sees less from a container.** It cannot see host processes or Docker's data directory, so the port and disk checks show ⚠ with a command to run on the host instead.

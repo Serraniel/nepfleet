@@ -5,11 +5,12 @@
 # a relative bind mount resolves on the host, and the API starts.
 # Usage: container.sh <image>   (needs docker and curl, nothing else)
 set -euo pipefail
-IMG=$1; T=$(mktemp -d); P=nepfleet-container-it; S=nepfleet-container-app
+IMG=$1; T=$(mktemp -d); P=nepfleet-container-it; S=nepfleet-container-app; NET=nepfleet_container_it
 fail() { echo "FAIL: $*"; exit 1; }
 cleanup() {
   [ -f "$T/compose.yaml" ] && docker compose -f "$T/compose.yaml" -p $P down >/dev/null 2>&1 || true
   docker compose -p $S down >/dev/null 2>&1 || true
+  docker network rm $NET >/dev/null 2>&1 || true
   # The test app wrote its data as root.
   docker run --rm -v "$T:$T" alpine:3.24 rm -rf "$T/state" >/dev/null 2>&1 || true
   rm -rf "$T"
@@ -26,13 +27,16 @@ NEPFLEET_GID=$(id -g)
 DOCKER_GID=$(getent group docker | cut -d: -f3)
 NEPFLEET_HOST=it-host
 EOF
-nf() { docker compose -p $P run --rm -T "$@" 2>/dev/null; }
+# Compose progress goes to stderr; keep the rest of stderr for CI logs.
+nf() { docker compose -p $P run --rm -T "$@" 2> >(grep -v -e "Container $P" -e "Network $P" >&2); }
 
 nf --entrypoint age-keygen nepfleet -o "$T/age.key" >/dev/null
 pub=$(nf --entrypoint age-keygen nepfleet -y "$T/age.key")
 nf nepfleet init . >/dev/null
 [ "$(stat -c %u fleet/fleet.yaml)" = "$(id -u)" ] || fail "fleet repository not owned by the host user"
 sed -i "s#    age: \[\]#    age: [\"$pub\"]#" fleet/fleet.yaml
+# Own ingress network, so the test never touches a real install's.
+printf '  ingressNetwork: %s\n' $NET >> fleet/fleet.yaml
 
 mkdir -p fleet/stacks/$S
 printf 'apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: %s}\nspec: {target: it-host, apply: auto}\n' $S > fleet/stacks/$S/stack.yaml
@@ -45,7 +49,7 @@ services:
     healthcheck: {test: ["CMD", "test", "-f", "/data/started"], interval: 1s, retries: 20}
 EOF
 
-nf nepfleet doctor >/dev/null || fail "doctor failed in the container"
+nf nepfleet doctor > "$T/doctor.log" || { cat "$T/doctor.log"; fail "doctor failed in the container"; }
 nf nepfleet apply --yes $S | tee "$T/apply.log" >/dev/null || { cat "$T/apply.log"; fail "apply from the container failed"; }
 find "$T/state" -name started | grep -q . || fail "relative bind mount did not resolve under the host state directory"
 
