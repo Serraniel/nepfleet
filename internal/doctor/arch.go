@@ -48,7 +48,7 @@ func imageArchs(ctx context.Context, e Env, host platform, images []string) []Im
 			out = append(out, ImageArch{img, Warn, "could not verify: private registry without credentials, or a single-platform image"})
 			continue
 		}
-		var emulated string
+		var emulated, thirtyTwo string
 		native := false
 		for _, p := range plats {
 			if host.runs(p.arch, p.variant) {
@@ -58,12 +58,19 @@ func imageArchs(ctx context.Context, e Env, host platform, images []string) []Im
 			if emulated == "" && e.emulates(p.arch) {
 				emulated = p.String()
 			}
+			if thirtyTwo == "" && compat(host, p) {
+				thirtyTwo = p.String()
+			}
 		}
 		switch {
 		case native:
 			out = append(out, ImageArch{img, OK, "built for " + host.String()})
 		case emulated != "":
 			out = append(out, ImageArch{img, Warn, fmt.Sprintf("not built for %s; runs as %s under binfmt emulation (slower)", host, emulated)})
+		case thirtyTwo != "":
+			out = append(out, ImageArch{img, Warn, fmt.Sprintf("only a 32-bit %s build; runs if this CPU supports 32-bit mode", thirtyTwo)})
+		case !e.binfmtVisible() && e.InContainer:
+			out = append(out, ImageArch{img, Warn, fmt.Sprintf("not built for %s (only %s), and binfmt_misc is not visible from the container to check for emulation; mount it as in compose.yaml", host, list(plats))})
 		default:
 			out = append(out, ImageArch{img, Fail, fmt.Sprintf("not built for %s (only %s)", host, list(plats))})
 		}
@@ -121,11 +128,33 @@ var qemuNames = map[string]string{
 // a NepFleet running in a container, if /proc/sys/fs/binfmt_misc is visible.
 func (e Env) emulates(arch string) bool {
 	name, ok := qemuNames[arch]
-	if !ok {
+	if !ok || !e.binfmtVisible() {
 		return false
 	}
-	raw, err := e.ReadFile("/proc/sys/fs/binfmt_misc/qemu-" + name)
+	raw, err := e.ReadFile(e.binfmtDir() + "/qemu-" + name)
 	return err == nil && strings.HasPrefix(string(raw), "enabled")
+}
+
+// binfmtDir is where binfmt_misc is mounted. A container has its own
+// /proc without it, so compose.yaml mounts the host's at /host/binfmt_misc
+// (NEPFLEET_BINFMT_DIR).
+func (e Env) binfmtDir() string {
+	if e.BinfmtDir != "" {
+		return e.BinfmtDir
+	}
+	return "/proc/sys/fs/binfmt_misc"
+}
+
+// binfmtVisible reports whether binfmt_misc can be read and is enabled.
+func (e Env) binfmtVisible() bool {
+	raw, err := e.ReadFile(e.binfmtDir() + "/status")
+	return err == nil && strings.HasPrefix(string(raw), "enabled")
+}
+
+// compat reports images 64-bit hosts usually run natively in 32-bit mode
+// (arm on arm64, 386 on amd64), which depends on the CPU.
+func compat(host platform, p platform) bool {
+	return (host.arch == "arm64" && p.arch == "arm") || (host.arch == "amd64" && p.arch == "386")
 }
 
 func archChecks(ctx context.Context, e Env, host platform, images []string) []Check {
@@ -143,8 +172,11 @@ func archChecks(ctx context.Context, e Env, host platform, images []string) []Ch
 			missing = append(missing, a.Image)
 		case strings.HasPrefix(a.Detail, "could not verify"):
 			unknown = append(unknown, a.Image)
-		default:
+		case strings.Contains(a.Detail, "under binfmt emulation"):
 			emulated = append(emulated, a.Image)
+		default:
+			ok++
+			out = append(out, Check{"Image architectures", Warn, a.Image + ": " + a.Detail, ""})
 		}
 	}
 	if len(missing) > 0 {

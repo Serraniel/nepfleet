@@ -51,6 +51,8 @@ type Env struct {
 	// InContainer is true when nepfleet itself runs in a container, where
 	// the host's listeners and Docker's data directory are not visible.
 	InContainer bool
+	// BinfmtDir overrides where binfmt_misc is read (NEPFLEET_BINFMT_DIR).
+	BinfmtDir string
 }
 
 // Host returns an Env backed by the real host.
@@ -70,6 +72,7 @@ func Host() Env {
 			return exec.CommandContext(ctx, name, args...).Output()
 		},
 		InContainer: inContainer(),
+		BinfmtDir:   os.Getenv("NEPFLEET_BINFMT_DIR"),
 	}
 }
 

@@ -171,9 +171,29 @@ func TestArchitecturesWithEmulation(t *testing.T) {
 	}
 	check(map[string]Status{"amd-only:1": Fail, "multi:1": OK, "private:1": Warn})
 	files["/proc/sys/fs/binfmt_misc/qemu-x86_64"] = "enabled\ninterpreter /usr/bin/qemu-x86_64\n"
+	check(map[string]Status{"amd-only:1": Fail, "multi:1": OK, "private:1": Warn}) // binfmt_misc itself not enabled
+	files["/proc/sys/fs/binfmt_misc/status"] = "enabled\n"
 	check(map[string]Status{"amd-only:1": Warn, "multi:1": OK, "private:1": Warn})
+
+	// In a container, the host's binfmt_misc is read where compose.yaml mounts it.
+	e.InContainer, e.BinfmtDir = true, "/host/binfmt_misc"
+	check(map[string]Status{"amd-only:1": Warn, "multi:1": OK, "private:1": Warn}) // not mounted: cannot tell, warn
+	files["/host/binfmt_misc/status"] = "enabled\n"
+	check(map[string]Status{"amd-only:1": Fail, "multi:1": OK, "private:1": Warn}) // mounted, no x86_64 emulator
+	files["/host/binfmt_misc/qemu-x86_64"] = "enabled\n"
+	check(map[string]Status{"amd-only:1": Warn, "multi:1": OK, "private:1": Warn})
+	e.InContainer, e.BinfmtDir = false, ""
 
 	// A pulled image counts as what it is, without asking the registry.
 	d["image inspect"] = "linux arm64 v8\n"
 	check(map[string]Status{"amd-only:1": OK, "multi:1": OK, "private:1": OK})
+}
+
+func TestThirtyTwoBitImagesOnlyWarn(t *testing.T) {
+	armv7 := `{"manifests":[{"platform":{"architecture":"arm","os":"linux","variant":"v7"}}]}`
+	d := fakeDocker{"info --format": "aarch64\n", "version --format": "arm64\n", "image inspect": "ERR", "manifest inspect": armv7}
+	a := Architectures(context.Background(), env(d, map[string]string{}), []string{"armv7-only:1"})
+	if len(a) != 1 || a[0].Status != Warn || !strings.Contains(a[0].Detail, "32-bit") {
+		t.Errorf("arm/v7 on arm64: %+v", a)
+	}
 }

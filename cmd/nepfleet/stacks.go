@@ -309,7 +309,11 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		if p.plan.Empty() {
 			continue
 		}
-		if err := archGate(ctx, stdout, name, p); err != nil {
+		pins := updated
+		if pins == nil && !*noLock {
+			pins, _ = lock.Load(s.Dir)
+		}
+		if err := archGate(ctx, stdout, name, p, pins); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -928,10 +932,22 @@ func composeImages(out *render.Output) (images []string, publishesWeb bool) {
 // archGate refuses a stack with an image that cannot run on this host,
 // before anything is pulled or stopped. Images that only run under binfmt
 // emulation, or that could not be checked, are reported and allowed.
-func archGate(ctx context.Context, stdout io.Writer, name string, p *prepared) error {
+func archGate(ctx context.Context, stdout io.Writer, name string, p *prepared, pins *lock.Lock) error {
 	imgs, _ := composeImages(p.out)
+	// Check what apply deploys: the pinned digest, not what the tag (local
+	// or in the registry) points to today.
+	refs := make([]string, len(imgs))
+	shown := map[string]string{}
+	for i, img := range imgs {
+		refs[i] = img
+		if pins != nil && pins.Images[img] != "" {
+			refs[i] = img + "@" + pins.Images[img] // as deploy pins it
+		}
+		shown[refs[i]] = img
+	}
 	var bad []string
-	for _, a := range doctor.Architectures(ctx, doctor.Host(), imgs) {
+	for _, a := range doctor.Architectures(ctx, doctor.Host(), refs) {
+		a.Image = shown[a.Image]
 		switch a.Status {
 		case doctor.Fail:
 			bad = append(bad, a.Image+": "+a.Detail)
