@@ -30,6 +30,7 @@ import (
 	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/importer"
+	"github.com/Serraniel/nepfleet/internal/kuma"
 	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/secrets"
@@ -321,8 +322,16 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 			}
 			opts.Resolver = e.resolverOnce()
 		}
+		// Monitors of a stack whose containers change go into maintenance in
+		// every configured Uptime Kuma; problems only warn.
+		window := e.openMaintenance(ctx, stdout, p)
 		var res deploy.Result
 		res, err = deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, opts)
+		if window != nil {
+			for _, w := range window.Close(context.WithoutCancel(ctx), nil) {
+				fmt.Fprintf(stdout, "%s: ⚠ %s\n", name, w)
+			}
+		}
 		for _, u := range res.Unpinned {
 			fmt.Fprintf(stdout, "%s: ⚠ not pinned, runs by tag: %s\n", name, u)
 		}
@@ -369,6 +378,50 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 	}
 	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
 	return updated, err
+}
+
+// openMaintenance opens Uptime Kuma maintenance windows when the plan
+// changes what runs (compose file, env file or image pins).
+func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared) *kuma.Window {
+	if len(e.fleet.Spec.UptimeKuma) == 0 {
+		return nil
+	}
+	runtime := false
+	for _, c := range p.plan.Changes {
+		if c.Path == render.ComposeFile || c.Path == render.EnvFile || strings.HasPrefix(c.Path, "image ") {
+			runtime = true
+		}
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(p.out.Files[render.EnvFile]), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(k, "#") {
+			env[k] = strings.Trim(v, "'")
+		}
+	}
+	names := kuma.MonitorNames(p.out.Files[render.ComposeFile], env)
+	if !runtime || len(names) == 0 {
+		return nil
+	}
+	fleetSecrets, err := e.store.Load(filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile))
+	if err != nil {
+		fmt.Fprintf(stdout, "%s: ⚠ Uptime Kuma: cannot read %s: %v\n", p.stack.Metadata.Name, fleet.FleetSecretsFile, err)
+		return nil
+	}
+	var targets []kuma.Target
+	for _, k := range e.fleet.Spec.UptimeKuma {
+		targets = append(targets, kuma.Target{Name: k.Name, URL: k.URL, Username: k.Username, Password: fleetSecrets[k.PasswordSecret]})
+	}
+	what := "update"
+	if p.plan.First {
+		what = "first deployment"
+	}
+	title := fmt.Sprintf("NepFleet: %s of %s", what, p.stack.Metadata.Name)
+	desc := fmt.Sprintf("Started by nepfleet apply on %s. Ends automatically when the stack is healthy or rolled back.", e.host)
+	w, warnings := kuma.Open(ctx, targets, names, title, desc, nil)
+	for _, msg := range warnings {
+		fmt.Fprintf(stdout, "%s: %s\n", p.stack.Metadata.Name, msg)
+	}
+	return w
 }
 
 func cmdRender(args []string, stdout, stderr io.Writer) error {
@@ -433,34 +486,39 @@ func cmdSecret(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	c.register(fs)
+	global := fs.Bool("global", false, "store in fleet.secret.yaml (fleet-wide, e.g. Uptime Kuma passwords): nepfleet secret set --global KEY")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if fs.NArg() != 2 {
-		return errors.New("usage: nepfleet secret set <stack> <KEY>")
+	if (*global && fs.NArg() != 1) || (!*global && fs.NArg() != 2) {
+		return errors.New("usage: nepfleet secret set <stack> <KEY> | nepfleet secret set --global <KEY>")
 	}
 	e, err := c.open()
 	if err != nil {
 		return err
 	}
-	s, err := e.fleet.LoadStack(fs.Arg(0))
+	key := fs.Arg(fs.NArg() - 1)
+	path := filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile)
+	if !*global {
+		s, err := e.fleet.LoadStack(fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		path = filepath.Join(s.Dir, fleet.SecretsFile)
+	}
+	value, err := readSecret(stdout, key)
 	if err != nil {
 		return err
 	}
-	value, err := readSecret(stdout, fs.Arg(1))
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(s.Dir, fleet.SecretsFile)
 	values, err := e.store.Load(path)
 	if err != nil {
 		return err
 	}
-	values[fs.Arg(1)] = value
+	values[key] = value
 	if err := e.store.Save(path, values); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "saved %s in %s (encrypted)\n", fs.Arg(1), path)
+	fmt.Fprintf(stdout, "saved %s in %s (encrypted)\n", key, path)
 	return nil
 }
 

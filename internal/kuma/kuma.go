@@ -182,8 +182,11 @@ func (k *Client) MaintenanceMonitors(ctx context.Context, m Maintenance) ([]int,
 		Msg      string    `json:"msg"`
 		Monitors []Monitor `json:"monitors"`
 	}
-	if err := json.Unmarshal(raw, &r); err != nil || !r.OK {
-		return nil, fmt.Errorf("getMonitorMaintenance: %s %v", r.Msg, err)
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return nil, fmt.Errorf("getMonitorMaintenance: %w", err)
+	}
+	if !r.OK {
+		return nil, fmt.Errorf("getMonitorMaintenance: %s", r.Msg)
 	}
 	ids := make([]int, len(r.Monitors))
 	for i, mon := range r.Monitors {

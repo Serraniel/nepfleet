@@ -33,6 +33,8 @@ type conn struct {
 	waiters map[string][]chan struct{}
 	closed  chan struct{}
 	err     error
+	// stop ends the read loop; it lives as long as the session, not a call.
+	stop context.CancelFunc
 }
 
 func dial(ctx context.Context, base string, hc *http.Client) (*conn, error) {
@@ -50,7 +52,10 @@ func dial(ctx context.Context, base string, hc *http.Client) (*conn, error) {
 	q.Set("EIO", "4")
 	q.Set("transport", "websocket")
 	u.RawQuery = q.Encode()
-	ws, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPClient: hc})
+	ws, res, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPClient: hc})
+	if res != nil && res.Body != nil {
+		_ = res.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", base, err)
 	}
@@ -59,21 +64,58 @@ func dial(ctx context.Context, base string, hc *http.Client) (*conn, error) {
 		waiters: map[string][]chan struct{}{}, closed: make(chan struct{})}
 
 	// Engine.IO open packet, then Socket.IO connect to the default namespace.
-	if _, msg, err := ws.Read(ctx); err != nil || len(msg) == 0 || msg[0] != '0' {
+	_, msg, err := ws.Read(ctx)
+	if err != nil {
 		_ = ws.CloseNow()
-		return nil, fmt.Errorf("unexpected Engine.IO handshake (%q): %v", msg, err)
+		return nil, fmt.Errorf("Engine.IO handshake: %w", err)
+	}
+	if len(msg) == 0 || msg[0] != '0' {
+		_ = ws.CloseNow()
+		return nil, fmt.Errorf("unexpected Engine.IO handshake %q", msg)
 	}
 	if err := ws.Write(ctx, websocket.MessageText, []byte("40")); err != nil {
 		_ = ws.CloseNow()
 		return nil, err
 	}
-	go c.readLoop()
+	session, stop := context.WithCancel(context.WithoutCancel(ctx))
+	c.stop = stop
+	go c.readLoop(session)
+	// Kuma registers its event handlers asynchronously after the connection;
+	// anything sent earlier is silently dropped. It announces the end of that
+	// with loginRequired (or autoLogin when auth is disabled).
+	if err := c.waitAny(ctx, "loginRequired", "autoLogin"); err != nil {
+		c.close()
+		return nil, err
+	}
 	return c, nil
 }
 
-func (c *conn) readLoop() {
+// waitAny blocks until one of the events has arrived.
+func (c *conn) waitAny(ctx context.Context, names ...string) error {
+	c.mu.Lock()
+	for _, n := range names {
+		if _, ok := c.events[n]; ok {
+			c.mu.Unlock()
+			return nil
+		}
+	}
+	w := make(chan struct{})
+	for _, n := range names {
+		c.waiters[n] = append(c.waiters[n], w)
+	}
+	c.mu.Unlock()
+	select {
+	case <-w:
+		return nil
+	case <-c.closed:
+		return errors.New("connection closed during the Socket.IO handshake")
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for Uptime Kuma to accept events: %w", ctx.Err())
+	}
+}
+
+func (c *conn) readLoop(ctx context.Context) {
 	defer close(c.closed)
-	ctx := context.Background()
 	for {
 		_, msg, err := c.ws.Read(ctx)
 		if err != nil {
@@ -112,7 +154,11 @@ func (c *conn) readLoop() {
 			c.mu.Lock()
 			c.events[name] = data
 			for _, w := range c.waiters[name] {
-				close(w)
+				select {
+				case <-w: // already closed through another name
+				default:
+					close(w)
+				}
 			}
 			delete(c.waiters, name)
 			c.mu.Unlock()
@@ -182,7 +228,10 @@ func (c *conn) event(ctx context.Context, name string) (json.RawMessage, error) 
 	}
 }
 
-func (c *conn) close() { _ = c.ws.Close(websocket.StatusNormalClosure, "") }
+func (c *conn) close() {
+	_ = c.ws.Close(websocket.StatusNormalClosure, "")
+	c.stop()
+}
 
 // result is Kuma's usual acknowledgement shape.
 type result struct {
