@@ -40,6 +40,17 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - run: go test -race -count=1 ./...
       - run: go build ./...
+      # The Go tests compare schemas and parser with a small validator; this
+      # checks real files with a full JSON Schema implementation as well.
+      - name: Schemas validate real files
+        run: |
+          set -euo pipefail
+          pipx install check-jsonschema==0.39.0
+          check-jsonschema --check-metaschema schemas/*.schema.json
+          go run ./cmd/nepfleet init /tmp/fleet >/dev/null
+          check-jsonschema --schemafile schemas/fleet.schema.json /tmp/fleet/fleet.yaml
+          git clone -q --depth 1 https://github.com/Serraniel/nepfleet-templates /tmp/templates
+          check-jsonschema --schemafile schemas/template.schema.json /tmp/templates/*/*/template.yaml
 
   e2e:
     runs-on: ubuntu-latest

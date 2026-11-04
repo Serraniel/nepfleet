@@ -235,7 +235,7 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "stack.yaml"), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "stack.yaml"), append([]byte(fleet.Modeline("stack.schema.json")), raw...), 0o600); err != nil {
 		return nil, err
 	}
 	if len(sec) > 0 {

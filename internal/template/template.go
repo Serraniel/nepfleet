@@ -27,10 +27,10 @@ var Builtins = []string{"NEPFLEET_STACK", "NEPFLEET_INGRESS_NETWORK", "TZ"}
 
 // Template is the parsed template.yaml.
 type Template struct {
-	APIVersion string   `yaml:"apiVersion"`
-	Kind       string   `yaml:"kind"`
-	Metadata   Metadata `yaml:"metadata"`
-	Spec       Spec     `yaml:"spec"`
+	APIVersion string   `yaml:"apiVersion" schema:"required;const=nepfleet/v1alpha1"`
+	Kind       string   `yaml:"kind" schema:"required;const=Template"`
+	Metadata   Metadata `yaml:"metadata" schema:"required"`
+	Spec       Spec     `yaml:"spec" schema:"required"`
 
 	// Dir is the directory the template was loaded from.
 	Dir string `yaml:"-"`
@@ -38,10 +38,10 @@ type Template struct {
 
 // Metadata describes the template for catalogues and the UI.
 type Metadata struct {
-	Name        string `yaml:"name"`
-	Title       string `yaml:"title"`
-	Description string `yaml:"description"`
-	Tier        string `yaml:"tier"` // system | app
+	Name        string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
+	Title       string `yaml:"title" schema:"required"`
+	Description string `yaml:"description" schema:"required"`
+	Tier        string `yaml:"tier" schema:"required;enum=system|app"` // system | app
 	Category    string `yaml:"category"`
 	Homepage    string `yaml:"homepage"`
 	Source      string `yaml:"source"`
@@ -50,9 +50,9 @@ type Metadata struct {
 
 // Spec is what NepFleet needs to install, update and migrate the stack.
 type Spec struct {
-	Version    string      `yaml:"version"`
-	Compose    string      `yaml:"compose"`
-	Images     []Image     `yaml:"images"`
+	Version    string      `yaml:"version" schema:"required;pattern=^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$"`
+	Compose    string      `yaml:"compose" schema:"required"`
+	Images     []Image     `yaml:"images" schema:"required;minItems=1"`
 	Supports   Supports    `yaml:"supports"`
 	Inputs     []Input     `yaml:"inputs"`
 	Generate   []Generate  `yaml:"generate"`
@@ -65,10 +65,10 @@ type Spec struct {
 // itself lives only in the compose file, so there is one place to bump it.
 type Image struct {
 	// Name is the image without tag, as written in the compose file.
-	Name string `yaml:"name"`
+	Name string `yaml:"name" schema:"required;pattern=^[^:@]+$"`
 	// Track is the widest update NepFleet applies without a template change:
 	// patch, minor or major. Anything wider opens an issue in the template repo.
-	Track string `yaml:"track"`
+	Track string `yaml:"track" schema:"required;enum=patch|minor|major"`
 }
 
 // Supports flags which NepFleet integrations a template wires up.
@@ -87,8 +87,8 @@ type Supports struct {
 
 // Input is a value the wizard asks the user for.
 type Input struct {
-	Name        string   `yaml:"name"`
-	Type        string   `yaml:"type"`
+	Name        string   `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$"`
+	Type        string   `yaml:"type" schema:"required;enum=string|text|secret|hostname|url|email|int|bool|enum|path"`
 	Title       string   `yaml:"title"`
 	Description string   `yaml:"description"`
 	Required    bool     `yaml:"required"`
@@ -99,21 +99,21 @@ type Input struct {
 
 // Generate is a value NepFleet creates once at install time.
 type Generate struct {
-	Name     string `yaml:"name"`
-	Kind     string `yaml:"kind"` // secret
-	Length   int    `yaml:"length"`
-	Encoding string `yaml:"encoding"`
+	Name     string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$"`
+	Kind     string `yaml:"kind" schema:"required;enum=secret"` // secret
+	Length   int    `yaml:"length" schema:"required;minimum=16;maximum=256"`
+	Encoding string `yaml:"encoding" schema:"enum=base64url|hex|alnum"`
 }
 
 // File is an extra file rendered into the stack directory.
 type File struct {
-	Src  string `yaml:"src"`
-	Dest string `yaml:"dest"`
+	Src  string `yaml:"src" schema:"required"`
+	Dest string `yaml:"dest" schema:"required"`
 }
 
 // Volume is persistent data the stack owns.
 type Volume struct {
-	Name   string `yaml:"name"`
+	Name   string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
 	Backup bool   `yaml:"backup"`
 	// Shared marks data that must follow the service across swarm nodes.
 	Shared bool `yaml:"shared"`
@@ -121,12 +121,12 @@ type Volume struct {
 
 // Migration moves an installed stack from one template version to another.
 type Migration struct {
-	From        string `yaml:"from"`
-	To          string `yaml:"to"`
+	From        string `yaml:"from" schema:"required"`
+	To          string `yaml:"to" schema:"required;pattern=^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$"`
 	Description string `yaml:"description"`
-	Backup      string `yaml:"backup"`   // required | recommended | none
-	Rollback    string `yaml:"rollback"` // restore | revert
-	Steps       []Step `yaml:"steps"`
+	Backup      string `yaml:"backup" schema:"required;enum=required|recommended|none"` // required | recommended | none
+	Rollback    string `yaml:"rollback" schema:"required;enum=restore|revert"`          // restore | revert
+	Steps       []Step `yaml:"steps" schema:"required;minItems=1"`
 }
 
 // Step is one action of a migration.
@@ -144,10 +144,13 @@ var (
 	semverRe  = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
 	composeRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
 
-	inputTypes = []string{"string", "text", "secret", "hostname", "url", "email", "int", "bool", "enum", "path"}
-	encodings  = []string{"", "base64url", "hex", "alnum"}
-	tracks     = []string{"patch", "minor", "major"}
-	tiers      = []string{"system", "app"}
+	inputTypes    = []string{"string", "text", "secret", "hostname", "url", "email", "int", "bool", "enum", "path"}
+	encodings     = []string{"", "base64url", "hex", "alnum"}
+	tracks        = []string{"patch", "minor", "major"}
+	tiers         = []string{"system", "app"}
+	generateKinds = []string{"secret"}
+	backups       = []string{"required", "recommended", "none"}
+	rollbacks     = []string{"restore", "revert"}
 )
 
 // Load reads and strictly decodes dir/template.yaml. It does not validate.
@@ -243,7 +246,7 @@ func (t *Template) Validate() error {
 	}
 	for _, g := range s.Generate {
 		declare("spec.generate", g.Name)
-		if g.Kind != "secret" {
+		if !slices.Contains(generateKinds, g.Kind) {
 			bad("spec.generate %q: kind must be secret", g.Name)
 		}
 		if g.Length < 16 || g.Length > 256 {
@@ -277,10 +280,10 @@ func (t *Template) Validate() error {
 		if mg.From == "" || !semverRe.MatchString(mg.To) {
 			bad("spec.migrations[%d]: from is required and to must be a semantic version", i)
 		}
-		if !slices.Contains([]string{"required", "recommended", "none"}, mg.Backup) {
+		if !slices.Contains(backups, mg.Backup) {
 			bad("spec.migrations[%d]: backup must be required, recommended or none", i)
 		}
-		if !slices.Contains([]string{"restore", "revert"}, mg.Rollback) {
+		if !slices.Contains(rollbacks, mg.Rollback) {
 			bad("spec.migrations[%d]: rollback must be restore or revert", i)
 		}
 		if len(mg.Steps) == 0 {

@@ -1,0 +1,241 @@
+{
+  "$id": "https://raw.githubusercontent.com/Serraniel/nepfleet/main/schemas/fleet.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Fleet is fleet.yaml.",
+  "properties": {
+    "apiVersion": {
+      "const": "nepfleet/v1alpha1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Fleet",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "spec": {
+      "additionalProperties": false,
+      "description": "Spec holds the settings that apply to every stack.",
+      "properties": {
+        "ingressNetwork": {
+          "default": "nepfleet_ingress",
+          "description": "IngressNetwork is the external network Caddy and the stacks share.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "notifications": {
+          "additionalProperties": false,
+          "properties": {
+            "channels": {
+              "additionalProperties": {
+                "additionalProperties": {},
+                "type": "object"
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "routes": {
+              "items": {
+                "additionalProperties": {},
+                "type": "object"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "secrets": {
+          "additionalProperties": false,
+          "properties": {
+            "age": {
+              "description": "Age recipients (public keys) that every secret file is encrypted to.",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "templateSources": {
+          "items": {
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              }
+            ],
+            "properties": {
+              "name": {
+                "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+                "type": "string"
+              },
+              "path": {
+                "description": "Path is a local directory, relative to the fleet repository.",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "ref": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "tz": {
+          "default": "UTC",
+          "description": "TZ is passed to stacks as ${TZ}.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "updates": {
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "default": "off",
+              "enum": [
+                "",
+                "off",
+                "notify",
+                "auto"
+              ],
+              "type": "string"
+            },
+            "images": {
+              "default": "notify",
+              "enum": [
+                "",
+                "off",
+                "notify",
+                "auto"
+              ],
+              "type": "string"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "uptimeKuma": {
+          "description": "UptimeKuma instances get maintenance windows while stacks with their monitors are being changed (docs/maintenance.md).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "passwordSecret": {
+                "description": "PasswordSecret names the key in fleet.secret.yaml holding the password.",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "url": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "username": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "url"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata"
+  ],
+  "title": "NepFleet fleet.yaml",
+  "type": "object"
+}

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -53,7 +54,13 @@ Usage:
 Stack commands take --fleet <dir> (default .), --state <dir> and --host <name>.
 `
 
+// releaseTag matches the versions release builds are stamped with.
+var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
 func main() {
+	if releaseTag.MatchString(version) {
+		fleet.SchemaRef = version // schema links in written files match this release
+	}
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "nepfleet:", err)
 		os.Exit(1)

@@ -94,6 +94,9 @@ func Init(dir string) error {
 		return err
 	}
 	for name, content := range skeleton {
+		if name == "fleet.yaml" {
+			content = Modeline("fleet.schema.json") + content
+		}
 		p := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			return err
