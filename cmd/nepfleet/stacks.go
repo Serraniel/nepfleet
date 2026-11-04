@@ -309,6 +309,10 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		if p.plan.Empty() {
 			continue
 		}
+		if err := archGate(ctx, stdout, name, p); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		if len(p.plan.Destructive) > 0 && !slices.Contains(confirm, name) {
 			if !ask(stdout, fmt.Sprintf("%s has destructive changes. Type the stack name to continue: ", name), name) {
 				errs = append(errs, fmt.Errorf("%s: destructive changes not confirmed (use --confirm %s)", name, name))
@@ -919,4 +923,24 @@ func composeImages(out *render.Output) (images []string, publishesWeb bool) {
 	}
 	sort.Strings(images)
 	return images, publishesWeb
+}
+
+// archGate refuses a stack with an image that cannot run on this host,
+// before anything is pulled or stopped. Images that only run under binfmt
+// emulation, or that could not be checked, are reported and allowed.
+func archGate(ctx context.Context, stdout io.Writer, name string, p *prepared) error {
+	imgs, _ := composeImages(p.out)
+	var bad []string
+	for _, a := range doctor.Architectures(ctx, doctor.Host(), imgs) {
+		switch a.Status {
+		case doctor.Fail:
+			bad = append(bad, a.Image+": "+a.Detail)
+		case doctor.Warn:
+			fmt.Fprintf(stdout, "%s: %s: %s\n", name, a.Image, a.Detail)
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("%s: refusing to deploy images this host cannot run:\n  %s\n  use other images, or install emulation with: nepfleet new binfmt", name, strings.Join(bad, "\n  "))
+	}
+	return nil
 }
