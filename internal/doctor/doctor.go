@@ -49,6 +49,9 @@ type Env struct {
 	FreeBytes func(string) (uint64, error)
 	// Command runs a host command (timedatectl, age-keygen).
 	Command func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// InContainer is true when nepfleet itself runs in a container, where
+	// the host's listeners and Docker's data directory are not visible.
+	InContainer bool
 }
 
 // Host returns an Env backed by the real host.
@@ -67,7 +70,18 @@ func Host() Env {
 		Command: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return exec.CommandContext(ctx, name, args...).Output()
 		},
+		InContainer: inContainer(),
 	}
+}
+
+// inContainer reports whether this process runs in a Docker or Podman container.
+func inContainer() bool {
+	for _, f := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := os.Stat(f); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Input is what the fleet expects of this host.
@@ -126,7 +140,11 @@ func Run(ctx context.Context, e Env, in Input) []Check {
 
 	// Disk.
 	if free, err := e.FreeBytes(info.DockerRootDir); err != nil {
-		add(Check{"Disk", Warn, err.Error(), ""})
+		if e.InContainer {
+			add(Check{"Disk", Warn, "cannot see " + info.DockerRootDir + " from inside the container", "check free space on the host: df -h " + info.DockerRootDir})
+		} else {
+			add(Check{"Disk", Warn, err.Error(), ""})
+		}
 	} else {
 		gb := float64(free) / (1 << 30)
 		c := Check{"Disk", OK, fmt.Sprintf("%.1f GiB free under %s", gb, info.DockerRootDir), ""}
@@ -271,7 +289,13 @@ func ageKey(ctx context.Context, e Env, in Input) Check {
 func portCheck(ctx context.Context, e Env, port int) Check {
 	name := fmt.Sprintf("Port %d", port)
 	listening := false
-	for _, f := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+	// In a container /proc/net shows the container's own network namespace,
+	// so only Docker can tell whether the host port is taken.
+	files := []string{"/proc/net/tcp", "/proc/net/tcp6"}
+	if e.InContainer {
+		files, listening = nil, true
+	}
+	for _, f := range files {
 		raw, err := e.ReadFile(f)
 		if err != nil {
 			continue
@@ -295,6 +319,9 @@ func portCheck(ctx context.Context, e Env, port int) Check {
 	who := strings.TrimSpace(string(out))
 	if strings.Contains(who, "caddy") {
 		return Check{name, OK, "used by " + who, ""}
+	}
+	if who == "" && e.InContainer {
+		return Check{name, Warn, "no container publishes it; host processes are not visible from inside a container", fmt.Sprintf("check on the host: ss -ltn sport = :%d", port)}
 	}
 	if who == "" {
 		who = "a process on the host"

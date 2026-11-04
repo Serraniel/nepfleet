@@ -125,3 +125,27 @@ func TestPlatforms(t *testing.T) {
 		}
 	}
 }
+
+func TestInContainer(t *testing.T) {
+	info := `{"ServerVersion":"29.9.2","Architecture":"x86_64","DockerRootDir":"/var/lib/docker","CgroupVersion":"2"}`
+	// The container's own /proc/net/tcp is empty, so it must not be trusted.
+	files := map[string]string{"/key": "AGE-SECRET-KEY-1", "/proc/net/tcp": ""}
+	in := Input{Recipients: []string{"age1fleet"}, AgeKeyFile: "/key", Ingress: true}
+
+	e := env(fakeDocker{"info": info, "compose version": "5.7.0\n", "ps --filter publish=": ""}, files)
+	e.InContainer = true
+	e.FreeBytes = func(string) (uint64, error) { return 0, errors.New("no such file or directory") }
+	cs := byName(Run(context.Background(), e, in))
+	if c := cs["Port 80"]; c.Status != Warn || !strings.Contains(c.Fix, "ss -ltn") {
+		t.Errorf("port 80 in a container: %+v", c)
+	}
+	if c := cs["Disk"]; c.Status != Warn || !strings.Contains(c.Detail, "inside the container") {
+		t.Errorf("disk in a container: %+v", c)
+	}
+
+	e.Docker = fakeDocker{"info": info, "compose version": "5.7.0\n", "ps --filter publish=": "nginx-legacy (nginx:1)\n"}
+	cs = byName(Run(context.Background(), e, in))
+	if c := cs["Port 443"]; c.Status != Fail || !strings.Contains(c.Detail, "nginx-legacy") {
+		t.Errorf("published port in a container: %+v", c)
+	}
+}
