@@ -61,6 +61,8 @@ jobs:
       - run: go build -o /tmp/nepfleet ./cmd/nepfleet
       - name: Apply, health-gated rollback, git rollback
         run: test/integration/e2e.sh /tmp/nepfleet templates
+      - name: Import a running Compose project without recreating it
+        run: test/integration/import.sh /tmp/nepfleet
 
   vulncheck:
     runs-on: ubuntu-latest

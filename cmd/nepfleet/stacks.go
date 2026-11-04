@@ -23,6 +23,7 @@ import (
 
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/importer"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/secrets"
 	"github.com/Serraniel/nepfleet/internal/source"
@@ -523,3 +524,89 @@ type multiFlag []string
 
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
+
+func cmdImport(args []string, stdout, stderr io.Writer) error {
+	if len(args) < 1 || args[0] != "compose" {
+		return errors.New("usage: nepfleet import compose [project...] [--all] [--target host]")
+	}
+	var c common
+	fs := flag.NewFlagSet("import compose", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	c.register(fs)
+	all := fs.Bool("all", false, "import every project found")
+	target := fs.String("target", "", "spec.target for the imported stacks (default: --host)")
+	encryptAll := fs.Bool("encrypt-all", false, "store every env value encrypted, not only secret-looking names")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *target == "" {
+		*target = c.host
+	}
+	e, err := c.open()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	projects, err := importer.ListCompose(ctx, deploy.Docker{})
+	if err != nil {
+		return err
+	}
+	if fs.NArg() == 0 && !*all {
+		fmt.Fprintln(stdout, "Compose projects on this host (import with `nepfleet import compose <name>` or --all):")
+		for _, p := range projects {
+			fmt.Fprintf(stdout, "  %-24s %-14s %s\n", p.Name, p.Status, strings.Join(p.ConfigFiles, ", "))
+		}
+		return nil
+	}
+	want := map[string]bool{}
+	for _, n := range fs.Args() {
+		want[n] = true
+	}
+	var errs []error
+	for _, p := range projects {
+		if !*all && !want[p.Name] {
+			continue
+		}
+		delete(want, p.Name)
+		res, err := importer.ImportCompose(ctx, deploy.Docker{}, e.fleet, e.store, p, importer.Options{Target: *target, EncryptAll: *encryptAll})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", p.Name, err))
+			continue
+		}
+		fmt.Fprintf(stdout, "imported %s → %s\n  values: %s\n  secrets (encrypted): %s\n  volumes (kept as they are): %s\n",
+			p.Name, relTo(e.fleet.Dir, res.Dir), orNone(res.Values), orNone(res.Secrets), orNone(res.Volumes))
+		if *target == c.host || *target == "local" {
+			// The running containers are the applied state: record it, so the
+			// first plan is empty and apply has nothing to change.
+			s, err := e.fleet.LoadStack(p.Name)
+			if err == nil {
+				var prep *prepared
+				if prep, err = e.prepare(s); err == nil {
+					err = deploy.Adopt(prep.plan.Dir, prep.out)
+				}
+			}
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: imported, but recording the running state failed: %w", p.Name, err))
+				continue
+			}
+			fmt.Fprintf(stdout, "  adopted: the running containers are now the applied state (plan is empty)\n")
+		}
+		for _, w := range res.Warnings {
+			fmt.Fprintf(stdout, "  ⚠ %s\n", w)
+		}
+	}
+	for n := range want {
+		errs = append(errs, fmt.Errorf("no compose project %q on this host", n))
+	}
+	if len(errs) == 0 {
+		fmt.Fprintln(stdout, "\nNext: review and commit the stack. `nepfleet plan` shows nothing to do; manage these projects only through NepFleet from now on.")
+	}
+	return errors.Join(errs...)
+}
+
+func orNone(s []string) string {
+	if len(s) == 0 {
+		return "none"
+	}
+	return strings.Join(s, ", ")
+}

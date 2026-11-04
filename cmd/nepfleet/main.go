@@ -42,6 +42,7 @@ Usage:
   nepfleet secret check                 fail if any *.secret.yaml is not encrypted
   nepfleet history <stack>              versions of a stack in the fleet repository
   nepfleet rollback <stack> [commit]    restore an earlier version, commit and apply
+  nepfleet import compose [project...]  adopt running Compose projects (lists them without args)
   nepfleet template validate <path>...  validate templates (searches recursively)
   nepfleet serve [flags]                run the optional HTTP API
   nepfleet version                      print the version
@@ -97,6 +98,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdHistory(args[1:], stdout, stderr)
 	case "rollback":
 		return cmdRollback(args[1:], stdout, stderr)
+	case "import":
+		return cmdImport(args[1:], stdout, stderr)
 	}
 	fmt.Fprint(stderr, usage)
 	return fmt.Errorf("unknown command %q", args[0])
