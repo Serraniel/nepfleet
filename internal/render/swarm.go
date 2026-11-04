@@ -82,6 +82,26 @@ func ForSwarm(compose []byte) ([]byte, error) {
 	return yaml.Marshal(&doc)
 }
 
+// PinImages rewrites services.*.image values found in pins to image@digest.
+func PinImages(compose []byte, pins map[string]string) ([]byte, error) {
+	if len(pins) == 0 {
+		return compose, nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(compose, &doc); err != nil {
+		return nil, err
+	}
+	services := mapGet(doc.Content[0], "services")
+	for i := 1; services != nil && i < len(services.Content); i += 2 {
+		if img := mapGet(services.Content[i], "image"); img != nil {
+			if d, ok := pins[img.Value]; ok {
+				img.Value += "@" + d
+			}
+		}
+	}
+	return yaml.Marshal(&doc)
+}
+
 func mapGet(m *yaml.Node, key string) *yaml.Node {
 	if m == nil || m.Kind != yaml.MappingNode {
 		return nil

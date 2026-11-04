@@ -51,6 +51,16 @@ A plain compose stack is a valid stack. You can paste any `compose.yaml` and Nep
 
 Swarm stacks and Portainer follow with their own issues.
 
+## `lock.yaml`
+
+`apply` pins every image to the digest it runs and writes `stacks/<name>/lock.yaml`; commit it with the stack.
+
+- **New images** are locked to what already runs on the host, if anything does. Otherwise they are resolved from the registry. Locking therefore never changes a running image.
+- **A moved tag** (for example `:1` rebuilt upstream) changes nothing until you run `nepfleet apply --update-lock`, which re-resolves every image. That is how image updates become git commits.
+- **Rollback** of a stack restores its old `lock.yaml`, so exactly the old digests run again.
+- **How images are pinned:** in Compose mode the digest is pulled and tagged locally, so the compose file and its config hash stay unchanged. In Swarm mode the generated stack file uses `image:tag@digest`.
+- **Images that cannot be resolved,** such as local builds or private registries without credentials, run by tag. `apply` reports them.
+
 ## Rules
 
 - NepFleet commits only what it owns, such as `lock.yaml`, rendered output and imported stacks. Each commit message says why the change was made.

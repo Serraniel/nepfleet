@@ -21,9 +21,12 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/Serraniel/neptide/pkg/registry"
+
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/importer"
+	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/secrets"
 	"github.com/Serraniel/nepfleet/internal/source"
@@ -74,6 +77,7 @@ type env struct {
 	fleet    *fleet.Fleet
 	store    secrets.SOPS
 	resolver *source.Resolver
+	reg      *registry.Client
 }
 
 func (c common) open() (*env, error) {
@@ -90,6 +94,24 @@ func (c common) open() (*env, error) {
 }
 
 // stacks returns the named stacks, or all stacks for this host.
+// resolverOnce builds the registry resolver with Docker's credentials.
+func (e *env) resolverOnce() lock.Resolver {
+	if e.reg == nil {
+		c := registry.New()
+		c.UserAgent = "nepfleet/" + version
+		cfgPath := filepath.Join(os.Getenv("DOCKER_CONFIG"), "config.json")
+		if os.Getenv("DOCKER_CONFIG") == "" {
+			h, _ := os.UserHomeDir()
+			cfgPath = filepath.Join(h, ".docker", "config.json")
+		}
+		if creds, err := registry.LoadDockerConfig(cfgPath); err == nil {
+			c.Creds = creds.Lookup
+		}
+		e.reg = c
+	}
+	return lock.Registry{Client: e.reg}
+}
+
 func (e *env) stacks(names []string) ([]*fleet.Stack, error) {
 	if len(names) > 0 {
 		var out []*fleet.Stack
@@ -130,7 +152,11 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
-	p, err := deploy.PlanStack(s.Metadata.Name, s.Spec.Mode, deploy.StackDir(e.stateDir, s.Metadata.Name), out)
+	l, err := lock.Load(s.Dir)
+	if err != nil {
+		return nil, err
+	}
+	p, err := deploy.PlanStack(s.Metadata.Name, s.Spec.Mode, deploy.StackDir(e.stateDir, s.Metadata.Name), out, l.Images)
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +239,8 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	var confirm multiFlag
 	fs.Var(&confirm, "confirm", "allow destructive changes for this stack (repeatable)")
 	wait := fs.Duration("wait", 3*time.Minute, "health gate timeout per stack")
+	noLock := fs.Bool("no-lock", false, "do not pin images to digests (lock.yaml)")
+	updateLock := fs.Bool("update-lock", false, "re-resolve every image tag to its current digest")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -237,7 +265,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 		printPlan(stdout, p.plan)
-		if p.plan.Empty() {
+		if p.plan.Empty() && !*updateLock {
 			continue
 		}
 		if len(p.plan.Destructive) > 0 && !slices.Contains(confirm, name) {
@@ -259,9 +287,29 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 			}
 			fmt.Fprintf(stdout, "%s: generated secrets saved; commit %s\n", name, filepath.Join(s.Dir, fleet.SecretsFile))
 		}
-		err = deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, deploy.Options{
+		opts := deploy.Options{
 			WaitTimeout: *wait, Commit: commit, Dirty: dirty, IngressNetwork: e.fleet.Spec.IngressNetwork,
-		})
+			UpdateLock: *updateLock,
+		}
+		if !*noLock {
+			if opts.Lock, err = lock.Load(s.Dir); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			opts.Resolver = e.resolverOnce()
+		}
+		var res deploy.Result
+		res, err = deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, opts)
+		for _, u := range res.Unpinned {
+			fmt.Fprintf(stdout, "%s: ⚠ not pinned, runs by tag: %s\n", name, u)
+		}
+		if res.LockChanged {
+			if serr := opts.Lock.Save(s.Dir); serr != nil {
+				errs = append(errs, serr)
+			} else {
+				fmt.Fprintf(stdout, "%s: image digests pinned; commit %s\n", name, filepath.Join(s.Dir, lock.File))
+			}
+		}
 		switch {
 		case errors.Is(err, deploy.ErrRolledBack):
 			fmt.Fprintf(stdout, "%s: ✗ %v\n", name, err)
