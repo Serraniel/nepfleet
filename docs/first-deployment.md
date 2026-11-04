@@ -54,15 +54,27 @@ spec:
 nepfleet secret set caddy DNS_API_TOKEN        # only with a DNS provider; prompts without echo
 ```
 
-Add the others the same way. Each template's `template.yaml` lists the values it needs.
+Add the others the same way. Each template's `template.yaml` lists the values it needs, and `nepfleet plan` reports any that are missing or invalid.
 
 | Stack | Template | Values |
 |---|---|---|
 | `system/dozzle` | `dozzle` | `DOMAIN` |
 | `system/uptime-kuma` | `uptime-kuma` | `DOMAIN`, `KUMA_USERNAME` + `secret set … KUMA_PASSWORD` |
 | `system/homepage` | `homepage` | `DOMAIN` |
-| `system/volume-backup` | `volume-backup` | `AGE_RECIPIENTS` (your public key), optional `SSH_*` for a Storage Box |
+| `system/volume-backup` | `volume-backup` | `AGE_RECIPIENTS` (your public key); for a Storage Box `SSH_HOST_NAME`, `SSH_USER`, `SSH_HOST_PUBLIC_KEY` + `secret set … SSH_PASSWORD` |
 | `system/neptide` | `neptide` | `DOCKER_GID` (`getent group docker \| cut -d: -f3`), `MONITOR_ONLY: "true"` to start safely |
+
+Once Uptime Kuma runs and you have created its admin account, let NepFleet put monitors into maintenance while it changes a stack ([details](maintenance.md)):
+
+```yaml
+# fleet.yaml, under spec:
+  uptimeKuma:
+    - {name: global, url: "https://status.example.org", username: admin, passwordSecret: KUMA_PASSWORD}
+```
+
+```sh
+nepfleet secret set --global KUMA_PASSWORD
+```
 
 ## 5. Bring over what already runs
 
@@ -107,4 +119,4 @@ git add -A && git commit -m "feat: initial fleet" && git push
 
 ## Known limits of this version
 
-Single host only. There is no web UI yet. Host OS updates, Swarm, tunnels, Uptime Kuma maintenance windows and volume snapshots before updates are planned; see the [roadmap](roadmap.md). Until volume snapshots exist, keep `volume-backup` enabled, and run neptide in monitor-only mode for stacks with databases.
+Single host only. There is no web UI yet. Host OS updates, Swarm, tunnels, scheduled maintenance announcements and volume snapshots before updates are planned; see the [roadmap](roadmap.md). Until volume snapshots exist, keep `volume-backup` enabled, and run neptide in monitor-only mode for stacks with databases.
