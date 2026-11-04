@@ -38,14 +38,14 @@ type Template struct {
 
 // Metadata describes the template for catalogues and the UI.
 type Metadata struct {
-	Name        string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
-	Title       string `yaml:"title" schema:"required"`
-	Description string `yaml:"description" schema:"required"`
-	Tier        string `yaml:"tier" schema:"required;enum=system|app"` // system | app
-	Category    string `yaml:"category"`
-	Homepage    string `yaml:"homepage"`
-	Source      string `yaml:"source"`
-	Icon        string `yaml:"icon"`
+	Name        string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$" json:"name,omitempty"`
+	Title       string `yaml:"title" schema:"required" json:"title,omitempty"`
+	Description string `yaml:"description" schema:"required" json:"description,omitempty"`
+	Tier        string `yaml:"tier" schema:"required;enum=system|app" json:"tier,omitempty"` // system | app
+	Category    string `yaml:"category" json:"category,omitempty"`
+	Homepage    string `yaml:"homepage" json:"homepage,omitempty"`
+	Source      string `yaml:"source" json:"source,omitempty"`
+	Icon        string `yaml:"icon" json:"icon,omitempty"`
 }
 
 // Spec is what NepFleet needs to install, update and migrate the stack.
@@ -65,44 +65,44 @@ type Spec struct {
 // itself lives only in the compose file, so there is one place to bump it.
 type Image struct {
 	// Name is the image without tag, as written in the compose file.
-	Name string `yaml:"name" schema:"required;pattern=^[^:@]+$"`
+	Name string `yaml:"name" schema:"required;pattern=^[^:@]+$" json:"name,omitempty"`
 	// Track is the widest update NepFleet applies without a template change:
 	// patch, minor or major. Anything wider opens an issue in the template repo.
-	Track string `yaml:"track" schema:"required;enum=patch|minor|major"`
+	Track string `yaml:"track" schema:"required;enum=patch|minor|major" json:"track,omitempty"`
 }
 
 // Supports flags which NepFleet integrations a template wires up.
 type Supports struct {
-	Swarm      bool `yaml:"swarm"`
-	ARM64      bool `yaml:"arm64"`
-	Ingress    bool `yaml:"ingress"`
-	Monitoring bool `yaml:"monitoring"`
-	StatusPage bool `yaml:"statusPage"`
-	Dashboard  bool `yaml:"dashboard"`
-	Logs       bool `yaml:"logs"`
-	AutoUpdate bool `yaml:"autoUpdate"`
-	Backup     bool `yaml:"backup"`
-	SSO        bool `yaml:"sso"`
+	Swarm      bool `yaml:"swarm" json:"swarm"`
+	ARM64      bool `yaml:"arm64" json:"arm64"`
+	Ingress    bool `yaml:"ingress" json:"ingress"`
+	Monitoring bool `yaml:"monitoring" json:"monitoring"`
+	StatusPage bool `yaml:"statusPage" json:"statusPage"`
+	Dashboard  bool `yaml:"dashboard" json:"dashboard"`
+	Logs       bool `yaml:"logs" json:"logs"`
+	AutoUpdate bool `yaml:"autoUpdate" json:"autoUpdate"`
+	Backup     bool `yaml:"backup" json:"backup"`
+	SSO        bool `yaml:"sso" json:"sso"`
 }
 
 // Input is a value the wizard asks the user for.
 type Input struct {
-	Name        string   `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$"`
-	Type        string   `yaml:"type" schema:"required;enum=string|text|secret|hostname|url|email|int|bool|enum|path"`
-	Title       string   `yaml:"title"`
-	Description string   `yaml:"description"`
-	Required    bool     `yaml:"required"`
-	Default     string   `yaml:"default"`
-	Options     []string `yaml:"options"`
-	Pattern     string   `yaml:"pattern"`
+	Name        string   `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$" json:"name,omitempty"`
+	Type        string   `yaml:"type" schema:"required;enum=string|text|secret|hostname|url|email|int|bool|enum|path" json:"type,omitempty"`
+	Title       string   `yaml:"title" json:"title,omitempty"`
+	Description string   `yaml:"description" json:"description,omitempty"`
+	Required    bool     `yaml:"required" json:"required,omitempty"`
+	Default     string   `yaml:"default" json:"default,omitempty"`
+	Options     []string `yaml:"options" json:"options,omitempty"`
+	Pattern     string   `yaml:"pattern" json:"pattern,omitempty"`
 }
 
 // Generate is a value NepFleet creates once at install time.
 type Generate struct {
-	Name     string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$"`
-	Kind     string `yaml:"kind" schema:"required;enum=secret"` // secret
-	Length   int    `yaml:"length" schema:"required;minimum=16;maximum=256"`
-	Encoding string `yaml:"encoding" schema:"enum=base64url|hex|alnum"`
+	Name     string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$" json:"name,omitempty"`
+	Kind     string `yaml:"kind" schema:"required;enum=secret" json:"kind,omitempty"` // secret
+	Length   int    `yaml:"length" schema:"required;minimum=16;maximum=256" json:"length,omitempty"`
+	Encoding string `yaml:"encoding" schema:"enum=base64url|hex|alnum" json:"encoding,omitempty"`
 }
 
 // File is an extra file rendered into the stack directory.
@@ -113,10 +113,10 @@ type File struct {
 
 // Volume is persistent data the stack owns.
 type Volume struct {
-	Name   string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
-	Backup bool   `yaml:"backup"`
+	Name   string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$" json:"name,omitempty"`
+	Backup bool   `yaml:"backup" json:"backup,omitempty"`
 	// Shared marks data that must follow the service across swarm nodes.
-	Shared bool `yaml:"shared"`
+	Shared bool `yaml:"shared" json:"shared,omitempty"`
 }
 
 // Migration moves an installed stack from one template version to another.
