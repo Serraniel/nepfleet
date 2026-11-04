@@ -10,12 +10,13 @@ import (
 )
 
 // isIntegration reports whether a label is read from swarm *service* labels
-// by caddy-docker-proxy (caddy, caddy.*, caddy_N…), AutoKuma, Homepage or neptide.
+// by caddy-docker-proxy (caddy, caddy.*, caddy_N…), AutoKuma, Homepage,
+// neptide or docker-volume-backup.
 func isIntegration(k string) bool {
 	if k == "caddy" || strings.HasPrefix(k, "caddy.") || strings.HasPrefix(k, "caddy_") {
 		return true
 	}
-	for _, p := range []string{"kuma.", "homepage.", "neptide."} {
+	for _, p := range []string{"kuma.", "homepage.", "neptide.", "docker-volume-backup."} {
 		if strings.HasPrefix(k, p) {
 			return true
 		}

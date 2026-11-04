@@ -109,6 +109,7 @@ func TestForSwarm(t *testing.T) {
       caddy: app.example.org # route
       caddy.reverse_proxy: "{{upstreams 80}}"
       com.example.keep: "yes"
+      docker-volume-backup.stop-during-backup: "true"
     deploy:
       replicas: 2
   worker:
@@ -124,6 +125,9 @@ func TestForSwarm(t *testing.T) {
 		}
 	}
 	webDeploy := s[strings.Index(s, "deploy:"):strings.Index(s, "worker:")]
+	if !strings.Contains(webDeploy, "docker-volume-backup.stop-during-backup") {
+		t.Errorf("backup label not moved to deploy.labels:\n%s", s)
+	}
 	if !strings.Contains(webDeploy, "caddy: app.example.org") || !strings.Contains(webDeploy, "caddy.reverse_proxy") {
 		t.Errorf("caddy labels not moved to deploy.labels:\n%s", s)
 	}
