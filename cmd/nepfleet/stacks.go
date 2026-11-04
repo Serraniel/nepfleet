@@ -165,7 +165,11 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &prepared{stack: s, out: out, plan: p, secrets: sec}, nil
+	// Exact per-service steps from compose; without docker they stay marked approximate.
+	_ = p.RefineServices(context.Background(), deploy.Docker{}, out)
+	pr := &prepared{stack: s, out: out, plan: p, secrets: sec}
+	e.addMaintenanceStep(pr)
+	return pr, nil
 }
 
 func printPlan(w io.Writer, p *deploy.Plan) {
@@ -191,6 +195,20 @@ func printPlan(w io.Writer, p *deploy.Plan) {
 	}
 	for _, d := range p.Destructive {
 		fmt.Fprintf(w, "  ⚠ DESTRUCTIVE: %s\n", d)
+	}
+	if len(p.Steps) > 0 {
+		if p.Approximate {
+			fmt.Fprintln(w, "  steps (approximate: docker was not reachable to compute them exactly):")
+		} else {
+			fmt.Fprintln(w, "  steps:")
+		}
+		for i, s := range p.Steps {
+			mark := ""
+			if s.Destructive {
+				mark = " ⚠"
+			}
+			fmt.Fprintf(w, "    %d. %s%s\n", i+1, s.Text, mark)
+		}
 	}
 }
 
@@ -383,7 +401,42 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 		fmt.Fprintf(stderr, "%s: ⚠ cannot resolve %s, its pin stays as is\n", p.stack.Metadata.Name, s)
 	}
 	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
+	if err == nil {
+		_ = p.plan.RefineServices(ctx, deploy.Docker{}, p.out)
+	}
 	return updated, err
+}
+
+// addMaintenanceStep lists the Uptime Kuma window apply will open, before
+// the first step that touches containers.
+func (e *env) addMaintenanceStep(p *prepared) {
+	if len(e.fleet.Spec.UptimeKuma) == 0 || !touchesRuntime(p.plan) {
+		return
+	}
+	refs := kuma.MonitorRefs(p.out.Files[render.ComposeFile], render.EnvValues(p.out.Files[render.EnvFile]))
+	if len(refs) == 0 {
+		return
+	}
+	var names []string
+	for _, k := range e.fleet.Spec.UptimeKuma {
+		names = append(names, k.Name)
+	}
+	step := deploy.Step{Kind: "maintenance", Text: fmt.Sprintf("put %d monitor(s) into maintenance in Uptime Kuma %s until the stack is healthy", len(refs), strings.Join(names, ", "))}
+	for i, s := range p.plan.Steps {
+		if s.Kind == "image" || s.Kind == "service" || s.Kind == "health" {
+			p.plan.Steps = append(p.plan.Steps[:i], append([]deploy.Step{step}, p.plan.Steps[i:]...)...)
+			return
+		}
+	}
+}
+
+func touchesRuntime(p *deploy.Plan) bool {
+	for _, c := range p.Changes {
+		if c.Path == render.ComposeFile || c.Path == render.EnvFile || strings.HasPrefix(c.Path, "image ") {
+			return true
+		}
+	}
+	return false
 }
 
 // openMaintenance opens Uptime Kuma maintenance windows when the plan
@@ -392,19 +445,8 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 	if len(e.fleet.Spec.UptimeKuma) == 0 {
 		return nil
 	}
-	runtime := false
-	for _, c := range p.plan.Changes {
-		if c.Path == render.ComposeFile || c.Path == render.EnvFile || strings.HasPrefix(c.Path, "image ") {
-			runtime = true
-		}
-	}
-	env := map[string]string{}
-	for _, line := range strings.Split(string(p.out.Files[render.EnvFile]), "\n") {
-		if k, v, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(k, "#") {
-			env[k] = strings.Trim(v, "'")
-		}
-	}
-	refs := kuma.MonitorRefs(p.out.Files[render.ComposeFile], env)
+	runtime := touchesRuntime(p.plan)
+	refs := kuma.MonitorRefs(p.out.Files[render.ComposeFile], render.EnvValues(p.out.Files[render.EnvFile]))
 	if !runtime || len(refs) == 0 {
 		return nil
 	}
@@ -855,12 +897,7 @@ func ageKeyFile() string {
 // composeImages lists the image references of a rendered stack (env values
 // substituted) and whether it publishes port 80 or 443.
 func composeImages(out *render.Output) (images []string, publishesWeb bool) {
-	env := map[string]string{}
-	for _, line := range strings.Split(string(out.Files[render.EnvFile]), "\n") {
-		if k, v, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(k, "#") {
-			env[k] = strings.Trim(v, "'")
-		}
-	}
+	env := render.EnvValues(out.Files[render.EnvFile])
 	var doc struct {
 		Services map[string]struct {
 			Image string `yaml:"image"`

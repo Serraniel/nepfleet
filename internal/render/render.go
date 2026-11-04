@@ -223,6 +223,23 @@ func dotenv(env map[string]string) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// EnvValues reads an env file written by dotenv (KEY='value' lines) back
+// into a map. It is the one parser for rendered env files.
+func EnvValues(envFile []byte) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(string(envFile), "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.HasPrefix(k, "#") {
+			continue
+		}
+		if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+			v = v[1 : len(v)-1]
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // substitute replaces ${NAME} for known names; $${ becomes a literal ${.
 func substitute(raw []byte, env map[string]string) []byte {
 	pairs := []string{"$${", "\x00"}

@@ -238,3 +238,84 @@ func TestSwarmRollbackPinsRunningDigest(t *testing.T) {
 		t.Fatalf("rollback deploy does not pin the previously running digest:\n%s", last)
 	}
 }
+
+func TestSteps(t *testing.T) {
+	dir := t.TempDir()
+	r := &fakeRunner{}
+	v1 := output("services:\n  web: {image: 'nginx:1', environment: {A: '${X}'}}\n  worker: {image: 'busybox:1'}\n", "X='1'\n")
+	p, _ := PlanStack("app", "compose", dir, v1, nil)
+	var kinds []string
+	for _, s := range p.Steps {
+		kinds = append(kinds, s.Kind+":"+s.Service)
+	}
+	if got := strings.Join(kinds, " "); got != "files: service:web service:worker health: record:" {
+		t.Fatalf("first deployment steps = %s", got)
+	}
+	if _, err := Apply(context.Background(), r, p, v1, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// X changes web's effective config (through the env file), worker goes away,
+	// db is new; the image pin of busybox is irrelevant once worker is gone.
+	v2 := output("services:\n  web: {image: 'nginx:1', environment: {A: '${X}'}}\n  db: {image: 'postgres:18'}\n", "X='2'\n")
+	p, _ = PlanStack("app", "compose", dir, v2, nil)
+	var texts []string
+	for _, s := range p.Steps {
+		texts = append(texts, s.Text)
+		if s.Service == "worker" && !s.Destructive {
+			t.Error("removing a service must be marked destructive")
+		}
+	}
+	all := strings.Join(texts, "\n")
+	for _, want := range []string{"create db", "recreate web", "remove worker"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in steps:\n%s", want, all)
+		}
+	}
+	// Unchanged plan: no steps at all.
+	if _, err := Apply(context.Background(), r, p, v2, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := PlanStack("app", "compose", dir, v2, nil); len(p.Steps) != 0 {
+		t.Errorf("empty plan has steps: %+v", p.Steps)
+	}
+}
+
+// hashRunner answers `config --hash` from the rendered .env in the directory.
+type hashRunner struct{ calls int }
+
+func (h *hashRunner) Run(_ context.Context, dir string, args ...string) ([]byte, error) {
+	if !strings.Contains(strings.Join(args, " "), "config --hash") {
+		return nil, nil
+	}
+	h.calls++
+	env, _ := os.ReadFile(filepath.Join(dir, ".env"))
+	// web's hash follows the env file (as compose's would for $TAG), side's never changes.
+	return []byte("web " + fingerprint(string(env)) + "\nside fixed\n"), nil
+}
+
+func TestRefineServicesUsesComposeHashes(t *testing.T) {
+	dir := t.TempDir()
+	v1 := output("services:\n  web: {image: 'nginx:$TAG'}\n  side: {image: 'x:1'}\n", "TAG='1'\n")
+	p, _ := PlanStack("app", "compose", dir, v1, nil)
+	if _, err := Apply(context.Background(), &fakeRunner{}, p, v1, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	v2 := output("services:\n  web: {image: 'nginx:$TAG'}\n  side: {image: 'x:1'}\n", "TAG='2'\n")
+	p, _ = PlanStack("app", "compose", dir, v2, nil)
+	if !p.Approximate {
+		t.Error("steps without compose must be marked approximate")
+	}
+	r := &hashRunner{}
+	if err := p.RefineServices(context.Background(), r, v2); err != nil {
+		t.Fatal(err)
+	}
+	var svc []string
+	for _, s := range p.Steps {
+		if s.Kind == "service" {
+			svc = append(svc, s.Text)
+		}
+	}
+	if p.Approximate || r.calls != 2 || len(svc) != 1 || !strings.HasPrefix(svc[0], "recreate web") {
+		t.Fatalf("approximate=%v calls=%d service steps=%v", p.Approximate, r.calls, svc)
+	}
+}
