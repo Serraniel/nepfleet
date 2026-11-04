@@ -23,7 +23,10 @@
       "required": [
         "name"
       ],
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "spec": {
       "additionalProperties": false,
@@ -32,7 +35,11 @@
         "ingressNetwork": {
           "default": "nepfleet_ingress",
           "description": "IngressNetwork is the external network Caddy and the stacks share.",
-          "type": "string"
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
         },
         "notifications": {
           "additionalProperties": false,
@@ -42,17 +49,26 @@
                 "additionalProperties": {},
                 "type": "object"
               },
-              "type": "object"
+              "type": [
+                "object",
+                "null"
+              ]
             },
             "routes": {
               "items": {
                 "additionalProperties": {},
                 "type": "object"
               },
-              "type": "array"
+              "type": [
+                "array",
+                "null"
+              ]
             }
           },
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "secrets": {
           "additionalProperties": false,
@@ -60,16 +76,38 @@
             "age": {
               "description": "Age recipients (public keys) that every secret file is encrypted to.",
               "items": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
-              "type": "array"
+              "type": [
+                "array",
+                "null"
+              ]
             }
           },
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "templateSources": {
           "items": {
             "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              }
+            ],
             "properties": {
               "name": {
                 "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
@@ -77,13 +115,25 @@
               },
               "path": {
                 "description": "Path is a local directory, relative to the fleet repository.",
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "ref": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "url": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               }
             },
             "required": [
@@ -91,12 +141,19 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "tz": {
           "default": "UTC",
           "description": "TZ is passed to stacks as ${TZ}.",
-          "type": "string"
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
         },
         "updates": {
           "additionalProperties": false,
@@ -104,6 +161,7 @@
             "host": {
               "default": "off",
               "enum": [
+                "",
                 "off",
                 "notify",
                 "auto"
@@ -113,6 +171,7 @@
             "images": {
               "default": "notify",
               "enum": [
+                "",
                 "off",
                 "notify",
                 "auto"
@@ -120,7 +179,10 @@
               "type": "string"
             }
           },
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "uptimeKuma": {
           "description": "UptimeKuma instances get maintenance windows while stacks with their monitors are being changed (docs/maintenance.md).",
@@ -128,17 +190,27 @@
             "additionalProperties": false,
             "properties": {
               "name": {
+                "minLength": 1,
                 "type": "string"
               },
               "passwordSecret": {
                 "description": "PasswordSecret names the key in fleet.secret.yaml holding the password.",
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "url": {
+                "minLength": 1,
                 "type": "string"
               },
               "username": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               }
             },
             "required": [
@@ -147,10 +219,16 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     }
   },
   "required": [

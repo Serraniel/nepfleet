@@ -52,7 +52,7 @@ type Metadata struct {
 type Spec struct {
 	Version    string      `yaml:"version" schema:"required;pattern=^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$"`
 	Compose    string      `yaml:"compose" schema:"required"`
-	Images     []Image     `yaml:"images" schema:"required"`
+	Images     []Image     `yaml:"images" schema:"required;minItems=1"`
 	Supports   Supports    `yaml:"supports"`
 	Inputs     []Input     `yaml:"inputs"`
 	Generate   []Generate  `yaml:"generate"`
@@ -126,7 +126,7 @@ type Migration struct {
 	Description string `yaml:"description"`
 	Backup      string `yaml:"backup" schema:"required;enum=required|recommended|none"` // required | recommended | none
 	Rollback    string `yaml:"rollback" schema:"required;enum=restore|revert"`          // restore | revert
-	Steps       []Step `yaml:"steps" schema:"required"`
+	Steps       []Step `yaml:"steps" schema:"required;minItems=1"`
 }
 
 // Step is one action of a migration.
@@ -144,10 +144,13 @@ var (
 	semverRe  = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
 	composeRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
 
-	inputTypes = []string{"string", "text", "secret", "hostname", "url", "email", "int", "bool", "enum", "path"}
-	encodings  = []string{"", "base64url", "hex", "alnum"}
-	tracks     = []string{"patch", "minor", "major"}
-	tiers      = []string{"system", "app"}
+	inputTypes    = []string{"string", "text", "secret", "hostname", "url", "email", "int", "bool", "enum", "path"}
+	encodings     = []string{"", "base64url", "hex", "alnum"}
+	tracks        = []string{"patch", "minor", "major"}
+	tiers         = []string{"system", "app"}
+	generateKinds = []string{"secret"}
+	backups       = []string{"required", "recommended", "none"}
+	rollbacks     = []string{"restore", "revert"}
 )
 
 // Load reads and strictly decodes dir/template.yaml. It does not validate.
@@ -243,7 +246,7 @@ func (t *Template) Validate() error {
 	}
 	for _, g := range s.Generate {
 		declare("spec.generate", g.Name)
-		if g.Kind != "secret" {
+		if !slices.Contains(generateKinds, g.Kind) {
 			bad("spec.generate %q: kind must be secret", g.Name)
 		}
 		if g.Length < 16 || g.Length > 256 {
@@ -277,10 +280,10 @@ func (t *Template) Validate() error {
 		if mg.From == "" || !semverRe.MatchString(mg.To) {
 			bad("spec.migrations[%d]: from is required and to must be a semantic version", i)
 		}
-		if !slices.Contains([]string{"required", "recommended", "none"}, mg.Backup) {
+		if !slices.Contains(backups, mg.Backup) {
 			bad("spec.migrations[%d]: backup must be required, recommended or none", i)
 		}
-		if !slices.Contains([]string{"restore", "revert"}, mg.Rollback) {
+		if !slices.Contains(rollbacks, mg.Rollback) {
 			bad("spec.migrations[%d]: rollback must be restore or revert", i)
 		}
 		if len(mg.Steps) == 0 {

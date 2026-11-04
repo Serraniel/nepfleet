@@ -234,6 +234,7 @@ func (g gen) object(t reflect.Type, path string) (obj, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", fpath, err)
 		}
+		loosen(s, req)
 		if req {
 			required = append(required, name)
 		}
@@ -244,7 +245,43 @@ func (g gen) object(t reflect.Type, path string) (obj, error) {
 		sort.Strings(required)
 		o["required"] = required
 	}
+	if x, ok := reflect.New(t).Interface().(interface{ SchemaExtend(map[string]any) }); ok {
+		x.SchemaExtend(o)
+	}
 	return o, nil
+}
+
+// loosen makes a field's schema accept what yaml.v3 accepts for it, so
+// editors do not report errors the parser would not:
+//   - a required string must not be empty (the validators check values);
+//   - an optional enum may be empty, the parser then applies the default;
+//   - a free-form string may be written as a number or boolean, which
+//     yaml.v3 turns into a string;
+//   - an empty list or map may be written as null (key with no value).
+func loosen(s obj, required bool) {
+	scalars := []any{"string", "number", "boolean"}
+	switch s["type"] {
+	case "string":
+		switch {
+		case s["enum"] != nil:
+			if !required {
+				s["enum"] = append([]string{""}, s["enum"].([]string)...)
+			}
+		case s["const"] != nil || s["pattern"] != nil:
+		case required:
+			s["minLength"] = 1
+		default:
+			s["type"] = scalars
+		}
+	case "array", "object":
+		s["type"] = []any{s["type"], "null"}
+		if items, ok := s["items"].(obj); ok && items["type"] == "string" && items["enum"] == nil && items["pattern"] == nil {
+			items["type"] = scalars
+		}
+		if vals, ok := s["additionalProperties"].(obj); ok && vals["type"] == "string" {
+			vals["type"] = append(scalars, "null")
+		}
+	}
 }
 
 // constrain applies a schema tag and reports whether the field is required.
@@ -273,6 +310,12 @@ func constrain(s obj, tag string) (required bool, err error) {
 			}
 		case "pattern":
 			target["pattern"] = v
+		case "minItems":
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return false, fmt.Errorf("%s: %w", k, err)
+			}
+			s[k] = n
 		case "minimum", "maximum":
 			n, err := strconv.Atoi(v)
 			if err != nil {

@@ -23,7 +23,10 @@
       "required": [
         "name"
       ],
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "spec": {
       "additionalProperties": false,
@@ -33,6 +36,7 @@
           "default": "manual",
           "description": "manual | auto",
           "enum": [
+            "",
             "manual",
             "auto"
           ],
@@ -42,12 +46,14 @@
           "default": "compose",
           "description": "compose | swarm",
           "enum": [
+            "",
             "compose",
             "swarm"
           ],
           "type": "string"
         },
         "target": {
+          "minLength": 1,
           "type": "string"
         },
         "template": {
@@ -55,25 +61,35 @@
           "description": "TemplateRef selects a template from a source.",
           "properties": {
             "name": {
+              "minLength": 1,
               "type": "string"
             },
             "source": {
+              "minLength": 1,
               "type": "string"
             },
             "version": {
-              "type": "string"
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
             }
           },
           "required": [
             "name",
             "source"
           ],
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "updates": {
           "default": "notify",
           "description": "off | notify | auto",
           "enum": [
+            "",
             "off",
             "notify",
             "auto"
@@ -82,21 +98,33 @@
         },
         "values": {
           "additionalProperties": {
-            "type": "string"
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
           },
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         }
       },
       "required": [
         "target"
       ],
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     }
   },
   "required": [
     "apiVersion",
     "kind",
-    "metadata"
+    "metadata",
+    "spec"
   ],
   "title": "NepFleet stack.yaml",
   "type": "object"

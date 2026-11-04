@@ -73,6 +73,13 @@ func TestSchemasAgreeWithParser(t *testing.T) {
 		{"stack.schema.json", strings.Replace(stackYAML, "kind: Stack", "kind: Fleet", 1), false},
 		{"template.schema.json", string(tplYAML), true},
 		{"template.schema.json", strings.Replace(string(tplYAML), "tier: ", "tier: x", 1), false},
+		{"stack.schema.json", "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\n", false},
+		{"stack.schema.json", strings.Replace(stackYAML, "target: local", `target: ""`, 1), false},
+		{"stack.schema.json", stackYAML + "  mode: \"\"\n", true},
+		{"stack.schema.json", strings.Replace(stackYAML, "DOMAIN: example.org", "PORT: 8080", 1), true},
+		{"stack.schema.json", strings.Replace(stackYAML, "  values: {DOMAIN: example.org}\n", "  values:\n", 1), true},
+		{"fleet.schema.json", strings.Replace(string(fleetYAML), "      ref: main\n", "      ref: main\n      path: ./x\n", 1), false},
+		{"template.schema.json", strings.Replace(string(tplYAML), "compose: compose.yaml", `compose: ""`, 1), false},
 	} {
 		var schema, doc any
 		if err := json.Unmarshal(files[c.schema], &schema); err != nil {
@@ -96,22 +103,57 @@ func validate(s map[string]any, v any, at string) error {
 	if e, ok := s["enum"].([]any); ok && !slices.ContainsFunc(e, func(x any) bool { return x == fmt.Sprint(v) }) {
 		return fmt.Errorf("%s: %v not in %v", at, v, e)
 	}
-	if p, ok := s["pattern"].(string); ok && !regexp.MustCompile(p).MatchString(fmt.Sprint(v)) {
-		return fmt.Errorf("%s: %v does not match %s", at, v, p)
-	}
-	switch s["type"] {
-	case "object":
-		m, ok := v.(map[string]any)
-		if !ok {
-			return fmt.Errorf("%s: want an object", at)
+	if str, ok := v.(string); ok {
+		if p, ok := s["pattern"].(string); ok && !regexp.MustCompile(p).MatchString(str) {
+			return fmt.Errorf("%s: %v does not match %s", at, v, p)
 		}
-		props, _ := s["properties"].(map[string]any)
-		for _, r := range asSlice(s["required"]) {
+		if n, ok := s["minLength"].(float64); ok && len(str) < int(n) {
+			return fmt.Errorf("%s: empty", at)
+		}
+	}
+	if alts, ok := s["oneOf"].([]any); ok {
+		matched := 0
+		for _, alt := range alts {
+			if validate(alt.(map[string]any), v, at) == nil {
+				matched++
+			}
+		}
+		if matched != 1 {
+			return fmt.Errorf("%s: matches %d of oneOf", at, matched)
+		}
+	}
+	types := asSlice(s["type"])
+	if t, ok := s["type"].(string); ok {
+		types = []any{t}
+	}
+	kind := "null"
+	switch v.(type) {
+	case map[string]any:
+		kind = "object"
+	case []any:
+		kind = "array"
+	case string:
+		kind = "string"
+	case bool:
+		kind = "boolean"
+	case int, float64:
+		kind = "number"
+	}
+	if len(types) > 0 && !slices.ContainsFunc(types, func(t any) bool { return t == kind || (t == "integer" && kind == "number") }) {
+		return fmt.Errorf("%s: %s not allowed, want %v", at, kind, types)
+	}
+	if req := asSlice(s["required"]); len(req) > 0 {
+		m, _ := v.(map[string]any)
+		for _, r := range req {
 			if _, ok := m[r.(string)]; !ok {
 				return fmt.Errorf("%s: %s is required", at, r)
 			}
 		}
-		for k, val := range m {
+	}
+	switch val := v.(type) {
+	case map[string]any:
+		props, _ := s["properties"].(map[string]any)
+		for k, item := range val {
 			sub, known := props[k].(map[string]any)
 			if !known {
 				if ap, ok := s["additionalProperties"].(map[string]any); ok {
@@ -122,19 +164,18 @@ func validate(s map[string]any, v any, at string) error {
 					continue
 				}
 			}
-			if err := validate(sub, val, at+"."+k); err != nil {
+			if err := validate(sub, item, at+"."+k); err != nil {
 				return err
 			}
 		}
-	case "array":
-		for i, item := range asSlice(v) {
+	case []any:
+		if n, ok := s["minItems"].(float64); ok && len(val) < int(n) {
+			return fmt.Errorf("%s: needs %d item(s)", at, int(n))
+		}
+		for i, item := range val {
 			if err := validate(s["items"].(map[string]any), item, fmt.Sprintf("%s[%d]", at, i)); err != nil {
 				return err
 			}
-		}
-	case "string":
-		if _, ok := v.(string); !ok {
-			return fmt.Errorf("%s: want a string, got %T", at, v)
 		}
 	}
 	return nil

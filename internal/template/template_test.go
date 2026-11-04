@@ -160,6 +160,9 @@ func TestSchemaTagsMatchValidation(t *testing.T) {
 		{Image{}, "Track", tracks},
 		{Input{}, "Type", inputTypes},
 		{Generate{}, "Encoding", encodings[1:]},
+		{Generate{}, "Kind", generateKinds},
+		{Migration{}, "Backup", backups},
+		{Migration{}, "Rollback", rollbacks},
 	} {
 		f, _ := reflect.TypeOf(c.v).FieldByName(c.field)
 		if got := schemaEnum(f.Tag.Get("schema")); !slices.Equal(got, c.want) {

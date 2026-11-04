@@ -133,8 +133,18 @@ func TestSchemaTagsMatchValidation(t *testing.T) {
 			t.Errorf("%s: schema enum %v, parser accepts %v", c.name, c.got, c.want)
 		}
 	}
-	f, _ := reflect.TypeOf(Source{}).FieldByName("Name")
-	if !strings.Contains(f.Tag.Get("schema"), "pattern="+nameRe.String()) {
-		t.Errorf("source name pattern differs from %s", nameRe)
+	for _, c := range []struct {
+		v    any
+		path []string
+	}{{Source{}, []string{"Name"}}, {Stack{}, []string{"Metadata", "Name"}}, {Fleet{}, []string{"Metadata", "Name"}}} {
+		ty := reflect.TypeOf(c.v)
+		var f reflect.StructField
+		for _, p := range c.path {
+			f, _ = ty.FieldByName(p)
+			ty = f.Type
+		}
+		if !strings.Contains(f.Tag.Get("schema"), "pattern="+nameRe.String()) {
+			t.Errorf("%T.%v: name pattern differs from %s", c.v, c.path, nameRe)
+		}
 	}
 }

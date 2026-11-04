@@ -17,23 +17,40 @@
       "description": "Metadata describes the template for catalogues and the UI.",
       "properties": {
         "category": {
-          "type": "string"
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
         },
         "description": {
+          "minLength": 1,
           "type": "string"
         },
         "homepage": {
-          "type": "string"
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
         },
         "icon": {
-          "type": "string"
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
         },
         "name": {
           "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
           "type": "string"
         },
         "source": {
-          "type": "string"
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
         },
         "tier": {
           "description": "system | app",
@@ -44,6 +61,7 @@
           "type": "string"
         },
         "title": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -53,13 +71,17 @@
         "tier",
         "title"
       ],
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "spec": {
       "additionalProperties": false,
       "description": "Spec is what NepFleet needs to install, update and migrate the stack.",
       "properties": {
         "compose": {
+          "minLength": 1,
           "type": "string"
         },
         "files": {
@@ -67,9 +89,11 @@
             "additionalProperties": false,
             "properties": {
               "dest": {
+                "minLength": 1,
                 "type": "string"
               },
               "src": {
+                "minLength": 1,
                 "type": "string"
               }
             },
@@ -79,7 +103,10 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "generate": {
           "items": {
@@ -87,6 +114,7 @@
             "properties": {
               "encoding": {
                 "enum": [
+                  "",
                   "base64url",
                   "hex",
                   "alnum"
@@ -117,7 +145,10 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "images": {
           "items": {
@@ -144,17 +175,29 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "inputs": {
           "items": {
             "additionalProperties": false,
             "properties": {
               "default": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "description": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "name": {
                 "pattern": "^[A-Z][A-Z0-9_]*$",
@@ -162,18 +205,33 @@
               },
               "options": {
                 "items": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "pattern": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "required": {
                 "type": "boolean"
               },
               "title": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "type": {
                 "enum": [
@@ -197,7 +255,10 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "migrations": {
           "items": {
@@ -213,9 +274,14 @@
                 "type": "string"
               },
               "description": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
               },
               "from": {
+                "minLength": 1,
                 "type": "string"
               },
               "rollback": {
@@ -234,25 +300,48 @@
                       "type": "boolean"
                     },
                     "name": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
                     },
                     "run": {
                       "items": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ]
                       },
-                      "type": "array"
+                      "type": [
+                        "array",
+                        "null"
+                      ]
                     },
                     "service": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
                     },
                     "wait": {
                       "description": "healthy",
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
                     }
                   },
                   "type": "object"
                 },
-                "type": "array"
+                "minItems": 1,
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "to": {
                 "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$",
@@ -268,7 +357,10 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "supports": {
           "additionalProperties": false,
@@ -305,7 +397,10 @@
               "type": "boolean"
             }
           },
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "version": {
           "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$",
@@ -332,7 +427,10 @@
             ],
             "type": "object"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -340,7 +438,10 @@
         "images",
         "version"
       ],
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     }
   },
   "required": [
