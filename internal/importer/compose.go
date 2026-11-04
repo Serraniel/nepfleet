@@ -182,6 +182,18 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 	}
 	res.Warnings = append(res.Warnings, inspect(cfg, env)...)
 
+	// Secrets written literally into the compose file would otherwise land in
+	// git in plaintext: move them to the encrypted values, referenced as
+	// ${NAME}. The container gets the same value, so nothing is recreated.
+	cfg, moved, err := extractLiteralSecrets(cfg, env, o.EncryptAll)
+	if err != nil {
+		return nil, err
+	}
+	for name, m := range moved {
+		env[name] = m.value
+		res.Warnings = append(res.Warnings, fmt.Sprintf("service %s had %s written into the compose file; it is now stored encrypted as ${%s}", m.service, m.key, name))
+	}
+
 	values, sec := map[string]string{}, map[string]string{}
 	for k, v := range env {
 		if strings.ContainsAny(v, "'\n\r") {
@@ -232,6 +244,64 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 	}
 	res.Volumes = volumes(cfg)
 	return res, nil
+}
+
+type movedSecret struct{ service, key, value string }
+
+// extractLiteralSecrets rewrites services.*.environment entries whose name
+// looks secret (or all, with all) and whose value is a literal into ${NAME}
+// references. NAME is the key itself unless the env files already define it
+// differently; then <SERVICE>_<KEY>.
+func extractLiteralSecrets(cfg []byte, env map[string]string, all bool) ([]byte, map[string]movedSecret, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(cfg, &doc); err != nil {
+		return nil, nil, err
+	}
+	moved := map[string]movedSecret{}
+	root := doc.Content[0]
+	services := child(root, "services")
+	for i := 0; services != nil && i+1 < len(services.Content); i += 2 {
+		svc := services.Content[i].Value
+		envNode := child(services.Content[i+1], "environment")
+		if envNode == nil || envNode.Kind != yaml.MappingNode {
+			continue // normalised compose always uses the mapping form
+		}
+		for j := 0; j+1 < len(envNode.Content); j += 2 {
+			key, val := envNode.Content[j].Value, envNode.Content[j+1]
+			if val.Kind != yaml.ScalarNode || val.Tag == "!!null" || strings.Contains(val.Value, "$") || val.Value == "" {
+				continue
+			}
+			if !all && !secretName.MatchString(key) {
+				continue
+			}
+			name := key
+			if have, ok := env[name]; ok && have != val.Value {
+				name = strings.ToUpper(regexp.MustCompile(`[^A-Za-z0-9]+`).ReplaceAllString(svc, "_")) + "_" + key
+			}
+			if m, ok := moved[name]; ok && m.value != val.Value {
+				return nil, nil, fmt.Errorf("cannot store %s of service %s: %s is already used for a different value", key, svc, name)
+			}
+			moved[name] = movedSecret{service: svc, key: key, value: val.Value}
+			val.Value, val.Style = "${"+name+"}", 0
+		}
+	}
+	if len(moved) == 0 {
+		return cfg, nil, nil
+	}
+	out, err := yaml.Marshal(&doc)
+	return out, moved, err
+}
+
+func child(m *yaml.Node, key string) *yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
 }
 
 var varRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)([:?+-][^}]*)?\}`)

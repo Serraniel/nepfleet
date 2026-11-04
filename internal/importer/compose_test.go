@@ -109,6 +109,24 @@ func TestImportCompose(t *testing.T) {
 	}
 }
 
+func TestLiteralSecretsAreMoved(t *testing.T) {
+	root := t.TempDir()
+	f := &fleet.Fleet{Dir: root}
+	store := secrets.Memory{}
+	cfg := "name: db\nservices:\n  postgres:\n    image: postgres:18\n    environment:\n      POSTGRES_PASSWORD: s3cr3t\n      POSTGRES_DB: app\n      FROM_FILE: ${FROM_FILE}\n"
+	res, err := ImportCompose(context.Background(), fakeRunner{config: cfg}, f, store, Project{Name: "db", ConfigFiles: []string{"c"}}, Options{Target: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(res.Dir, "compose.yaml"))
+	if strings.Contains(string(raw), "s3cr3t") || !strings.Contains(string(raw), "POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}") || !strings.Contains(string(raw), "POSTGRES_DB: app") {
+		t.Fatalf("compose.yaml:\n%s", raw)
+	}
+	if store[filepath.Join(res.Dir, fleet.SecretsFile)]["POSTGRES_PASSWORD"] != "s3cr3t" {
+		t.Error("moved secret not stored")
+	}
+}
+
 func TestSecretNames(t *testing.T) {
 	for _, k := range []string{"DB_PWD", "MYSQL_ROOT_PW", "SMTP_PW", "JWT", "SESSION_SECRET", "COOKIE_KEY", "ADMIN_PIN", "API_TOKEN", "DATABASE_URL"} {
 		if !secretName.MatchString(k) {
