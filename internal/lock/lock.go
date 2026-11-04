@@ -58,7 +58,7 @@ func (l *Lock) Save(dir string) error {
 	if err != nil {
 		return err
 	}
-	header := "# Image digests, written by NepFleet on apply. Commit this file: it makes\n# every revision of the stack reproducible. Update with `nepfleet lock --update`.\n"
+	header := "# Image digests, written by NepFleet on apply. Commit this file: it makes\n# every revision of the stack reproducible. Update with `nepfleet apply --update-lock`.\n"
 	return os.WriteFile(filepath.Join(dir, File), append([]byte(header), raw...), 0o644) //nolint:gosec // not secret, committed to git
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/render"
 )
 
@@ -104,5 +105,83 @@ func TestDiff(t *testing.T) {
 	d := diff([]byte("a\nb\nc\nd\ne\nf\ng\n"), []byte("a\nb\nc\nX\ne\nf\ng\n"))
 	if !strings.Contains(d, "- d\n+ X\n") || strings.Contains(d, "  a\n") {
 		t.Errorf("diff:\n%s", d)
+	}
+}
+
+// tagRunner simulates local image tags for pinning and rollback.
+type tagRunner struct {
+	tags    map[string]string // ref -> image ID
+	byDig   map[string]string // name@digest -> image ID (once pulled)
+	failUp  bool
+	tagCmds []string
+}
+
+func (f *tagRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	call := strings.Join(args, " ")
+	switch {
+	case strings.Contains(call, "config --images"):
+		return []byte("app:1\n"), nil
+	case strings.HasPrefix(call, "image inspect --format {{.Id}} "):
+		ref := args[len(args)-1]
+		if id, ok := f.byDig[ref]; ok {
+			return []byte(id), nil
+		}
+		if id, ok := f.tags[ref]; ok && !strings.Contains(ref, "@") {
+			return []byte(id), nil
+		}
+		return nil, errors.New("no such image")
+	case strings.HasPrefix(call, "image inspect"), strings.HasPrefix(call, "ps "), strings.HasPrefix(call, "network"):
+		return []byte("[]"), nil
+	case strings.HasPrefix(call, "pull "):
+		ref := args[len(args)-1]
+		f.byDig[ref] = "id-" + ref[strings.Index(ref, "@")+1:]
+		return nil, nil
+	case strings.HasPrefix(call, "tag "):
+		src, dst := args[1], args[2]
+		if id, ok := f.byDig[src]; ok {
+			src = id
+		}
+		f.tags[dst] = src
+		f.tagCmds = append(f.tagCmds, call)
+		return nil, nil
+	case strings.Contains(call, " up "):
+		if f.failUp {
+			f.failUp = false
+			return nil, errors.New("unhealthy")
+		}
+	}
+	return nil, nil
+}
+
+type fixed map[string]string
+
+func (f fixed) Digest(_ context.Context, ref string) (string, error) { return f[ref], nil }
+
+// TestRollbackRestoresTagWithoutRecordedDigests covers a previous version
+// applied without pins (older manifest, or --no-lock): the failed attempt
+// moved app:1 to the new digest; rollback must point it back.
+func TestRollbackRestoresTagWithoutRecordedDigests(t *testing.T) {
+	dir := t.TempDir()
+	r := &tagRunner{tags: map[string]string{"app:1": "id-old"}, byDig: map[string]string{}}
+	ctx := context.Background()
+	v1 := output("services:\n  a: {image: 'app:1'}\n", "X='1'\n")
+	p, _ := PlanStack("app", "compose", dir, v1, nil)
+	if _, err := Apply(ctx, r, p, v1, Options{}); err != nil { // no lock: manifest without Images
+		t.Fatal(err)
+	}
+	newDigest := "sha256:" + strings.Repeat("b", 64)
+	l := &lock.Lock{Images: map[string]string{}}
+	v2 := output("services:\n  a: {image: 'app:1', environment: {Y: '2'}}\n", "X='1'\n")
+	p, _ = PlanStack("app", "compose", dir, v2, nil)
+	r.failUp = true
+	res, err := Apply(ctx, r, p, v2, Options{Lock: l, Resolver: fixed{"app:1": newDigest}, UpdateLock: true})
+	if !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("expected rollback, got %v", err)
+	}
+	if r.tags["app:1"] != "id-old" {
+		t.Fatalf("after rollback app:1 -> %s, want id-old (tag commands: %v)", r.tags["app:1"], r.tagCmds)
+	}
+	if res.LockChanged {
+		t.Error("a failed apply must not ask to commit the lock")
 	}
 }

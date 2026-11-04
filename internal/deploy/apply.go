@@ -94,18 +94,20 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 		return res, err
 	}
 	var pins map[string]string
+	var imgs []string
 	if o.Lock != nil && o.Resolver != nil {
-		imgs, err := images(ctx, r, p.Stack, p.Dir)
+		imgs, err = images(ctx, r, p.Stack, p.Dir)
 		if err == nil {
 			resolver := o.Resolver
 			if !o.UpdateLock {
-				// New entries lock what already runs here, so adopting or
-				// first-locking a stack never changes its images.
-				resolver = localFirst{r: r, remote: o.Resolver}
+				// New entries lock what is running now, so adopting or first
+				// locking a stack never changes its images.
+				resolver = &runningFirst{r: r, stack: p.Stack, swarm: p.Mode == "swarm", remote: o.Resolver}
 			}
 			res.LockChanged, res.Unpinned, err = o.Lock.Sync(ctx, resolver, imgs, o.UpdateLock)
 		}
 		if err != nil {
+			res.LockChanged = false
 			if prev != nil {
 				_ = restore(p.Dir, out.Files, prev)
 			}
@@ -113,45 +115,156 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 		}
 		pins = o.Lock.Images
 	}
+	// What each local tag points at now, so a rollback can put it back even
+	// for images the previous manifest did not pin.
+	tagsBefore := localTags(ctx, r, imgs)
 	err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
 	if err == nil {
 		return res, writeManifest(p.Dir, out.Files, pins, o)
 	}
+	res.LockChanged = false // the new pins did not run successfully; never ask to commit them
 	if prev == nil {
 		// Nothing to go back to. Leave it as is for inspection.
-		return res, fmt.Errorf("first deploy of %s failed (left running for inspection, `docker compose -p %s logs`): %w", p.Stack, p.Stack, err)
+		return res, fmt.Errorf("first deploy of %s failed (left as is for inspection, `docker compose -p %s logs`): %w", p.Stack, p.Stack, err)
 	}
 	if rerr := restore(p.Dir, out.Files, prev); rerr != nil {
 		return res, fmt.Errorf("%w; restoring the previous files also failed: %w", err, rerr)
 	}
-	// Re-pin the previous digests: the failed attempt may have moved local tags.
-	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, prev.Images, o.WaitTimeout); rerr != nil {
-		return res, fmt.Errorf("%w; the previous version did not come back up either: %w", err, rerr)
-	}
-	res.LockChanged = false // the new pins never ran; do not ask to commit them
-	return res, fmt.Errorf("%w: %w", ErrRolledBack, err)
-}
-
-// localFirst resolves from the local image's RepoDigests, then the registry.
-type localFirst struct {
-	r      Runner
-	remote lock.Resolver
-}
-
-func (l localFirst) Digest(ctx context.Context, img string) (string, error) {
-	if ref, err := registry.ParseRef(img); err == nil {
-		if out, err := l.r.Run(ctx, "", "image", "inspect", "--format", "{{json .RepoDigests}}", img); err == nil {
-			var digests []string
-			if json.Unmarshal(out, &digests) == nil {
-				for _, rd := range digests {
-					if r, err := registry.ParseRef(rd); err == nil && r.Host == ref.Host && r.Repo == ref.Repo {
-						return r.Digest, nil
-					}
-				}
+	// The failed attempt may have moved local tags: put back what they were,
+	// then re-pin the previous digests on top.
+	for img, id := range tagsBefore {
+		if _, pinned := prev.Images[img]; !pinned {
+			if _, terr := r.Run(ctx, "", "tag", id, img); terr != nil {
+				return res, fmt.Errorf("%w; restoring the previous image of %s failed: %w", err, img, terr)
 			}
 		}
 	}
+	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, prev.Images, o.WaitTimeout); rerr != nil {
+		return res, fmt.Errorf("%w; the previous version did not come back up either: %w", err, rerr)
+	}
+	return res, fmt.Errorf("%w: %w", ErrRolledBack, err)
+}
+
+// ResolveUpdate returns a copy of l with every image of the rendered stack
+// re-resolved to its current registry digest, without touching the stack:
+// the files are rendered into a private temporary directory to let compose
+// interpolate the image references. Used to show updates before confirming.
+func ResolveUpdate(ctx context.Context, r Runner, stack string, out *render.Output, l *lock.Lock, resolver lock.Resolver) (*lock.Lock, []string, error) {
+	tmp, err := os.MkdirTemp("", "nepfleet-resolve-")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }() // MkdirTemp creates it 0700: the env file stays private
+	if err := writeFiles(tmp, out.Files, nil); err != nil {
+		return nil, nil, err
+	}
+	imgs, err := images(ctx, r, stack, tmp)
+	if err != nil {
+		return nil, nil, err
+	}
+	next := &lock.Lock{Images: map[string]string{}}
+	for k, v := range l.Images {
+		next.Images[k] = v
+	}
+	_, skipped, err := next.Sync(ctx, resolver, imgs, true)
+	return next, skipped, err
+}
+
+// localTags maps each image reference to the image ID its local tag points at.
+func localTags(ctx context.Context, r Runner, imgs []string) map[string]string {
+	out := map[string]string{}
+	for _, img := range imgs {
+		if id, err := r.Run(ctx, "", "image", "inspect", "--format", "{{.Id}}", img); err == nil {
+			if s := strings.TrimSpace(string(id)); s != "" {
+				out[img] = s
+			}
+		}
+	}
+	return out
+}
+
+// runningFirst resolves an image to the digest that is running now: for
+// swarm the digest in the service spec (the manager's local images may be
+// stale), for compose the image of the stack's running containers, then the
+// local tag, and only then the registry.
+type runningFirst struct {
+	r       Runner
+	stack   string
+	swarm   bool
+	remote  lock.Resolver
+	running map[string]string
+}
+
+func (l *runningFirst) Digest(ctx context.Context, img string) (string, error) {
+	if l.running == nil {
+		l.running = l.collect(ctx)
+	}
+	if d, ok := l.running[img]; ok {
+		return d, nil
+	}
+	if !l.swarm {
+		if d := repoDigest(ctx, l.r, img, img); d != "" {
+			return d, nil
+		}
+	}
 	return l.remote.Digest(ctx, img)
+}
+
+func (l *runningFirst) collect(ctx context.Context) map[string]string {
+	out := map[string]string{}
+	if l.swarm {
+		names, err := l.r.Run(ctx, "", "service", "ls", "--filter", "label=com.docker.stack.namespace="+l.stack, "--format", "{{.Name}}")
+		if err != nil {
+			return out
+		}
+		for _, svc := range strings.Fields(string(names)) {
+			spec, err := l.r.Run(ctx, "", "service", "inspect", "--format", "{{.Spec.TaskTemplate.ContainerSpec.Image}}", svc)
+			if err != nil {
+				continue
+			}
+			if name, d, ok := strings.Cut(strings.TrimSpace(string(spec)), "@"); ok {
+				out[name] = d
+			}
+		}
+		return out
+	}
+	ids, err := l.r.Run(ctx, "", "ps", "--all", "--quiet", "--filter", "label=com.docker.compose.project="+l.stack)
+	if err != nil {
+		return out
+	}
+	for _, id := range strings.Fields(string(ids)) {
+		info, err := l.r.Run(ctx, "", "inspect", "--format", "{{.Config.Image}}|{{.Image}}", id)
+		if err != nil {
+			continue
+		}
+		img, imageID, _ := strings.Cut(strings.TrimSpace(string(info)), "|")
+		if d := repoDigest(ctx, l.r, imageID, img); d != "" {
+			out[img] = d
+		}
+	}
+	return out
+}
+
+// repoDigest returns the RepoDigest of image (ID or reference) for ref's repository.
+func repoDigest(ctx context.Context, r Runner, image, ref string) string {
+	want, err := registry.ParseRef(ref)
+	if err != nil {
+		return ""
+	}
+	raw, err := r.Run(ctx, "", "image", "inspect", "--format", "{{json .RepoDigests}}", image)
+	if err != nil {
+		return ""
+	}
+	var digests []string
+	if json.Unmarshal(raw, &digests) != nil {
+		return ""
+	}
+	for _, rd := range digests {
+		if got, err := registry.ParseRef(rd); err == nil && got.Host == want.Host && got.Repo == want.Repo {
+			return got.Digest
+		}
+	}
+	return ""
 }
 
 // images lists the interpolated image references of a stack.

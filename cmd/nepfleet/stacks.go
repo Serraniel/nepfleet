@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -195,6 +196,7 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	asJSON := fs.Bool("json", false, "print the plan as JSON")
+	updateLock := fs.Bool("update-lock", false, "include image updates that apply --update-lock would make")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -213,6 +215,12 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		if *updateLock {
+			if _, err := e.previewUpdate(context.Background(), p); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 		}
 		plans = append(plans, p.plan)
 	}
@@ -240,9 +248,12 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	fs.Var(&confirm, "confirm", "allow destructive changes for this stack (repeatable)")
 	wait := fs.Duration("wait", 3*time.Minute, "health gate timeout per stack")
 	noLock := fs.Bool("no-lock", false, "do not pin images to digests (lock.yaml)")
-	updateLock := fs.Bool("update-lock", false, "re-resolve every image tag to its current digest")
+	updateLock := fs.Bool("update-lock", false, "re-resolve every image tag to its current digest (shown in the plan before confirming)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *noLock && *updateLock {
+		return errors.New("--update-lock and --no-lock contradict each other")
 	}
 	e, err := c.open()
 	if err != nil {
@@ -264,8 +275,16 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 			errs = append(errs, err)
 			continue
 		}
+		var updated *lock.Lock
+		if *updateLock {
+			// Resolve before confirming, so the plan shows the image changes.
+			if updated, err = e.previewUpdate(ctx, p); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
 		printPlan(stdout, p.plan)
-		if p.plan.Empty() && !*updateLock {
+		if p.plan.Empty() {
 			continue
 		}
 		if len(p.plan.Destructive) > 0 && !slices.Contains(confirm, name) {
@@ -289,10 +308,11 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 		opts := deploy.Options{
 			WaitTimeout: *wait, Commit: commit, Dirty: dirty, IngressNetwork: e.fleet.Spec.IngressNetwork,
-			UpdateLock: *updateLock,
 		}
 		if !*noLock {
-			if opts.Lock, err = lock.Load(s.Dir); err != nil {
+			if updated != nil {
+				opts.Lock = updated
+			} else if opts.Lock, err = lock.Load(s.Dir); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -302,6 +322,12 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		res, err = deploy.Apply(ctx, deploy.Docker{}, p.plan, p.out, opts)
 		for _, u := range res.Unpinned {
 			fmt.Fprintf(stdout, "%s: ⚠ not pinned, runs by tag: %s\n", name, u)
+		}
+		if err == nil && updated != nil {
+			// The preview already moved the pins; persist them now that they ran.
+			if before, lerr := lock.Load(s.Dir); lerr == nil && !maps.Equal(before.Images, updated.Images) {
+				res.LockChanged = true
+			}
 		}
 		if res.LockChanged {
 			if serr := opts.Lock.Save(s.Dir); serr != nil {
@@ -322,6 +348,24 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// previewUpdate resolves current digests for a prepared stack and re-plans
+// with them, so the plan lists every image that would move.
+func (e *env) previewUpdate(ctx context.Context, p *prepared) (*lock.Lock, error) {
+	current, err := lock.Load(p.stack.Dir)
+	if err != nil {
+		return nil, err
+	}
+	updated, skipped, err := deploy.ResolveUpdate(ctx, deploy.Docker{}, p.stack.Metadata.Name, p.out, current, e.resolverOnce())
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolving image updates: %w", p.stack.Metadata.Name, err)
+	}
+	for _, s := range skipped {
+		fmt.Fprintf(os.Stderr, "%s: ⚠ cannot resolve %s, its pin stays as is\n", p.stack.Metadata.Name, s)
+	}
+	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
+	return updated, err
 }
 
 func cmdRender(args []string, stdout, stderr io.Writer) error {
