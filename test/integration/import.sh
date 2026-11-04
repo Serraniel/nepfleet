@@ -22,10 +22,11 @@ sed -i "s#    age: \[\]#    age: [\"$(age-keygen -y ../key.txt)\"]#" fleet.yaml
 grep -q 'secrets (encrypted): DB_PASSWORD' ../import.log || fail "DB_PASSWORD not treated as secret"
 grep -q s3cr3t stacks/$P/stack.yaml stacks/$P/values.secret.yaml && fail "secret in plaintext"
 
-"$NF" apply --yes --state "$T/state" $P | grep -q '✓ applied' || fail "apply"
+grep -q 'adopted' ../import.log || fail "running state not adopted"
+"$NF" plan --state "$T/state" $P | grep -q 'up to date' || fail "first plan after import is not empty"
+"$NF" apply --yes --state "$T/state" $P | grep -q 'up to date' || fail "apply after import changed something"
 after=$(docker compose -p $P ps -q web)
 [ "$before" = "$after" ] || fail "container was recreated ($before -> $after)"
 [ "$(docker exec "$after" cat /usr/share/nginx/html/index.html)" = "existing data" ] || fail "bind mount lost"
 [ "$(docker exec "$after" printenv DB_PASSWORD)" = s3cr3t ] || fail "secret value lost"
-"$NF" plan --state "$T/state" $P | grep -q 'up to date' || fail "plan not empty after import"
 echo PASS

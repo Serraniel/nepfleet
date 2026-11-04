@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,27 +81,74 @@ func splitList(s string) []string {
 
 // Result describes one import.
 type Result struct {
-	Stack    string
-	Dir      string
-	Values   []string // variable names stored in stack.yaml
-	Secrets  []string // variable names stored encrypted
+	Stack   string
+	Dir     string
+	Values  []string // variable names stored in stack.yaml
+	Secrets []string // variable names stored encrypted
+	// Volumes are the named volumes the stack keeps using ("name (external)").
+	Volumes  []string
 	Warnings []string
+}
+
+// volumes lists top-level named volumes with their real Docker names.
+func volumes(cfg []byte) []string {
+	var doc struct {
+		Volumes map[string]struct {
+			Name     string `yaml:"name"`
+			External bool   `yaml:"external"`
+		} `yaml:"volumes"`
+	}
+	if yaml.Unmarshal(cfg, &doc) != nil {
+		return nil
+	}
+	var out []string
+	for key, v := range doc.Volumes {
+		name := v.Name
+		if name == "" {
+			name = key
+		}
+		if v.External {
+			name += " (external)"
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // secretName guesses which variables hold secrets. It errs on the side of
 // encrypting: a value encrypted needlessly costs nothing.
-var secretName = regexp.MustCompile(`(?i)(PASS|SECRET|TOKEN|KEY|PRIVATE|CREDENTIAL|AUTH|SALT|HASH|CERT|DSN|_URI$|_URL$)`)
+var secretName = regexp.MustCompile(`(?i)(PASS|PW|SECRET|TOKEN|KEY|PRIVATE|CREDENTIAL|AUTH|SALT|HASH|CERT|DSN|JWT|SESSION|COOKIE|PIN|SIGN|API|_URI$|_URL$)`)
+
+// stackName mirrors fleet's rule for stack directory names.
+var stackName = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+
+// Options tune an import.
+type Options struct {
+	Target string
+	// EncryptAll stores every env value encrypted, not only secret-looking ones.
+	EncryptAll bool
+}
 
 // ImportCompose writes stacks/<project>/ from a running Compose project.
-func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store secrets.Store, p Project, target string) (*Result, error) {
+func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store secrets.Store, p Project, o Options) (res *Result, err error) {
 	if len(p.ConfigFiles) == 0 {
 		return nil, fmt.Errorf("%s: compose did not report its config files", p.Name)
+	}
+	if !stackName.MatchString(p.Name) {
+		return nil, fmt.Errorf("%q cannot be a stack name (lowercase letters, digits, - and _, at most 63, not ending in - or _)", p.Name)
 	}
 	dir := filepath.Join(f.Dir, "stacks", p.Name)
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("%s already exists", dir)
 	}
-	res := &Result{Stack: p.Name, Dir: dir}
+	res = &Result{Stack: p.Name, Dir: dir}
+	// Never leave a half-written stack behind: a retry would refuse it.
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(dir)
+		}
+	}()
 
 	// Normalised, but not interpolated: relative paths become absolute (so
 	// bind mounts keep pointing at the existing data) and ${VAR} stays.
@@ -123,12 +169,15 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 
 	env := map[string]string{}
 	for _, ef := range p.EnvFiles {
-		vars, err := parseEnvFile(ef)
+		vars, fromShell, err := parseEnvFile(ef, env)
 		if err != nil {
 			return nil, err
 		}
 		for k, v := range vars {
 			env[k] = v
+		}
+		for _, name := range fromShell {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("%s refers to $%s, which is not defined in the env files (the shell may have provided it); check the imported value", ef, name))
 		}
 	}
 	res.Warnings = append(res.Warnings, inspect(cfg, env)...)
@@ -138,7 +187,7 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 		if strings.ContainsAny(v, "'\n\r") {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("%s contains a single quote or newline and cannot be written to an env file literally; change it before applying", k))
 		}
-		if secretName.MatchString(k) {
+		if o.EncryptAll || secretName.MatchString(k) {
 			sec[k] = v
 			res.Secrets = append(res.Secrets, k)
 		} else {
@@ -161,7 +210,7 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 		"kind":       "Stack",
 		"metadata":   map[string]string{"name": p.Name},
 		"spec": map[string]any{
-			"target": target,
+			"target": o.Target,
 			"mode":   "compose",
 			"apply":  "manual",
 		},
@@ -178,10 +227,10 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 	}
 	if len(sec) > 0 {
 		if err := store.Save(filepath.Join(dir, fleet.SecretsFile), sec); err != nil {
-			_ = os.RemoveAll(dir)
 			return nil, fmt.Errorf("encrypting secrets (nothing was imported): %w", err)
 		}
 	}
+	res.Volumes = volumes(cfg)
 	return res, nil
 }
 
@@ -225,16 +274,26 @@ func inspect(cfg []byte, env map[string]string) []string {
 	return warn
 }
 
-// parseEnvFile reads KEY=VALUE lines the way Compose does for the common
-// cases: comments, export prefix, single quotes (literal), double quotes
-// (with \n, \", \\ escapes).
-func parseEnvFile(path string) (map[string]string, error) {
+// parseEnvFile reads an env file the way Compose does: comments, export
+// prefix, single quotes (literal), double quotes (escapes \n \" \\ and
+// interpolation), unquoted values (interpolation, " #" starts a comment).
+// Interpolation uses vars (earlier files and lines); names that are not
+// defined there would come from the shell at deploy time and are reported.
+func parseEnvFile(path string, vars map[string]string) (map[string]string, []string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = f.Close() }()
 	out := map[string]string{}
+	var fromShell []string
+	lookup := func(name string) (string, bool) {
+		if v, ok := out[name]; ok {
+			return v, true
+		}
+		v, ok := vars[name]
+		return v, ok
+	}
 	sc := bufio.NewScanner(f)
 	n := 0
 	for sc.Scan() {
@@ -244,23 +303,95 @@ func parseEnvFile(path string) (map[string]string, error) {
 			continue
 		}
 		line = strings.TrimPrefix(line, "export ")
-		k, v, ok := strings.Cut(line, "=")
+		k, raw, ok := strings.Cut(line, "=")
 		k = strings.TrimSpace(k)
 		if !ok || k == "" {
-			return nil, fmt.Errorf("%s:%d: not KEY=VALUE", path, n)
+			return nil, nil, fmt.Errorf("%s:%d: not KEY=VALUE", path, n)
 		}
-		v = strings.TrimSpace(v)
+		raw = strings.TrimSpace(raw)
+		var v string
 		switch {
-		case len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'':
-			v = v[1 : len(v)-1]
-		case len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"':
-			v = strings.NewReplacer(`\n`, "\n", `\"`, `"`, `\\`, `\`).Replace(v[1 : len(v)-1])
-		default:
-			if i := strings.Index(v, " #"); i >= 0 {
-				v = strings.TrimSpace(v[:i])
+		case strings.HasPrefix(raw, "'"):
+			end := strings.Index(raw[1:], "'")
+			if end < 0 {
+				return nil, nil, fmt.Errorf("%s:%d: unterminated single quote", path, n)
 			}
+			v = raw[1 : end+1]
+		case strings.HasPrefix(raw, `"`):
+			var b strings.Builder
+			i := 1
+			for ; i < len(raw) && raw[i] != '"'; i++ {
+				if raw[i] == '\\' && i+1 < len(raw) {
+					i++
+					switch raw[i] {
+					case 'n':
+						b.WriteByte('\n')
+					case 't':
+						b.WriteByte('\t')
+					default:
+						b.WriteByte(raw[i])
+					}
+					continue
+				}
+				b.WriteByte(raw[i])
+			}
+			if i >= len(raw) {
+				return nil, nil, fmt.Errorf("%s:%d: unterminated double quote", path, n)
+			}
+			var missing []string
+			v, missing = interpolate(b.String(), lookup)
+			fromShell = append(fromShell, missing...)
+		default:
+			if i := strings.Index(raw, " #"); i >= 0 {
+				raw = strings.TrimSpace(raw[:i])
+			}
+			var missing []string
+			v, missing = interpolate(raw, lookup)
+			fromShell = append(fromShell, missing...)
 		}
 		out[k] = v
 	}
-	return out, errors.Join(sc.Err())
+	return out, fromShell, sc.Err()
+}
+
+var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?+])([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// interpolate expands ${VAR}, ${VAR:-def}, ${VAR-def}, ${VAR:+alt} and $VAR.
+// $$ is a literal $. It returns the names that were not defined.
+func interpolate(s string, lookup func(string) (string, bool)) (string, []string) {
+	var missing []string
+	s = strings.ReplaceAll(s, "$$", "\x00")
+	s = envRef.ReplaceAllStringFunc(s, func(m string) string {
+		g := envRef.FindStringSubmatch(m)
+		name, op, arg := g[1], g[2], g[3]
+		if name == "" {
+			name = g[4]
+		}
+		v, ok := lookup(name)
+		switch op {
+		case ":-":
+			if !ok || v == "" {
+				return arg
+			}
+		case "-":
+			if !ok {
+				return arg
+			}
+		case ":+":
+			if ok && v != "" {
+				return arg
+			}
+			return ""
+		case "+":
+			if ok {
+				return arg
+			}
+			return ""
+		}
+		if !ok {
+			missing = append(missing, name)
+		}
+		return v
+	})
+	return strings.ReplaceAll(s, "\x00", "$"), missing
 }

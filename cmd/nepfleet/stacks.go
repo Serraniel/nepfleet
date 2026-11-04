@@ -515,6 +515,7 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 	c.register(fs)
 	all := fs.Bool("all", false, "import every project found")
 	target := fs.String("target", "", "spec.target for the imported stacks (default: --host)")
+	encryptAll := fs.Bool("encrypt-all", false, "store every env value encrypted, not only secret-looking names")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -547,13 +548,29 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 		delete(want, p.Name)
-		res, err := importer.ImportCompose(ctx, deploy.Docker{}, e.fleet, e.store, p, *target)
+		res, err := importer.ImportCompose(ctx, deploy.Docker{}, e.fleet, e.store, p, importer.Options{Target: *target, EncryptAll: *encryptAll})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", p.Name, err))
 			continue
 		}
-		fmt.Fprintf(stdout, "imported %s → %s\n  values: %s\n  secrets (encrypted): %s\n",
-			p.Name, relTo(e.fleet.Dir, res.Dir), orNone(res.Values), orNone(res.Secrets))
+		fmt.Fprintf(stdout, "imported %s → %s\n  values: %s\n  secrets (encrypted): %s\n  volumes (kept as they are): %s\n",
+			p.Name, relTo(e.fleet.Dir, res.Dir), orNone(res.Values), orNone(res.Secrets), orNone(res.Volumes))
+		if *target == c.host || *target == "local" {
+			// The running containers are the applied state: record it, so the
+			// first plan is empty and apply has nothing to change.
+			s, err := e.fleet.LoadStack(p.Name)
+			if err == nil {
+				var prep *prepared
+				if prep, err = e.prepare(s); err == nil {
+					err = deploy.Adopt(prep.plan.Dir, prep.out)
+				}
+			}
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: imported, but recording the running state failed: %w", p.Name, err))
+				continue
+			}
+			fmt.Fprintf(stdout, "  adopted: the running containers are now the applied state (plan is empty)\n")
+		}
 		for _, w := range res.Warnings {
 			fmt.Fprintf(stdout, "  ⚠ %s\n", w)
 		}
@@ -562,7 +579,7 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 		errs = append(errs, fmt.Errorf("no compose project %q on this host", n))
 	}
 	if len(errs) == 0 {
-		fmt.Fprintln(stdout, "\nNext: review, commit, then `nepfleet plan`. The first apply adopts the running containers without recreating them; manage them only through NepFleet from now on.")
+		fmt.Fprintln(stdout, "\nNext: review and commit the stack. `nepfleet plan` shows nothing to do; manage these projects only through NepFleet from now on.")
 	}
 	return errors.Join(errs...)
 }

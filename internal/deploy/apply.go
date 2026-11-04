@@ -223,6 +223,24 @@ func writeManifest(dir string, files map[string][]byte, o Options) error {
 	return os.WriteFile(filepath.Join(dir, metaDir, "manifest.json"), raw, 0o600)
 }
 
+// Adopt records out as already applied without touching any container: an
+// imported stack's running containers are the applied state, so the first
+// plan after an import is empty. Refuses if the stack was applied before.
+func Adopt(dir string, out *render.Output) error {
+	if m, err := readManifest(dir); err != nil {
+		return err
+	} else if m != nil {
+		return fmt.Errorf("%s is already managed", dir)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, metaDir), 0o700); err != nil {
+		return err
+	}
+	if err := writeFiles(dir, out.Files, nil); err != nil {
+		return err
+	}
+	return writeManifest(dir, out.Files, Options{})
+}
+
 // Applied returns the manifest of the last successful apply, or nil.
 func Applied(dir string) (*Manifest, error) { return readManifest(dir) }
 
