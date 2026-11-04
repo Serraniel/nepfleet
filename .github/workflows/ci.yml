@@ -67,6 +67,10 @@ jobs:
         run: test/integration/import.sh /tmp/nepfleet
       - name: Digest pinning, --update-lock and rollback to the pinned digest
         run: test/integration/lock.sh /tmp/nepfleet
+      - name: Build the image
+        run: docker build -t nepfleet-it:ci .
+      - name: Container install with only Docker on the host (compose.yaml)
+        run: test/integration/container.sh nepfleet-it:ci
 
   vulncheck:
     runs-on: ubuntu-latest

@@ -2,7 +2,13 @@
 #
 # NepFleet as a container. See docs/install.md.
 #
-#   DOCKER_GID=$(getent group docker | cut -d: -f3) docker compose up -d
+# Settings come from .env next to this file (see docs/install.md):
+#   NEPFLEET_UID, NEPFLEET_GID  owner of /srv/nepfleet, usually your user
+#   DOCKER_GID                  the host's docker group id
+#   NEPFLEET_HOST               this host's name in the fleet repository
+#
+#   docker compose up -d                 the API (nepfleet serve)
+#   docker compose run --rm nepfleet …   the CLI, same mounts and settings
 
 name: nepfleet
 
@@ -12,25 +18,37 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs: [/tmp]
-    # Membership in the host's docker group is what grants socket access;
-    # the process itself stays unprivileged (uid 65532).
-    group_add: ["${DOCKER_GID:?set DOCKER_GID to the host docker group id}"]
+    # Runs as the owner of /srv/nepfleet, so you can edit and commit the fleet
+    # repository on the host. Membership in the host's docker group is what
+    # grants socket access; the process itself stays unprivileged.
+    user: "${NEPFLEET_UID:?set NEPFLEET_UID in .env}:${NEPFLEET_GID:?set NEPFLEET_GID in .env}"
+    group_add: ["${DOCKER_GID:?set DOCKER_GID in .env to the host docker group id}"]
+    # The container's own hostname is random; stacks target the host by name.
+    hostname: "${NEPFLEET_HOST:?set NEPFLEET_HOST in .env to this host's name}"
     environment:
-      SOPS_AGE_KEY_FILE: /run/secrets/age-key
+      NEPFLEET_HOST: "${NEPFLEET_HOST}"
+      # Stack working directories. Must persist, and must have the same path
+      # on the host, because the Docker daemon resolves bind mounts there.
+      NEPFLEET_STATE: /srv/nepfleet/state
+      HOME: /tmp
+      # Template-source cache and registry logins, kept across runs.
+      XDG_CACHE_HOME: /srv/nepfleet/cache
+      DOCKER_CONFIG: /srv/nepfleet/docker
+      SOPS_AGE_KEY_FILE: /srv/nepfleet/age.key
+      # Identity for the commits that rollback makes.
+      GIT_AUTHOR_NAME: "${NEPFLEET_GIT_NAME:-NepFleet}"
+      GIT_AUTHOR_EMAIL: "${NEPFLEET_GIT_EMAIL:-nepfleet@localhost}"
+      GIT_COMMITTER_NAME: "${NEPFLEET_GIT_NAME:-NepFleet}"
+      GIT_COMMITTER_EMAIL: "${NEPFLEET_GIT_EMAIL:-nepfleet@localhost}"
     command: ["serve", "--listen", ":7480"]
     volumes:
       # Root-equivalent access to this host. Read docs/security.md first.
       - /var/run/docker.sock:/var/run/docker.sock
       # Same path inside and out: the Docker daemon resolves the stacks'
-      # relative bind mounts on the host, so the paths must match.
+      # relative bind mounts on the host, so the paths must match. Holds the
+      # fleet repository, state, caches and age.key.
       - /srv/nepfleet:/srv/nepfleet
-      - ${HOME}/.ssh/nepfleet_deploy:/run/secrets/ssh-key:ro   # pushes the fleet repo
     working_dir: /srv/nepfleet/fleet
-    secrets: [age-key]
     # Loopback only. Expose the API through the Caddy system stack (TLS) instead.
     ports:
       - "127.0.0.1:7480:7480"
-
-secrets:
-  age-key:
-    file: /srv/nepfleet/age.key

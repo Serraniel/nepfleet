@@ -4,12 +4,16 @@ This guide sets up one host with ingress, logs, uptime, a dashboard, backups and
 
 ## 1. Install
 
-You need Docker ≥ 25 with the Compose plugin, git, sops and age. On Arch Linux:
+You need Docker ≥ 25 with the Compose plugin, and git.
+
+**As a container** (nothing else on the host): follow [install](install.md#container), which also creates the key and the fleet repository, then continue at step 3.
+
+**Natively** you also need sops and age. On Arch Linux:
 
 ```sh
 sudo pacman -S --needed docker docker-compose git sops age
 sudo systemctl enable --now docker
-go install github.com/Serraniel/nepfleet/cmd/nepfleet@latest   # or use the container, see install.md
+go install github.com/Serraniel/nepfleet/cmd/nepfleet@latest
 ```
 
 ## 2. Create the fleet repository and its key
