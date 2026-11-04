@@ -310,8 +310,28 @@ func cmdRender(args []string, stdout, stderr io.Writer) error {
 }
 
 func cmdSecret(args []string, stdout, stderr io.Writer) error {
+	if len(args) >= 1 && args[0] == "check" {
+		fs := flag.NewFlagSet("secret check", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		bad, err := fleet.UnencryptedSecrets(*dir, secrets.IsEncrypted)
+		if err != nil {
+			return err
+		}
+		for _, b := range bad {
+			fmt.Fprintf(stdout, "not encrypted: %s\n", b)
+		}
+		if len(bad) > 0 {
+			return fmt.Errorf("%d secret file(s) are not SOPS-encrypted", len(bad))
+		}
+		fmt.Fprintln(stdout, "all secret files are encrypted")
+		return nil
+	}
 	if len(args) < 1 || args[0] != "set" {
-		return errors.New("usage: nepfleet secret set <stack> <KEY>   (value is read from stdin)")
+		return errors.New("usage: nepfleet secret set <stack> <KEY> (value from stdin) | nepfleet secret check")
 	}
 	var c common
 	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)

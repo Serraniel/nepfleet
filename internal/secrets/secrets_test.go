@@ -60,6 +60,21 @@ func TestRefusesPlaintext(t *testing.T) {
 	}
 }
 
+func TestIsEncrypted(t *testing.T) {
+	for doc, want := range map[string]bool{
+		"A: ENC[AES256_GCM,data:x]\nsops:\n  version: 3.11.0\n":                 true,
+		"A: ENC[AES256_GCM,data:x]\nNEW: plaintext\nsops:\n  version: 3.11.0\n": false,
+		"A: plaintext\nsops: {}\n":                                              false,
+		"A: hunter2\n":                                                          false,
+		"A: 5\nsops:\n  version: 3.11.0\n":                                      false,
+		"A: ENC[AES256_GCM,data:x]\nEMPTY: \"\"\nsops:\n  version: 3.11.0\n":    true,
+	} {
+		if got := IsEncrypted([]byte(doc)); got != want {
+			t.Errorf("IsEncrypted(%q) = %v, want %v", doc, got, want)
+		}
+	}
+}
+
 func TestMissingFileIsEmpty(t *testing.T) {
 	m, err := (SOPS{}).Load(filepath.Join(t.TempDir(), "nope.yaml"))
 	if err != nil || len(m) != 0 {
