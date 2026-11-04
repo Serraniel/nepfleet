@@ -19,6 +19,8 @@ For autocompletion and validation in your editor, start `template.yaml` with:
 
 The schema checks the structure. `template validate` also checks the compose file, the image policies and the integration labels, which a schema cannot express.
 
+`nepfleet template index <root>` prints `index.json`, the catalogue of every template under `root`: metadata, version, images and tracks, integration flags, inputs, volumes and the available migrations. Frontends use it to list and filter templates and to build the install wizard without reading every `template.yaml`. It refuses to index an invalid template.
+
 ```yaml
 apiVersion: nepfleet/v1alpha1
 kind: Template
