@@ -192,6 +192,16 @@ func printPlan(w io.Writer, p *deploy.Plan) {
 	for _, d := range p.Destructive {
 		fmt.Fprintf(w, "  ⚠ DESTRUCTIVE: %s\n", d)
 	}
+	if len(p.Steps) > 0 {
+		fmt.Fprintln(w, "  steps:")
+		for i, s := range p.Steps {
+			mark := ""
+			if s.Destructive {
+				mark = " ⚠"
+			}
+			fmt.Fprintf(w, "    %d. %s%s\n", i+1, s.Text, mark)
+		}
+	}
 }
 
 func cmdPlan(args []string, stdout, stderr io.Writer) error {

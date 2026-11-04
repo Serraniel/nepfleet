@@ -50,6 +50,8 @@ type Plan struct {
 	Changes     []Change `json:"changes"`
 	Destructive []string `json:"destructive,omitempty"`
 	Generated   []string `json:"generated,omitempty"` // secrets created by this apply
+	// Steps is everything apply will do, in order (see steps.go).
+	Steps []Step `json:"steps,omitempty"`
 }
 
 // Empty reports whether nothing would change.
@@ -96,6 +98,13 @@ func PlanStack(name, mode, dir string, out *render.Output, pins map[string]strin
 		return nil, err
 	}
 	p.First = man == nil
+	pinChanges := map[string]bool{}
+	var oldCompose, oldEnv []byte
+	defer func() {
+		if p != nil {
+			p.addSteps(oldCompose, oldEnv, out, pinChanges)
+		}
+	}()
 	paths := make([]string, 0, len(out.Files))
 	for path := range out.Files {
 		paths = append(paths, path)
@@ -118,7 +127,8 @@ func PlanStack(name, mode, dir string, out *render.Output, pins map[string]strin
 				p.Changes = append(p.Changes, Change{Path: path, Kind: Removed})
 			}
 		}
-		oldCompose, _ := os.ReadFile(filepath.Join(dir, render.ComposeFile))
+		oldCompose, _ = os.ReadFile(filepath.Join(dir, render.ComposeFile))
+		oldEnv, _ = os.ReadFile(filepath.Join(dir, render.EnvFile))
 		p.Destructive = destructive(oldCompose, out.Files[render.ComposeFile])
 		imgs := make([]string, 0, len(pins))
 		for img := range pins {
@@ -132,6 +142,7 @@ func PlanStack(name, mode, dir string, out *render.Output, pins map[string]strin
 					d = "- " + was + "\n" + d
 				}
 				p.Changes = append(p.Changes, Change{Path: "image " + img, Kind: Changed, Diff: d})
+				pinChanges[img] = true
 			}
 		}
 	}

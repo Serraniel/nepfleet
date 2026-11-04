@@ -238,3 +238,44 @@ func TestSwarmRollbackPinsRunningDigest(t *testing.T) {
 		t.Fatalf("rollback deploy does not pin the previously running digest:\n%s", last)
 	}
 }
+
+func TestSteps(t *testing.T) {
+	dir := t.TempDir()
+	r := &fakeRunner{}
+	v1 := output("services:\n  web: {image: 'nginx:1', environment: {A: '${X}'}}\n  worker: {image: 'busybox:1'}\n", "X='1'\n")
+	p, _ := PlanStack("app", "compose", dir, v1, nil)
+	var kinds []string
+	for _, s := range p.Steps {
+		kinds = append(kinds, s.Kind+":"+s.Service)
+	}
+	if got := strings.Join(kinds, " "); got != "files: service:web service:worker health: record:" {
+		t.Fatalf("first deployment steps = %s", got)
+	}
+	if _, err := Apply(context.Background(), r, p, v1, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// X changes web's effective config (through the env file), worker goes away,
+	// db is new; the image pin of busybox is irrelevant once worker is gone.
+	v2 := output("services:\n  web: {image: 'nginx:1', environment: {A: '${X}'}}\n  db: {image: 'postgres:18'}\n", "X='2'\n")
+	p, _ = PlanStack("app", "compose", dir, v2, nil)
+	var texts []string
+	for _, s := range p.Steps {
+		texts = append(texts, s.Text)
+		if s.Service == "worker" && !s.Destructive {
+			t.Error("removing a service must be marked destructive")
+		}
+	}
+	all := strings.Join(texts, "\n")
+	for _, want := range []string{"create db", "recreate web", "remove worker"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in steps:\n%s", want, all)
+		}
+	}
+	// Unchanged plan: no steps at all.
+	if _, err := Apply(context.Background(), r, p, v2, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := PlanStack("app", "compose", dir, v2, nil); len(p.Steps) != 0 {
+		t.Errorf("empty plan has steps: %+v", p.Steps)
+	}
+}
