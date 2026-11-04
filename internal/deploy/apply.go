@@ -470,7 +470,7 @@ func Adopt(dir string, out *render.Output) error {
 	if err := writeFiles(dir, out.Files, nil); err != nil {
 		return err
 	}
-	return writeManifest(dir, out.Files, Options{})
+	return writeManifest(dir, out.Files, nil, Options{}) // pins come from the running containers on the first apply
 }
 
 // Applied returns the manifest of the last successful apply, or nil.
