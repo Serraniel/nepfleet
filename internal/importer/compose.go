@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -262,6 +263,9 @@ func extractLiteralSecrets(cfg []byte, env map[string]string, all bool) ([]byte,
 		return nil, nil, nil, err
 	}
 	moved := map[string]movedSecret{}
+	if len(doc.Content) == 0 {
+		return nil, nil, nil, errors.New("the compose configuration is empty")
+	}
 	root := doc.Content[0]
 	services := child(root, "services")
 	for i := 0; services != nil && i+1 < len(services.Content); i += 2 {
