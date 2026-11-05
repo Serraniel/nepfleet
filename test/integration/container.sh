@@ -56,4 +56,8 @@ find "$T/state" -name started | grep -q . || fail "relative bind mount did not r
 docker compose -p $P up -d >/dev/null 2>&1
 for _ in $(seq 20); do curl -fs -o /dev/null http://127.0.0.1:17480/healthz && break; sleep 1; done
 curl -fs -o /dev/null http://127.0.0.1:17480/healthz || fail "API did not start"
+# The health check neptide gates self-updates on must pass.
+for _ in $(seq 30); do [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose -p $P ps -q nepfleet)")" = healthy ] && break; sleep 2; done
+[ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose -p $P ps -q nepfleet)")" = healthy ] || fail "container health check does not pass"
+[ "$(docker inspect -f '{{index .Config.Labels "neptide.enable"}}' "$(docker compose -p $P ps -q nepfleet)")" = true ] || fail "not opted in to neptide updates"
 echo PASS

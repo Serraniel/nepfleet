@@ -53,6 +53,21 @@ services:
       - /srv/nepfleet:/srv/nepfleet
       - /proc/sys/fs/binfmt_misc:/host/binfmt_misc:ro
     working_dir: /srv/nepfleet/fleet
+    # neptide (the neptide system stack) updates this container: a container
+    # cannot replace itself, so neptide does it from outside, waits for this
+    # health check and rolls back when the new version does not pass.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:7480/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      start_interval: 2s   # check quickly after a (re)start, so updates finish fast
+      retries: 3
+    labels:
+      neptide.enable: "true"
+      # Only bind mounts, and /srv/nepfleet also holds every stack's data:
+      # never roll that back together with NepFleet.
+      neptide.snapshot: "false"
     # Loopback only. Expose the API through the Caddy system stack (TLS) instead.
     ports:
       - "127.0.0.1:7480:7480"
