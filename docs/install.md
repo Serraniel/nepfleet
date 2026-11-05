@@ -61,7 +61,7 @@ Things to know:
 - **`doctor` sees less from a container.** It cannot see host processes or Docker's data directory, so the port and disk checks show ⚠ with a command to run on the host instead.
 - **Rollback commits** use `NEPFLEET_GIT_NAME` and `NEPFLEET_GIT_EMAIL` from `.env` (default `NepFleet <nepfleet@localhost>`) and are not signed.
 - **`import compose` only sees projects under `/srv/nepfleet`.** It reads each project's files, and the container sees only that mount. To adopt a project elsewhere, add its directory to `volumes:` at the same path, or run the import natively.
-- **Self-updates are planned** ([#17](https://github.com/Serraniel/nepfleet/issues/17)): a short-lived helper container will recreate NepFleet, because a container cannot replace itself mid-update. Until then, `docker compose pull && docker compose up -d`.
+- **Self-updates go through neptide.** A container cannot replace itself, so NepFleet leaves it to the neptide system stack (`nepfleet new neptide`), which runs as its own container. `compose.yaml` opts NepFleet in (`neptide.enable`) and gives it a health check: neptide pulls the new image, recreates NepFleet with the same settings, waits until it is healthy and restores the old container if it is not. With the `:latest` tag that follows releases; pin a version and set `neptide.track: minor` to choose how far it may go. Without neptide, update by hand: `docker compose pull && docker compose up -d`.
 
 ### Upgrading from the earlier compose.yaml
 
