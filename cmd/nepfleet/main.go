@@ -43,6 +43,7 @@ Usage:
   nepfleet plan [stack...] [--json]     show what apply would change
   nepfleet apply [stack...]             apply, health-gated, rolls back on failure
   nepfleet render <stack>               print rendered files (secrets masked)
+  nepfleet updates [stack...] [--json]  image updates within each track, beyond it, and rebuilt tags (read-only)
   nepfleet secret set <stack> <KEY>     store a secret (encrypted, read from stdin)
   nepfleet secret set --global <KEY>    store a fleet-wide secret (fleet.secret.yaml)
   nepfleet secret check                 fail if any *.secret.yaml is not encrypted
@@ -121,6 +122,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdHistory(args[1:], stdout, stderr)
 	case "enable":
 		return cmdEnable(args[1:], stdout, stderr)
+	case "updates":
+		return cmdUpdates(args[1:], stdout, stderr)
 	case "key":
 		return cmdKey(args[1:], stdout, stderr)
 	case "mirror":
