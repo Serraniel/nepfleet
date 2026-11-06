@@ -79,6 +79,20 @@
             "null"
           ]
         },
+        "mirrors": {
+          "description": "Mirrors are git URLs of second remotes the fleet repository is pushed to (nepfleet mirror), so it survives the loss of its main remote.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "notifications": {
           "additionalProperties": false,
           "properties": {

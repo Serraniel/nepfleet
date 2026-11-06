@@ -1106,6 +1106,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 			checks = append(checks, doctor.Check{Name: "Shared folder", Status: doctor.OK, Detail: fmt.Sprintf("@%s %s (used by %s)", name, p, strings.Join(used[name], ", ")), Fix: ""})
 		}
 	}
+	checks = append(checks, backupChecks(e, c.stateDir, in.KeyFromEnv)...)
 	for _, err := range renderErrs {
 		checks = append(checks, doctor.Check{Name: "Stacks", Status: doctor.Fail, Detail: err.Error(), Fix: "fix the stack, then run doctor again"})
 	}

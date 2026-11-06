@@ -109,6 +109,22 @@ Swarm stacks and Portainer follow with their own issues.
 - **How images are pinned:** in Compose mode the digest is pulled and tagged locally, so the compose file and its config hash stay unchanged. In Swarm mode the generated stack file uses `image:tag@digest`.
 - **Images that cannot be resolved,** such as local builds or private registries without credentials, run by tag. `apply` reports them.
 
+## Copies of the key and the repository
+
+Every secret is encrypted to the age keys in `fleet.yaml`. If you lose the private key, every secret is gone, so keep a copy somewhere other than this host:
+
+- **`nepfleet key backup --out /media/usb/nepfleet-key.age`:** writes the key encrypted with a passphrase that `age` asks for. With `--recipient age1…`, it's encrypted to another key instead, for example one in your password manager.
+  - The file is created owner-only (0600) and never overwrites anything.
+  - It may not end up in the fleet repository, also not through symlinks.
+  - Restore it with `age -d -o ~/.config/sops/age/keys.txt -- nepfleet-key.age`, adding `-i <identity>` for a recipient copy.
+- **A second recipient:** a second public key in `spec.secrets.age` also counts as a copy, once the files are re-encrypted (`sops updatekeys`), because its holder can decrypt every secret. Keep it on a different machine.
+- **`spec.mirrors`:** lists git URLs of second remotes, such as another forge or a Storage Box over SSH.
+  - `nepfleet mirror` fetches origin and pushes its branches and all tags to every mirror. A clone that is behind still publishes the current state.
+  - It never force-pushes and never deletes. A mirror with commits of its own makes it fail rather than be overwritten.
+  - Run it from a timer, or after pushing.
+
+`nepfleet doctor` warns while it knows of no copy of the key (including when a recorded copy has been moved away), when the key comes from `SOPS_AGE_KEY` and cannot be checked, and while the repository has no mirror or this host has not mirrored yet.
+
 ## Rules
 
 - NepFleet commits only what it owns, such as `lock.yaml`, rendered output and imported stacks. Each commit message says why the change was made.
