@@ -38,3 +38,15 @@ func FuzzExtractLiteralSecrets(f *testing.F) {
 		_ = volumes(cfg)
 	})
 }
+
+// As docker compose reads .env files: \' inside single quotes is a quote.
+func TestSingleQuotedBackslash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("A='it\\'s'\nB='x\\y'\nC='z'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := parseEnvFile(path, map[string]string{})
+	if err != nil || got["A"] != "it's" || got["B"] != `x\y` || got["C"] != "z" {
+		t.Errorf("got %v, %v", got, err)
+	}
+}

@@ -7,8 +7,10 @@
 set -euo pipefail
 time=${1:-15s}
 failed=0
+# A package that does not build must fail here, not be skipped silently.
+go vet ./...
 for pkg in $(go list ./...); do
-  for target in $(go test "$pkg" -list '^Fuzz' 2>/dev/null | grep '^Fuzz' || true); do
+  for target in $(go test "$pkg" -list '^Fuzz' | grep '^Fuzz' || true); do
     echo "== $pkg $target ($time)"
     go test "$pkg" -run '^$' -fuzz "^${target}\$" -fuzztime "$time" || failed=1
   done
