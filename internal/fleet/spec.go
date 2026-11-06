@@ -61,6 +61,9 @@ type Spec struct {
 	// Logging is the log driver of every service that sets none itself, so
 	// container logs rotate instead of filling the disk.
 	Logging *Logging `yaml:"logging"`
+	// Egress: hosts the containers must not reach (known telemetry by
+	// default, see TelemetryHosts).
+	Egress *Egress `yaml:"egress"`
 }
 
 // NotifyChannel is one notification destination.
@@ -165,6 +168,9 @@ type StackSpec struct {
 	Updates string           `yaml:"updates" schema:"enum=off|notify|auto;default=notify"` // off | notify | auto
 	// Logging overrides the fleet's default log settings for this stack.
 	Logging *Logging `yaml:"logging"`
+	// Egress: hosts the containers must not reach (known telemetry by
+	// default, see TelemetryHosts).
+	Egress *Egress `yaml:"egress"`
 	// Snapshot: auto copies the volumes before an apply that recreates
 	// running services and restores them on rollback; off skips that.
 	Snapshot string `yaml:"snapshot" schema:"enum=auto|off;default=auto"`
@@ -326,6 +332,9 @@ func Load(dir string) (*Fleet, error) {
 			return nil, fmt.Errorf("fleet.yaml: notifications.routes[%d]: minSeverity is info, warning or error", i)
 		}
 	}
+	if err := checkEgress(f.Spec.Egress); err != nil {
+		return nil, fmt.Errorf("fleet.yaml: spec.egress: %w", err)
+	}
 	for i := range f.Spec.UptimeKuma {
 		k := &f.Spec.UptimeKuma[i]
 		if k.RollingUpdates == "" {
@@ -441,6 +450,9 @@ func loadStack(dir string) (*Stack, error) {
 	}
 	if s.Spec.Target == "" {
 		bad("spec.target is required (a host name, or local)")
+	}
+	if err := checkEgress(s.Spec.Egress); err != nil {
+		bad("spec.egress: %v", err)
 	}
 	if s.Spec.Mode == "" {
 		s.Spec.Mode = "compose"
