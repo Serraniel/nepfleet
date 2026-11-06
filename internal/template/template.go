@@ -10,10 +10,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -97,6 +99,9 @@ type Supports struct {
 	AutoUpdate bool `yaml:"autoUpdate" json:"autoUpdate"`
 	Backup     bool `yaml:"backup" json:"backup"`
 	SSO        bool `yaml:"sso" json:"sso"`
+	// Metrics: services expose Prometheus metrics, declared with
+	// nepfleet.metrics.port (and optional .path, .scheme) labels.
+	Metrics bool `yaml:"metrics" json:"metrics"`
 }
 
 // Input is a value the wizard asks the user for.
@@ -345,9 +350,13 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 	}
 	var doc struct {
 		Services map[string]struct {
-			Image  string `yaml:"image"`
-			Labels any    `yaml:"labels"`
+			Image    string `yaml:"image"`
+			Labels   any    `yaml:"labels"`
+			Networks any    `yaml:"networks"`
 		} `yaml:"services"`
+		Networks map[string]struct {
+			Name string `yaml:"name"`
+		} `yaml:"networks"`
 	}
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return []error{fmt.Errorf("%s: %w", t.Spec.Compose, err)}
@@ -388,9 +397,27 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 
 	// Integration badges must be true: a flag needs its labels, labels need their flag.
 	keys := map[string]bool{}
-	for _, svc := range doc.Services {
+	for _, name := range slices.Sorted(maps.Keys(doc.Services)) {
+		svc := doc.Services[name]
 		for _, k := range labelKeys(svc.Labels) {
 			keys[k] = true
+		}
+		labels := labelValues(svc.Labels)
+		for _, err := range checkMetrics(labels) {
+			errs = append(errs, fmt.Errorf("%s: service %s: %w", t.Spec.Compose, name, err))
+		}
+		// Prometheus scrapes over the ingress network (one address per
+		// container), so services with metrics must be on it.
+		if _, ok := labels[metricsPrefix+"port"]; ok {
+			onIngress := false
+			for _, n := range serviceNetworks(svc.Networks) {
+				if doc.Networks[n].Name == "${NEPFLEET_INGRESS_NETWORK}" {
+					onIngress = true
+				}
+			}
+			if !onIngress {
+				errs = append(errs, fmt.Errorf("%s: service %s has %sport but is not on the ingress network (name: ${NEPFLEET_INGRESS_NETWORK}), where Prometheus scrapes", t.Spec.Compose, name, metricsPrefix))
+			}
 		}
 	}
 	for _, in := range []struct {
@@ -404,6 +431,7 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		}, "caddy"},
 		{"monitoring", t.Spec.Supports.Monitoring, func(k string) bool { return strings.HasPrefix(k, "kuma.") }, "kuma.*"},
 		{"dashboard", t.Spec.Supports.Dashboard, func(k string) bool { return strings.HasPrefix(k, "homepage.") }, "homepage.*"},
+		{"metrics", t.Spec.Supports.Metrics, func(k string) bool { return strings.HasPrefix(k, metricsPrefix) }, metricsPrefix + "port"},
 	} {
 		has := false
 		for k := range keys {
@@ -431,6 +459,88 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		}
 	}
 	return errs
+}
+
+const metricsPrefix = "nepfleet.metrics."
+
+var portRe = regexp.MustCompile(`^[1-9][0-9]{0,4}$`)
+
+var interpolated = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
+
+// checkMetrics validates one service's nepfleet.metrics.* labels: a port
+// (a number or one ${VAR}), an optional absolute path and http(s) scheme.
+func checkMetrics(labels map[string]string) []error {
+	var errs []error
+	has := false
+	for k, v := range labels {
+		key, ok := strings.CutPrefix(k, metricsPrefix)
+		if !ok {
+			continue
+		}
+		has = true
+		switch key {
+		case "port":
+			if n, err := strconv.Atoi(v); (!portRe.MatchString(v) || err != nil || n > 65535) && !interpolated.MatchString(v) {
+				errs = append(errs, fmt.Errorf("%s%s must be a port number, got %q", metricsPrefix, key, v))
+			}
+		case "path":
+			if !strings.HasPrefix(v, "/") {
+				errs = append(errs, fmt.Errorf("%s%s must start with /, got %q", metricsPrefix, key, v))
+			}
+		case "scheme":
+			if v != "http" && v != "https" {
+				errs = append(errs, fmt.Errorf("%s%s must be http or https, got %q", metricsPrefix, key, v))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("unknown label %s (port, path and scheme are known)", k))
+		}
+	}
+	if _, ok := labels[metricsPrefix+"port"]; has && !ok {
+		errs = append(errs, fmt.Errorf("%sport is required with the other %s* labels", metricsPrefix, metricsPrefix))
+	}
+	slices.SortFunc(errs, func(a, b error) int { return strings.Compare(a.Error(), b.Error()) })
+	return errs
+}
+
+// serviceNetworks lists a service's networks, written as a list or a map.
+func serviceNetworks(n any) []string {
+	var out []string
+	switch l := n.(type) {
+	case []any:
+		for _, x := range l {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+	case map[string]any:
+		for k := range l {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// labelValues reads both compose label forms into a map.
+func labelValues(labels any) map[string]string {
+	out := map[string]string{}
+	switch l := labels.(type) {
+	case map[string]any:
+		for k, v := range l {
+			if v == nil {
+				out[k] = "" // a key without a value
+				continue
+			}
+			out[k] = fmt.Sprint(v)
+		}
+	case []any:
+		for _, item := range l {
+			if s, ok := item.(string); ok {
+				k, v, _ := strings.Cut(s, "=")
+				out[k] = v
+			}
+		}
+	}
+	return out
 }
 
 // labelKeys accepts both compose label forms: a map or a "k=v" list.

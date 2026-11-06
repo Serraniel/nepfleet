@@ -110,6 +110,7 @@ func TestForSwarm(t *testing.T) {
       caddy.reverse_proxy: "{{upstreams 80}}"
       com.example.keep: "yes"
       docker-volume-backup.stop-during-backup: "true"
+      nepfleet.metrics.port: "9100"
     deploy:
       replicas: 2
   worker:
@@ -125,6 +126,9 @@ func TestForSwarm(t *testing.T) {
 		}
 	}
 	webDeploy := s[strings.Index(s, "deploy:"):strings.Index(s, "worker:")]
+	if !strings.Contains(webDeploy, "nepfleet.metrics.port") {
+		t.Errorf("metrics label not moved to deploy.labels:\n%s", s)
+	}
 	if !strings.Contains(webDeploy, "docker-volume-backup.stop-during-backup") {
 		t.Errorf("backup label not moved to deploy.labels:\n%s", s)
 	}
