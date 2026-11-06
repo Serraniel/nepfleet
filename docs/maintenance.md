@@ -18,6 +18,12 @@ nepfleet secret set --global KUMA_PASSWORD
 
 List one entry per Kuma, for example a global instance and a stack's own instance.
 
+With the `uptime-kuma` template (`nepfleet enable uptime`), NepFleet sets up Kuma by itself right after its first apply:
+
+- It completes the database step (SQLite).
+- It creates the admin from the stack's `KUMA_USERNAME` and `KUMA_PASSWORD`, talking to the container directly. So Kuma's first-run screen is never left open on a public domain.
+- It prints the `uptimeKuma` entry for `fleet.yaml`.
+
 ## When a window is opened
 
 - `apply` changes a stack's compose file, env file or image pins, and the stack has AutoKuma monitors (`kuma.<id>.<type>.name` labels). The window covers exactly those monitors.
