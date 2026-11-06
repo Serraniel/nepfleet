@@ -88,7 +88,7 @@ func TestPortainer(t *testing.T) {
 }
 
 func TestPortainerRedirectIsRefused(t *testing.T) {
-	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	other := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-API-Key") != "" {
 			t.Error("token forwarded to another host")
 		}
