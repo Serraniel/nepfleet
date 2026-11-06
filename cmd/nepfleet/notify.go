@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/notify"
@@ -70,6 +72,9 @@ func (e *env) emit(n *notify.Notifier, stdout io.Writer, ev notify.Event) {
 		return
 	}
 	ev.Host = e.host
+	if u := e.fleet.Spec.Notifications.UIURL; u != "" && ev.Stack != "" && ev.URL == "" {
+		ev.URL = strings.TrimRight(u, "/") + "/stacks/" + url.PathEscape(ev.Stack)
+	}
 	if err := n.Send(ev); err != nil {
 		fmt.Fprintf(stdout, "%s: ⚠ notification: %v\n", ev.Stack, err)
 	}

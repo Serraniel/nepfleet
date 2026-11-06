@@ -34,6 +34,7 @@ type payload struct {
 	Host     string `json:"host,omitempty"`
 	Title    string `json:"title"`
 	Message  string `json:"message"`
+	URL      string `json:"url,omitempty"`
 	Time     string `json:"time"`
 }
 
@@ -56,7 +57,7 @@ func Sign(secret []byte, timestamp string, body []byte) string {
 
 func (w *webhook) send(e Event) error {
 	now := w.now().UTC()
-	body, err := json.Marshal(payload{Event: e.Name, Severity: e.Severity, Stack: e.Stack, Host: e.Host, Title: e.Title, Message: e.Message, Time: now.Format(time.RFC3339)})
+	body, err := json.Marshal(payload{Event: e.Name, Severity: e.Severity, Stack: e.Stack, Host: e.Host, Title: e.Title, Message: e.Message, URL: e.URL, Time: now.Format(time.RFC3339)})
 	if err != nil {
 		return err
 	}
