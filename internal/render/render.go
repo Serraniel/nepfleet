@@ -235,6 +235,11 @@ func dotenv(env map[string]string) ([]byte, error) {
 		if strings.ContainsAny(v, "'\n\r") {
 			return nil, fmt.Errorf("%s contains a single quote or newline, which an env file cannot hold literally", k)
 		}
+		// docker compose reads \' inside single quotes as an escaped quote,
+		// so a trailing backslash would swallow the closing quote.
+		if strings.HasSuffix(v, `\`) {
+			return nil, fmt.Errorf("%s ends with a backslash, which an env file cannot hold literally", k)
+		}
 		fmt.Fprintf(&b, "%s='%s'\n", k, v)
 	}
 	return []byte(b.String()), nil

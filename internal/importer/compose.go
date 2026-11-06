@@ -10,6 +10,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -281,6 +282,9 @@ func extractLiteralSecrets(cfg []byte, env map[string]string, all bool) ([]byte,
 		return nil, nil, nil, err
 	}
 	moved := map[string]movedSecret{}
+	if len(doc.Content) == 0 {
+		return nil, nil, nil, errors.New("the compose configuration is empty")
+	}
 	root := doc.Content[0]
 	services := child(root, "services")
 	for i := 0; services != nil && i+1 < len(services.Content); i += 2 {
@@ -418,11 +422,26 @@ func parseEnvFile(path string, vars map[string]string) (map[string]string, []str
 		var v string
 		switch {
 		case strings.HasPrefix(raw, "'"):
-			end := strings.Index(raw[1:], "'")
-			if end < 0 {
+			// As docker compose: \' is a quote inside the value, any other
+			// backslash is literal.
+			var b strings.Builder
+			closed := false
+			for i := 1; i < len(raw); i++ {
+				if raw[i] == '\\' && i+1 < len(raw) && raw[i+1] == '\'' {
+					b.WriteByte('\'')
+					i++
+					continue
+				}
+				if raw[i] == '\'' {
+					closed = true
+					break
+				}
+				b.WriteByte(raw[i])
+			}
+			if !closed {
 				return nil, nil, fmt.Errorf("%s:%d: unterminated single quote", path, n)
 			}
-			v = raw[1 : end+1]
+			v = b.String()
 		case strings.HasPrefix(raw, `"`):
 			var b strings.Builder
 			i := 1

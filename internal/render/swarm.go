@@ -92,6 +92,9 @@ func PinImages(compose []byte, pins map[string]string) ([]byte, error) {
 	if err := yaml.Unmarshal(compose, &doc); err != nil {
 		return nil, err
 	}
+	if len(doc.Content) == 0 {
+		return nil, fmt.Errorf("empty compose document")
+	}
 	services := mapGet(doc.Content[0], "services")
 	for i := 1; services != nil && i < len(services.Content); i += 2 {
 		if img := mapGet(services.Content[i], "image"); img != nil {
