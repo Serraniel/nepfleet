@@ -45,7 +45,7 @@ spec:
 func stack(values map[string]string) *fleet.Stack {
 	s := &fleet.Stack{}
 	s.Metadata.Name = "myapp"
-	s.Spec.Values = values
+	s.Spec.Values = fleet.Literals(values)
 	return s
 }
 
@@ -148,5 +148,34 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRenderRefs(t *testing.T) {
+	f, tpl := setup(t)
+	s := stack(map[string]string{})
+	s.Spec.Values = map[string]fleet.Value{
+		"DOMAIN":      {From: "web", Value: "DOMAIN"},
+		"ADMIN_TOKEN": {From: "auth", Secret: "TOKEN"},
+	}
+	refs := map[string]string{"DOMAIN": "app.example.org", "ADMIN_TOKEN": "tok3n"}
+	out, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Refs: refs})
+	must(t, err)
+	env := EnvValues(out.Files[EnvFile])
+	if env["DOMAIN"] != "app.example.org" || env["ADMIN_TOKEN"] != "tok3n" {
+		t.Errorf("env = %v", env)
+	}
+	if !out.Secret["ADMIN_TOKEN"] || out.Secret["DOMAIN"] {
+		t.Errorf("masking: %v", out.Secret)
+	}
+	if masked := string(out.Masked(EnvFile)); strings.Contains(masked, "tok3n") {
+		t.Errorf("a referenced secret shows in the plan:\n%s", masked)
+	}
+	// Referenced values are validated like typed ones.
+	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Refs: map[string]string{"DOMAIN": "not a host", "ADMIN_TOKEN": "x"}}); err == nil {
+		t.Error("an invalid referenced hostname must fail")
+	}
+	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl}); err == nil || !strings.Contains(err.Error(), "not resolved") {
+		t.Errorf("unresolved: %v", err)
 	}
 }

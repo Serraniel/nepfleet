@@ -29,6 +29,9 @@ type Input struct {
 	Template *template.Template
 	// Secrets are the decrypted values.secret.yaml.
 	Secrets map[string]string
+	// Refs are the resolved values of references to other stacks
+	// (Stack.Spec.Values entries with from), by key.
+	Refs map[string]string
 	// RenderGID is the group of the host's /dev/dri render nodes, added to
 	// services that get an intel or amd GPU, so non-root images can use it.
 	RenderGID string
@@ -69,7 +72,11 @@ func Render(in Input) (*Output, error) {
 			return nil, err
 		}
 		for k, v := range in.Stack.Spec.Values {
-			env[k] = v
+			r, err := in.value(k, v, out)
+			if err != nil {
+				return nil, err
+			}
+			env[k] = r
 		}
 		for k, v := range in.Secrets {
 			env[k] = v
@@ -113,6 +120,22 @@ func Render(in Input) (*Output, error) {
 	return out, nil
 }
 
+// value is a stack value with references resolved; values taken from
+// another stack's secrets are masked like this stack's own.
+func (in Input) value(key string, v fleet.Value, out *Output) (string, error) {
+	if !v.IsRef() {
+		return v.Literal, nil
+	}
+	r, ok := in.Refs[key]
+	if !ok {
+		return "", fmt.Errorf("%s: %s is not resolved", key, v)
+	}
+	if v.Secret != "" {
+		out.Secret[key] = true
+	}
+	return r, nil
+}
+
 // values validates stack values against the template's inputs and fills env.
 func values(in Input, env map[string]string, out *Output) error {
 	t := in.Template
@@ -120,15 +143,26 @@ func values(in Input, env map[string]string, out *Output) error {
 	known := map[string]bool{}
 	for _, inp := range t.Spec.Inputs {
 		known[inp.Name] = true
-		v, given := in.Stack.Spec.Values[inp.Name]
+		raw, given := in.Stack.Spec.Values[inp.Name]
+		v := raw.Literal
+		if given && raw.IsRef() {
+			var err error
+			if v, err = in.value(inp.Name, raw, out); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
 		if inp.Type == "secret" {
-			if given {
+			out.Secret[inp.Name] = true
+			switch {
+			case given && raw.IsRef(): // another stack's value, never stored here
+			case given:
 				errs = append(errs, fmt.Errorf("%s is a secret: set it with `nepfleet secret set %s %s`, not in stack.yaml",
 					inp.Name, in.Stack.Metadata.Name, inp.Name))
 				continue
+			default:
+				v, given = in.Secrets[inp.Name]
 			}
-			v, given = in.Secrets[inp.Name]
-			out.Secret[inp.Name] = true
 		}
 		if !given {
 			v = inp.Default

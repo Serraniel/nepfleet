@@ -125,29 +125,37 @@ func (e *env) resolverOnce() lock.Resolver {
 	return lock.Registry{Client: e.reg}
 }
 
+// stacks returns the named stacks, or those planned on this host, ordered
+// so that stacks come after the stacks they take values from.
 func (e *env) stacks(names []string) ([]*fleet.Stack, error) {
+	all, err := e.fleet.Stacks()
+	switch {
+	case err != nil && len(names) == 0:
+		return nil, err
+	case err == nil:
+		// Cycles are refused fleet-wide, not only among the stacks selected.
+		// (A broken other stack does not block naming one that works.)
+		if _, err := fleet.OrderByRefs(all); err != nil {
+			return nil, err
+		}
+	}
+	var mine []*fleet.Stack
 	if len(names) > 0 {
-		var out []*fleet.Stack
 		for _, n := range names {
 			s, err := e.fleet.LoadStack(n)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, s)
-		}
-		return out, nil
-	}
-	all, err := e.fleet.Stacks()
-	if err != nil {
-		return nil, err
-	}
-	var mine []*fleet.Stack
-	for _, s := range all {
-		if s.Spec.Target == e.host || s.Spec.Target == "local" {
 			mine = append(mine, s)
 		}
+	} else {
+		for _, s := range all {
+			if s.Spec.Target == e.host || s.Spec.Target == "local" {
+				mine = append(mine, s)
+			}
+		}
 	}
-	return mine, nil
+	return fleet.OrderByRefs(mine)
 }
 
 func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
@@ -161,7 +169,11 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			return nil, err
 		}
 	}
-	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, RenderGID: doctor.RenderGID("/")})
+	refs, err := e.resolveRefs(s)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
+	}
+	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RenderGID: doctor.RenderGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -1046,7 +1058,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 			continue // reported with the stack's render error
 		}
 		for _, inp := range tpl.Spec.Inputs {
-			v := cmp.Or(s.Spec.Values[inp.Name], inp.Default)
+			v := cmp.Or(s.Spec.Values[inp.Name].Literal, inp.Default)
 			switch {
 			case v == "" || v == "none":
 			case inp.Type == "device":
