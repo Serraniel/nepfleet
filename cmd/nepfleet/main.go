@@ -39,6 +39,7 @@ Usage:
   nepfleet init [dir]                   create a fleet repository
   nepfleet doctor                       check that this host can run what is planned for it
   nepfleet new <template> [name]        create a stack from a template (asks for its inputs)
+  nepfleet enable [feature]             add an opt-in feature (ingress, logs, uptime, dashboard, …) as a system stack; lists them without args
   nepfleet plan [stack...] [--json]     show what apply would change
   nepfleet apply [stack...]             apply, health-gated, rolls back on failure
   nepfleet render <stack>               print rendered files (secrets masked)
@@ -118,6 +119,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdSecret(args[1:], stdout, stderr)
 	case "history":
 		return cmdHistory(args[1:], stdout, stderr)
+	case "enable":
+		return cmdEnable(args[1:], stdout, stderr)
 	case "key":
 		return cmdKey(args[1:], stdout, stderr)
 	case "mirror":
