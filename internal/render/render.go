@@ -170,7 +170,7 @@ func values(in Input, env map[string]string, out *Output) error {
 		// An empty value means unset for inputs whose type has no empty
 		// value (an enum, a number, a host name…): the default applies, or
 		// the input is missing. Otherwise "" would skip every check.
-		if !given || (v == "" && typedInput(inp.Type)) {
+		if !given || (v == "" && TypedInput(inp.Type)) {
 			v = inp.Default
 		}
 		if v == "" {
@@ -223,8 +223,9 @@ var (
 	hostnameRe = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
 )
 
-// typedInput: an empty string is not a valid value of this input type.
-func typedInput(typ string) bool {
+// TypedInput reports an input type that has no empty value, so
+// an empty value means unset (the default applies).
+func TypedInput(typ string) bool {
 	return slices.Contains([]string{"enum", "bool", "int", "hostname", "url", "email", "gpu"}, typ)
 }
 
