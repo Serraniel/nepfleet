@@ -108,6 +108,13 @@ Swarm stacks and Portainer follow with their own issues.
 - **Rollback** of a stack restores its old `lock.yaml`, so exactly the old digests run again.
 - **How images are pinned:** in Compose mode the digest is pulled and tagged locally, so the compose file and its config hash stay unchanged. In Swarm mode the generated stack file uses `image:tag@digest`.
 - **Images that cannot be resolved,** such as local builds or private registries without credentials, run by tag. `apply` reports them.
+- **The template's commit** is pinned too: `template: {source: official, commit: <sha>}`.
+  - A stack renders from that commit, even after the source's branch has moved, so a stack's revision means the same files later.
+  - `nepfleet apply --update-lock` moves it to the source's current commit, and the plan shows `template official@<old> → official@<new>`. If the files don't change, only the pin moves.
+  - The pinned commit is checked out once into the source cache (`sources/pinned/<source>@<commit>`).
+  - Raising the template `version` in `stack.yaml` moves the pin as well, and the plan shows the move.
+  - `--no-lock` writes neither image digests nor the template pin.
+  - Local path sources aren't pinned.
 
 ## Copies of the key and the repository
 

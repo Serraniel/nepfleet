@@ -205,7 +205,7 @@ func ResolveUpdate(ctx context.Context, r Runner, stack string, out *render.Outp
 	if err != nil {
 		return nil, nil, err
 	}
-	next := &lock.Lock{Images: map[string]string{}}
+	next := &lock.Lock{Images: map[string]string{}, Template: l.Template} // the template pin stays
 	for k, v := range l.Images {
 		next.Images[k] = v
 	}

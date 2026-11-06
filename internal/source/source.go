@@ -18,6 +18,9 @@ import (
 	"github.com/Serraniel/nepfleet/internal/template"
 )
 
+// ErrVersion means the template's version differs from the stack's pin.
+var ErrVersion = errors.New("version mismatch")
+
 // Resolver turns sources into directories.
 type Resolver struct {
 	Fleet *fleet.Fleet
@@ -33,6 +36,9 @@ type Resolver struct {
 type Resolved struct {
 	Dir    string
 	Commit string // empty for local paths outside git
+	// Pinnable: a git URL source, whose commits can be checked out again.
+	// Local paths are used as they are.
+	Pinnable bool
 }
 
 // Resolve returns the source's directory, fetching it once per Resolver.
@@ -55,6 +61,7 @@ func (r *Resolver) Resolve(name string) (Resolved, error) {
 		res.Commit, _ = git(dir, "rev-parse", "HEAD")
 	} else {
 		res, err = r.clone(src)
+		res.Pinnable = true
 	}
 	if err != nil {
 		return Resolved{}, err
@@ -73,6 +80,36 @@ func (r *Resolver) Template(ref fleet.TemplateRef) (*template.Template, Resolved
 	if err != nil {
 		return nil, res, err
 	}
+	return r.load(ref, res)
+}
+
+// TemplateAt loads a template from a source at a given commit (a lock pin):
+// the commit is checked out once into its own directory next to the clone.
+func (r *Resolver) TemplateAt(ref fleet.TemplateRef, commit string) (*template.Template, Resolved, error) {
+	res, err := r.Resolve(ref.Source)
+	if err != nil {
+		return nil, res, err
+	}
+	if commit == res.Commit || !res.Pinnable {
+		return r.load(ref, res)
+	}
+	dir := filepath.Join(filepath.Dir(res.Dir), "pinned", ref.Source+"@"+commit)
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		if _, err := git(res.Dir, "cat-file", "-e", commit+"^{commit}"); err != nil {
+			return nil, res, fmt.Errorf("source %s has no commit %s (rewritten history?); apply --update-lock moves the pin", ref.Source, commit)
+		}
+		_ = os.RemoveAll(dir)
+		if err := os.MkdirAll(filepath.Dir(dir), 0o750); err != nil {
+			return nil, res, err
+		}
+		if _, err := git(res.Dir, "worktree", "add", "--quiet", "--detach", dir, commit); err != nil {
+			return nil, res, err
+		}
+	}
+	return r.load(ref, Resolved{Dir: dir, Commit: commit, Pinnable: true})
+}
+
+func (r *Resolver) load(ref fleet.TemplateRef, res Resolved) (*template.Template, Resolved, error) {
 	for _, tier := range []string{"system", "apps"} {
 		dir := filepath.Join(res.Dir, tier, ref.Name)
 		if _, err := os.Stat(filepath.Join(dir, "template.yaml")); err != nil {
@@ -86,8 +123,8 @@ func (r *Resolver) Template(ref fleet.TemplateRef) (*template.Template, Resolved
 			return nil, res, fmt.Errorf("template %s/%s is invalid: %w", ref.Source, ref.Name, err)
 		}
 		if ref.Version != "" && t.Spec.Version != ref.Version {
-			return nil, res, fmt.Errorf("template %s/%s is version %s, stack pins %s (upgrade with a migration, or change the pin)",
-				ref.Source, ref.Name, t.Spec.Version, ref.Version)
+			return nil, res, fmt.Errorf("template %s/%s is version %s, stack pins %s (upgrade with a migration, or change the pin): %w",
+				ref.Source, ref.Name, t.Spec.Version, ref.Version, ErrVersion)
 		}
 		return t, res, nil
 	}

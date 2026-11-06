@@ -5,6 +5,8 @@ package lock
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -59,5 +61,23 @@ func TestLoadSave(t *testing.T) {
 	back, err := Load(dir)
 	if err != nil || back.Images["nginx:1"] != digest("a") {
 		t.Fatalf("round trip: %v %v", back, err)
+	}
+}
+
+func TestTemplatePin(t *testing.T) {
+	dir := t.TempDir()
+	l := &Lock{Images: map[string]string{}, Template: &TemplatePin{Source: "official", Commit: strings.Repeat("a1", 20)}}
+	if err := l.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil || got.Template == nil || *got.Template != *l.Template {
+		t.Fatalf("round trip: %+v %v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, File), []byte("images: {}\ntemplate: {source: official, commit: main}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Error("a branch name is not a pin")
 	}
 }
