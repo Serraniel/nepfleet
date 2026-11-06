@@ -26,4 +26,25 @@ List one entry per Kuma, for example a global instance and a stack's own instanc
 - A Kuma that is unreachable or misconfigured only produces a warning. It never blocks a deployment.
 - `nepfleet.maintenance: "false"` on a service keeps its monitors out of windows.
 
-Planned: degraded performance during Swarm rolling updates as a status-page incident, host update windows announced in advance, and per-node windows for drains (see the [roadmap](roadmap.md)).
+## Rolling updates in a swarm
+
+A swarm update where every monitored service runs two or more replicas, or runs globally, is not downtime: replicas are replaced one at a time. What each Kuma does then is set by `rollingUpdates` on its entry:
+
+```yaml
+  uptimeKuma:
+    - name: global
+      url: https://status.example.org
+      rollingUpdates: incident     # incident (default) | maintenance | none
+```
+
+- **`incident`:** a warning incident ("Rolling update of <stack>") goes on every status page that shows one of the stack's monitors, and it is resolved when the update is done or rolled back. Only that incident is resolved, so incidents you wrote stay. This needs Uptime Kuma 2.1 or newer; 2.0.x cannot resolve a single incident, so it gets a warning and no incident. If NepFleet is killed during the update, the incident stays until you resolve it in Kuma.
+- **`maintenance`:** a maintenance window, as for every other update.
+- **`none`:** nothing.
+
+`plan` shows which of the three applies. These always get a maintenance window:
+
+- the first deployment of a stack and compose stacks;
+- a monitored service with a single replica, or with a replica count NepFleet can't read (`${VAR}`);
+- an `update_config` that replaces all replicas at once: `parallelism: 0`, or stop-first with `parallelism` at least the replica count.
+
+Planned: host update windows announced in advance, and per-node windows for drains (see the [roadmap](roadmap.md)).

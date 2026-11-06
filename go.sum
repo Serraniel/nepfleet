@@ -1,5 +1,5 @@
-github.com/Serraniel/neptide v0.0.0-20261106135459-d73c4d2a18c4 h1:tVO7Xc1q5LzDcto54hHqf/j5f2FSxQPctsDdFtjChYs=
-github.com/Serraniel/neptide v0.0.0-20261106135459-d73c4d2a18c4/go.mod h1:cXSPVpZ5jBBSdCP0S8YBD4E1cHujBNs9cC6coWFIPsc=
+github.com/Serraniel/neptide v0.0.0-20261106171331-568cddde89a5 h1:xQbip3TRln5AQ+FQt6fNn9ZCiahkudxc26GsKf1C6OQ=
+github.com/Serraniel/neptide v0.0.0-20261106171331-568cddde89a5/go.mod h1:cXSPVpZ5jBBSdCP0S8YBD4E1cHujBNs9cC6coWFIPsc=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
 github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 go.yaml.in/yaml/v3 v3.0.6 h1:zcDfvjXEqTQmpjniUBLc91xYJMB2c4QOFxEF/LCEckM=
