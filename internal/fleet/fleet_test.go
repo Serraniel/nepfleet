@@ -210,3 +210,23 @@ func TestKumaRollingUpdates(t *testing.T) {
 		}
 	}
 }
+
+func TestBlockedHosts(t *testing.T) {
+	off, on := false, true
+	f := &Fleet{}
+	s := &Stack{}
+	if got := BlockedHosts(f, s); !slices.Contains(got, "mobile.events.data.microsoft.com") {
+		t.Errorf("telemetry is blocked by default: %v", got)
+	}
+	f.Spec.Egress = &Egress{BlockTelemetry: &off, Block: []string{"ads.example.org"}}
+	if got := BlockedHosts(f, s); len(got) != 1 || got[0] != "ads.example.org" {
+		t.Errorf("fleet off: %v", got)
+	}
+	s.Spec.Egress = &Egress{BlockTelemetry: &on, Block: []string{"ads.example.org"}}
+	if got := BlockedHosts(f, s); !slices.Contains(got, "scarf.sh") || len(slices.Compact(slices.Clone(got))) != len(got) {
+		t.Errorf("stack on, duplicates once: %v", got)
+	}
+	if checkEgress(&Egress{Block: []string{"*.posthog.com"}}) == nil {
+		t.Error("wildcards cannot be mapped")
+	}
+}

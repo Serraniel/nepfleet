@@ -32,6 +32,34 @@
       "additionalProperties": false,
       "description": "Spec holds the settings that apply to every stack.",
       "properties": {
+        "egress": {
+          "additionalProperties": false,
+          "description": "Egress: hosts the containers must not reach (known telemetry by default, see TelemetryHosts).",
+          "properties": {
+            "block": {
+              "description": "Block lists more host names to resolve to 0.0.0.0.",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "blockTelemetry": {
+              "description": "BlockTelemetry resolves the known telemetry hosts (TelemetryHosts) to 0.0.0.0 in every service; on unless set to false.",
+              "type": "boolean"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "ingressNetwork": {
           "default": "nepfleet_ingress",
           "description": "IngressNetwork is the external network Caddy and the stacks share.",
