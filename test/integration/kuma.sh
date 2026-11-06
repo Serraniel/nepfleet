@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Runs internal/kuma's integration test against a throwaway Uptime Kuma 2.
+# Runs the Kuma client's integration test (neptide's pkg/kuma, which NepFleet
+# uses) against a throwaway Uptime Kuma 2.
 set -euo pipefail
 cleanup() { docker rm -f nepfleet-kuma-it >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -10,4 +11,4 @@ U=http://127.0.0.1:13101
 until curl -sf "$U/setup-database-info" >/dev/null; do sleep 2; done
 curl -sf -X POST -H 'Content-Type: application/json' -d '{"dbConfig":{"type":"sqlite"}}' "$U/setup-database" >/dev/null
 until curl -sf "$U/setup-database-info" | grep -q '"needSetup":false' && curl -sf "$U/socket.io/?EIO=4&transport=polling" >/dev/null; do sleep 2; done
-NEPFLEET_TEST_KUMA_URL=$U go test ./internal/kuma/ -run TestAgainstKuma -count=1 -v
+NEPFLEET_TEST_KUMA_URL=$U go test github.com/Serraniel/neptide/pkg/kuma -run TestAgainstKuma -count=1 -v
