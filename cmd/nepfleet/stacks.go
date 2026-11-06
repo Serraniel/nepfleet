@@ -188,6 +188,11 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 		old := l.Template
 		if old != nil && old.Source == ref.Source && !e.updateLock {
 			tpl, res, err = e.resolver.TemplateAt(*ref, old.Commit)
+			// stack.yaml asks for another template version than the pinned
+			// commit has: an explicit move, shown in the plan.
+			if errors.Is(err, source.ErrVersion) {
+				tpl, res, err = e.resolver.Template(*ref)
+			}
 		} else {
 			tpl, res, err = e.resolver.Template(*ref)
 		}
@@ -266,7 +271,7 @@ func (e *env) noBackupVolumes(s *fleet.Stack) ([]string, error) {
 		if o.Spec.Template == nil || host(o.Spec.Target) != host(s.Spec.Target) {
 			continue
 		}
-		tpl, _, err := e.resolver.Template(*o.Spec.Template)
+		tpl, err := e.pinnedTemplate(o)
 		if err != nil {
 			continue // that stack's own plan reports it
 		}
@@ -341,7 +346,7 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	asJSON := fs.Bool("json", false, "print the plan as JSON")
-	updateLock := fs.Bool("update-lock", false, "include image updates that apply --update-lock would make")
+	updateLock := fs.Bool("update-lock", false, "include what apply --update-lock would change: newer image digests and the template source's current commit")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -393,9 +398,9 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	var confirm multiFlag
 	fs.Var(&confirm, "confirm", "allow destructive changes for this stack (repeatable)")
 	wait := fs.Duration("wait", 3*time.Minute, "health gate timeout per stack")
-	noLock := fs.Bool("no-lock", false, "do not pin images to digests (lock.yaml)")
+	noLock := fs.Bool("no-lock", false, "do not write lock.yaml (image digests, template commit)")
 	noSnapshot := fs.Bool("no-snapshot", false, "do not copy volumes before recreating services (a failed apply then rolls back files and images, not data)")
-	updateLock := fs.Bool("update-lock", false, "re-resolve every image tag to its current digest (shown in the plan before confirming)")
+	updateLock := fs.Bool("update-lock", false, "re-resolve every image tag to its current digest and move the template pin to the source's current commit (shown in the plan before confirming)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -440,7 +445,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		if p.plan.Empty() {
 			// Same files from another commit (or a stack from before pins):
 			// only the pin moves.
-			if p.pinMoved {
+			if p.pinMoved && !*noLock {
 				if err := savePin(s.Dir, p.pin); err != nil {
 					errs = append(errs, err)
 				} else {
@@ -526,7 +531,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 				fmt.Fprintf(stdout, "%s: image digests pinned; commit %s\n", name, filepath.Join(s.Dir, lock.File))
 			}
 		}
-		if err == nil && p.pinMoved {
+		if err == nil && p.pinMoved && !*noLock {
 			if perr := savePin(s.Dir, p.pin); perr != nil {
 				errs = append(errs, perr)
 			} else {
@@ -551,6 +556,22 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// pinnedTemplate loads a stack's template as the stack renders it: at the
+// commit its lock.yaml pins (when that is still valid), else current.
+func (e *env) pinnedTemplate(s *fleet.Stack) (*template.Template, error) {
+	ref := s.Spec.Template
+	if ref == nil {
+		return nil, nil
+	}
+	if l, err := lock.Load(s.Dir); err == nil && l.Template != nil && l.Template.Source == ref.Source {
+		if tpl, _, err := e.resolver.TemplateAt(*ref, l.Template.Commit); err == nil {
+			return tpl, nil
+		}
+	}
+	tpl, _, err := e.resolver.Template(*ref)
+	return tpl, err
 }
 
 // savePin records the template commit in lock.yaml, keeping the image pins.
@@ -1323,7 +1344,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		if s.Spec.Template == nil {
 			continue // plain stacks: values pass through
 		}
-		tpl, _, err := e.resolver.Template(*s.Spec.Template)
+		tpl, err := e.pinnedTemplate(s)
 		if err != nil {
 			continue // reported with the stack's render error
 		}

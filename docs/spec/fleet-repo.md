@@ -112,6 +112,8 @@ Swarm stacks and Portainer follow with their own issues.
   - A stack renders from that commit, even after the source's branch has moved, so a stack's revision means the same files later.
   - `nepfleet apply --update-lock` moves it to the source's current commit, and the plan shows `template official@<old> → official@<new>`. If the files don't change, only the pin moves.
   - The pinned commit is checked out once into the source cache (`sources/pinned/<source>@<commit>`).
+  - Raising the template `version` in `stack.yaml` moves the pin as well, and the plan shows the move.
+  - `--no-lock` writes neither image digests nor the template pin.
   - Local path sources aren't pinned.
 
 ## Copies of the key and the repository

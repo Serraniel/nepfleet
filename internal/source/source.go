@@ -18,6 +18,9 @@ import (
 	"github.com/Serraniel/nepfleet/internal/template"
 )
 
+// ErrVersion means the template's version differs from the stack's pin.
+var ErrVersion = errors.New("version mismatch")
+
 // Resolver turns sources into directories.
 type Resolver struct {
 	Fleet *fleet.Fleet
@@ -120,8 +123,8 @@ func (r *Resolver) load(ref fleet.TemplateRef, res Resolved) (*template.Template
 			return nil, res, fmt.Errorf("template %s/%s is invalid: %w", ref.Source, ref.Name, err)
 		}
 		if ref.Version != "" && t.Spec.Version != ref.Version {
-			return nil, res, fmt.Errorf("template %s/%s is version %s, stack pins %s (upgrade with a migration, or change the pin)",
-				ref.Source, ref.Name, t.Spec.Version, ref.Version)
+			return nil, res, fmt.Errorf("template %s/%s is version %s, stack pins %s (upgrade with a migration, or change the pin): %w",
+				ref.Source, ref.Name, t.Spec.Version, ref.Version, ErrVersion)
 		}
 		return t, res, nil
 	}

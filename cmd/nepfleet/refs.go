@@ -80,7 +80,7 @@ func (r refResolver) value(v fleet.Value, seen []string) (string, bool, error) {
 	if src.Spec.Template != nil {
 		// Only value references need the template (defaults, hints), so a
 		// secret reference works offline with an uncached source too.
-		tpl, _, err := r.e.resolver.Template(*src.Spec.Template)
+		tpl, err := r.e.pinnedTemplate(src)
 		if err != nil {
 			return "", false, fmt.Errorf("%s: %w", v, err)
 		}
