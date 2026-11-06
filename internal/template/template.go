@@ -25,7 +25,7 @@ import (
 const APIVersion = "nepfleet/v1alpha1"
 
 // Builtins are variables NepFleet always provides to a compose file.
-var Builtins = []string{"NEPFLEET_STACK", "NEPFLEET_INGRESS_NETWORK", "TZ"}
+var Builtins = []string{"NEPFLEET_STACK", "NEPFLEET_INGRESS_NETWORK", "TZ", "NEPFLEET_AGE_RECIPIENTS", "NEPFLEET_NO_BACKUP_VOLUMES"}
 
 // Template is the parsed template.yaml.
 type Template struct {
