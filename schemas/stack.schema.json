@@ -185,12 +185,9 @@
                 ],
                 "properties": {
                   "from": {
-                    "description": "From names the stack whose value or secret is used.",
-                    "type": [
-                      "string",
-                      "number",
-                      "boolean"
-                    ]
+                    "description": "The stack whose value or secret is used.",
+                    "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+                    "type": "string"
                   },
                   "secret": {
                     "description": "Secret is the name of a secret of that stack, generated ones included.",

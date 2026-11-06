@@ -3,7 +3,9 @@
 package fleet
 
 import (
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -68,9 +70,14 @@ func (v *Value) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	case yaml.MappingNode:
 		*v = Value{}
+		seen := map[string]bool{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, val := n.Content[i], n.Content[i+1]
-			if val.Kind != yaml.ScalarNode {
+			if seen[k.Value] {
+				return fmt.Errorf("line %d: %s is given twice", k.Line, k.Value)
+			}
+			seen[k.Value] = true
+			if val.Kind != yaml.ScalarNode || val.Tag == "!!null" {
 				return fmt.Errorf("line %d: %s must be a name", val.Line, k.Value)
 			}
 			switch k.Value {
@@ -89,10 +96,23 @@ func (v *Value) UnmarshalYAML(n *yaml.Node) error {
 			return fmt.Errorf("line %d: a reference needs from: <stack name>", n.Line)
 		case (v.Value == "") == (v.Secret == ""):
 			return fmt.Errorf("line %d: a reference to %s needs exactly one of value or secret", n.Line, v.From)
+		case !keyRe.MatchString(v.Value + v.Secret):
+			return fmt.Errorf("line %d: %q is not a value name (letters, digits and _)", n.Line, v.Value+v.Secret)
 		}
 		return nil
 	}
 	return fmt.Errorf("line %d: a value is a scalar or {from, value|secret}", n.Line)
+}
+
+var keyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// MarshalJSON uses the stack.yaml shape: a string, or the reference object.
+func (v Value) MarshalJSON() ([]byte, error) {
+	m, err := v.MarshalYAML()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(m)
 }
 
 // MarshalYAML writes literals as plain scalars.
@@ -117,6 +137,9 @@ func (*Value) SchemaExtend(s map[string]any) {
 		delete(s, k)
 	}
 	ref["required"] = []string{"from"}
+	if props, ok := ref["properties"].(map[string]any); ok {
+		props["from"] = map[string]any{"type": "string", "pattern": nameRe.String(), "description": "The stack whose value or secret is used."}
+	}
 	ref["oneOf"] = []any{
 		map[string]any{"required": []string{"value"}},
 		map[string]any{"required": []string{"secret"}},

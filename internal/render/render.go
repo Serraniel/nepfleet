@@ -32,6 +32,9 @@ type Input struct {
 	// Refs are the resolved values of references to other stacks
 	// (Stack.Spec.Values entries with from), by key.
 	Refs map[string]string
+	// RefSecret marks references whose value comes from a secret, also
+	// through a chain of value references: they are masked.
+	RefSecret map[string]bool
 	// RenderGID is the group of the host's /dev/dri render nodes, added to
 	// services that get an intel or amd GPU, so non-root images can use it.
 	RenderGID string
@@ -130,7 +133,7 @@ func (in Input) value(key string, v fleet.Value, out *Output) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("%s: %s is not resolved", key, v)
 	}
-	if v.Secret != "" {
+	if v.Secret != "" || in.RefSecret[key] {
 		out.Secret[key] = true
 	}
 	return r, nil

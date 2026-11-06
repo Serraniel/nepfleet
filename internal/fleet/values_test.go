@@ -3,6 +3,7 @@
 package fleet
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -41,10 +42,23 @@ func TestValueYAML(t *testing.T) {
 		"values: {K: {from: Bad Name, value: A}}",
 		"values: {K: {from: a, value: A, extra: 1}}",
 		"values: {K: [1]}",
+		"values: {K: {from: a, value: ~}}",
+		"values: {K: {from: a, value: b, from: c}}",
+		"values: {K: {from: a, secret: \"x y\"}}",
 	} {
 		if err := yaml.Unmarshal([]byte(bad), &got); err == nil {
 			t.Errorf("%s: accepted", bad)
 		}
+	}
+}
+
+func TestValueJSON(t *testing.T) {
+	out, err := json.Marshal(map[string]Value{"A": Lit("x"), "K": {From: "jellyfin", Secret: "API_KEY"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"A":"x","K":{"from":"jellyfin","secret":"API_KEY"}}` {
+		t.Errorf("json: %s", out)
 	}
 }
 

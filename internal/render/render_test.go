@@ -171,6 +171,13 @@ func TestRenderRefs(t *testing.T) {
 	if masked := string(out.Masked(EnvFile)); strings.Contains(masked, "tok3n") {
 		t.Errorf("a referenced secret shows in the plan:\n%s", masked)
 	}
+	// A value that reached a secret through a chain is masked too.
+	s.Spec.Values["DOMAIN"] = fleet.Value{From: "web", Value: "DOMAIN"}
+	out, err = Render(Input{Fleet: f, Stack: s, Template: tpl, Refs: refs, RefSecret: map[string]bool{"DOMAIN": true}})
+	must(t, err)
+	if !out.Secret["DOMAIN"] {
+		t.Error("a value from a secret chain must be masked")
+	}
 	// Referenced values are validated like typed ones.
 	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Refs: map[string]string{"DOMAIN": "not a host", "ADMIN_TOKEN": "x"}}); err == nil {
 		t.Error("an invalid referenced hostname must fail")
