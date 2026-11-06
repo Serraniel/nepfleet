@@ -50,7 +50,7 @@ func FuzzRender(f *testing.F) {
 	f.Fuzz(func(t *testing.T, domain, data, dev, gpu, pass, port, mode string) {
 		st := &fleet.Stack{}
 		st.Metadata.Name = "app"
-		st.Spec.Values = map[string]string{"DOMAIN": domain, "DATA": data, "DEV": dev, "GPU": gpu, "PORT": port, "MODE": mode}
+		st.Spec.Values = fleet.Literals(map[string]string{"DOMAIN": domain, "DATA": data, "DEV": dev, "GPU": gpu, "PORT": port, "MODE": mode})
 		out, err := Render(Input{Fleet: fl, Stack: st, Template: tpl, Secrets: map[string]string{"PASS": pass}, RenderGID: "989"})
 		if err != nil {
 			return

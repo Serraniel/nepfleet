@@ -125,23 +125,35 @@ func (e *env) resolverOnce() lock.Resolver {
 	return lock.Registry{Client: e.reg}
 }
 
+// stacks returns the named stacks, or those planned on this host, ordered
+// so that stacks come after the stacks they take values from.
+// A cycle among them is an error; references that loop through stacks not
+// selected are caught when the values are resolved.
 func (e *env) stacks(names []string) ([]*fleet.Stack, error) {
+	mine, err := e.selectStacks(names)
+	if err != nil {
+		return nil, err
+	}
+	return fleet.OrderByRefs(mine)
+}
+
+// selectStacks returns the named stacks, or those planned on this host.
+func (e *env) selectStacks(names []string) ([]*fleet.Stack, error) {
+	var mine []*fleet.Stack
 	if len(names) > 0 {
-		var out []*fleet.Stack
 		for _, n := range names {
 			s, err := e.fleet.LoadStack(n)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, s)
+			mine = append(mine, s)
 		}
-		return out, nil
+		return mine, nil
 	}
 	all, err := e.fleet.Stacks()
 	if err != nil {
 		return nil, err
 	}
-	var mine []*fleet.Stack
 	for _, s := range all {
 		if s.Spec.Target == e.host || s.Spec.Target == "local" {
 			mine = append(mine, s)
@@ -161,7 +173,11 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			return nil, err
 		}
 	}
-	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, RenderGID: doctor.RenderGID("/")})
+	refs, refSecret, err := e.resolveRefs(s)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
+	}
+	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret, RenderGID: doctor.RenderGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -1005,9 +1021,15 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	stacks, err := e.stacks(nil)
+	stacks, err := e.selectStacks(nil)
 	if err != nil {
 		return err
+	}
+	var cycleErr error
+	if ordered, err := fleet.OrderByRefs(stacks); err != nil {
+		cycleErr = err // reported with the other stack problems
+	} else {
+		stacks = ordered
 	}
 	in := doctor.Input{Recipients: e.fleet.Spec.Secrets.Age, AgeKeyFile: ageKeyFile(), LogRotation: fleet.EffectiveLogging(e.fleet, nil).Rotates()}
 	for _, k := range []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_CMD"} {
@@ -1017,6 +1039,9 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	}
 	seen := map[string]bool{}
 	var renderErrs []error
+	if cycleErr != nil {
+		renderErrs = append(renderErrs, cycleErr)
+	}
 	for _, s := range stacks {
 		p, err := e.prepare(s)
 		if err != nil {
@@ -1046,7 +1071,11 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 			continue // reported with the stack's render error
 		}
 		for _, inp := range tpl.Spec.Inputs {
-			v := cmp.Or(s.Spec.Values[inp.Name], inp.Default)
+			raw := s.Spec.Values[inp.Name]
+			if raw.IsRef() {
+				continue // another stack's value: checked where it is defined
+			}
+			v := cmp.Or(raw.Literal, inp.Default)
 			switch {
 			case v == "" || v == "none":
 			case inp.Type == "device":

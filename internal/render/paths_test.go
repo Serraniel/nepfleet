@@ -47,7 +47,7 @@ func TestRenderResolvesNamedPaths(t *testing.T) {
 	f.Spec.Paths = map[string]string{"media": "/mnt/media", "cache": "/srv/cache"}
 	s := &fleet.Stack{}
 	s.Metadata.Name = "jf"
-	s.Spec.Values = map[string]string{"MEDIA": "@media", "HANDLE": "@me@social.example"}
+	s.Spec.Values = fleet.Literals(map[string]string{"MEDIA": "@media", "HANDLE": "@me@social.example"})
 	out, err := Render(Input{Fleet: f, Stack: s, Template: tpl})
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestRenderResolvesNamedPaths(t *testing.T) {
 	if env["MEDIA"] != "/mnt/media" || env["CACHE"] != "/srv/cache" || env["HANDLE"] != "@me@social.example" {
 		t.Errorf("env = %v", env)
 	}
-	s.Spec.Values["MEDIA"] = "@nope"
+	s.Spec.Values["MEDIA"] = fleet.Lit("@nope")
 	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl}); err == nil {
 		t.Error("an undefined name must fail the render")
 	}
