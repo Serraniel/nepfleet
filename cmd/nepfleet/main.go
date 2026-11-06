@@ -51,6 +51,7 @@ Usage:
   nepfleet key backup --out FILE        copy the age key, encrypted with a passphrase (or --recipient)
   nepfleet mirror                       push origin's branches and tags to fleet.yaml's spec.mirrors (no force, no deletes)
   nepfleet history <stack>              versions of a stack in the fleet repository
+  nepfleet restore <stack> --archive F  put a stack's volumes back from a volume-backup archive
   nepfleet rollback <stack> [commit]    restore an earlier version, commit and apply
   nepfleet import compose [project...]  adopt running Compose projects (lists them without args)
   nepfleet import portainer --url URL [stack...]  adopt Portainer stacks (token in PORTAINER_TOKEN or prompted)
@@ -123,6 +124,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdHistory(args[1:], stdout, stderr)
 	case "notify":
 		return cmdNotify(args[1:], stdout, stderr)
+	case "restore":
+		return cmdRestore(args[1:], stdout, stderr)
 	case "enable":
 		return cmdEnable(args[1:], stdout, stderr)
 	case "updates":
