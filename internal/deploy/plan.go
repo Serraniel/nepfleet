@@ -164,7 +164,8 @@ func masked(out *render.Output, path string, content []byte) []byte {
 	var b strings.Builder
 	for _, line := range strings.SplitAfter(string(content), "\n") {
 		if k, _, ok := strings.Cut(line, "="); ok && out.Secret[k] {
-			// A hash prefix lets a diff show *that* a secret changed.
+			// A keyed mark lets a diff show *that* a secret changed, never
+			// anything about its value.
 			line = fmt.Sprintf("%s='•••••• (%s)'\n", k, fingerprint(line))
 		}
 		b.WriteString(line)
