@@ -5,7 +5,6 @@ package render
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -21,6 +20,7 @@ import (
 func FuzzRender(f *testing.F) {
 	f.Add("app.example.org", "@media", "/dev/serial/by-id/usb-x", "intel", "s3cr$t", "8080", "a")
 	f.Add("", "./data", "", "nvidia", "", "x", "")
+	f.Add("a.example", "./x@media", "", "none", "", "80", "a")
 	f.Add("x'y", "@nope", "/dev/../etc", "none", "ends\\", "-1", "b\nc")
 	dir := f.TempDir()
 	compose := "services:\n  app:\n    image: nginx:1.29\n    ports: [\"${PORT}:80\"]\n    volumes: [\"${DATA}:/data\"]\n    environment: {D: \"${DOMAIN}\", P: \"${PASS}\", M: \"${MODE}\"}\n    labels: {caddy: \"${DOMAIN}\"}\n"
@@ -59,7 +59,12 @@ func FuzzRender(f *testing.F) {
 		if env["DOMAIN"] != domain || env["PASS"] != pass || env["PORT"] != port {
 			t.Fatalf("values changed on the way to the env file: %v", env)
 		}
-		if want := strings.Replace(data, "@media", "/mnt/media", 1); data != "" && env["DATA"] != want {
+		// Only a whole @name resolves; "./x@media" is an ordinary path.
+		want := data
+		if data == "@media" {
+			want = "/mnt/media"
+		}
+		if data != "" && env["DATA"] != want {
 			t.Fatalf("DATA %q rendered as %q", data, env["DATA"])
 		}
 		var doc map[string]any

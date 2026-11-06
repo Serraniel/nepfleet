@@ -149,7 +149,7 @@ func (c *conn) handle(s string) (reply string) {
 		if ch != nil {
 			select {
 			case ch <- json.RawMessage(payload):
-			default: // a duplicate ack must not block the read loop
+			default: // defensive: each ack channel receives at most once
 			}
 		}
 	case strings.HasPrefix(s, "42"): // event: 42["name", data]
