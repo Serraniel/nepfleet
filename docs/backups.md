@@ -16,11 +16,16 @@ nepfleet restore immich --archive /srv/backups/backup-2026-11-06T03-00-00.tar.gz
 nepfleet restore immich --archive … --volume db        # only the database volume
 ```
 
-1. **Read the archive:** it is decrypted with the key sops uses (`--identity` for another one), and NepFleet lists the stack's volumes in it: the volumes compose created for the stack's project (by label, not by name, so stack `app` never touches stack `app_x`). Nothing changes yet.
+1. **Read the archive:** it is decrypted with the `age` CLI (needed on the host) and the key sops uses (`--identity` for another one).
+   - NepFleet lists the stack's volumes in it: the volumes compose created for the stack's project, found by their labels rather than by name, so stack `app` never touches stack `app_x`.
+   - Volumes with an explicit `name:` and bind mounts aren't covered.
+   - An unknown `--volume` key is an error. Nothing changes during this step.
 2. **Confirm:** type the stack name, or pass `--yes`.
-3. **Stop and keep a safety copy:** the stack is stopped. Each volume's current content is copied to `<volume>-before-restore-<time>`, a new volume labelled `nepfleet.restore.of=<volume>`, so a restore never loses data.
-4. **Restore and start:** each volume is emptied, the archive's copy is extracted with owners, permissions and links kept, and the stack is started again.
+3. **Stop and check:** the stack is stopped if it was running. The restore is refused while containers outside the stack still use one of the volumes.
+4. **Keep a safety copy:** each volume's current content is copied to `<volume>-before-restore-<time>`, a new volume labelled `nepfleet.restore.of=<volume>`, so a restore never loses data.
+5. **Restore:** each volume is emptied, and the archive's copy is extracted with owners, permissions and links kept.
+6. **Start again:** only if the stack was running before.
 
-If a step fails, the stack stays stopped and NepFleet names the volumes already restored and the safety copies. Once the stack works, remove the copies with the `docker volume rm …` line NepFleet prints.
+If a step fails or you press Ctrl-C, the stack stays stopped and NepFleet names the volumes already restored and the safety copies. Once the stack works, remove the copies with the `docker volume rm …` line NepFleet prints.
 
 Restore runs on the host where the stack's volumes are. Swarm stacks aren't supported yet: scale the service to 0 and restore on the node that holds the volume.

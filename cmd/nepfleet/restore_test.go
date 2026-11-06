@@ -6,6 +6,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"maps"
 	"slices"
 	"testing"
 )
@@ -32,8 +33,11 @@ func TestArchiveVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"app_data", "app_db", "other_x"}; !slices.Equal(got, want) {
+	if want := []string{"app_data", "app_db", "other_x"}; !slices.Equal(slices.Sorted(maps.Keys(got)), want) {
 		t.Errorf("volumes = %v, want %v", got, want)
+	}
+	if got["app_db"] != "/backup/volumes/app_db/_data" {
+		t.Errorf("member name = %q", got["app_db"])
 	}
 	if _, err := archiveVolumes(bytes.NewReader([]byte("not gzip"))); err == nil {
 		t.Error("a non-gzip archive must fail")
