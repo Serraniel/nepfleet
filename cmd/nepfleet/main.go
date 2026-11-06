@@ -57,6 +57,7 @@ Usage:
   nepfleet import portainer --url URL [stack...]  adopt Portainer stacks (token in PORTAINER_TOKEN or prompted)
   nepfleet template validate <path>...  validate templates (searches recursively)
   nepfleet template index <root>        print index.json, the catalogue of the templates under root
+  nepfleet template match <stack>       which catalogue template covers a plain stack, and how they differ
   nepfleet serve [flags]                run the optional HTTP API
   nepfleet version                      print the version
 
@@ -104,8 +105,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return validateTemplates(args[2:], stdout)
 		case len(args) == 3 && args[1] == "index":
 			return indexTemplates(args[2], stdout, stderr)
+		case len(args) >= 3 && args[1] == "match":
+			return cmdTemplateMatch(args[2:], stdout, stderr)
 		}
-		return errors.New("usage: nepfleet template validate <path>... | nepfleet template index <root>")
+		return errors.New("usage: nepfleet template validate <path>... | nepfleet template index <root> | nepfleet template match <stack>")
 	case "serve":
 		return serve(args[1:], stderr)
 	case "doctor":
