@@ -942,7 +942,11 @@ func (e *env) importPortainerStack(ctx context.Context, stdout io.Writer, pt imp
 		if err != nil {
 			return err
 		}
-		if !slices.ContainsFunc(local, func(lp importer.Project) bool { return lp.Name == s.Name }) {
+		// Same name and Portainer's working directory: a local project that
+		// only shares the name was not deployed by this stack.
+		if !slices.ContainsFunc(local, func(lp importer.Project) bool {
+			return lp.Name == s.Name && (s.ProjectPath == "" || lp.WorkingDir == s.ProjectPath)
+		}) {
 			so.NoAdopt = true
 			warnings = append(warnings, "no compose project of this name runs on this host, so it was not adopted: check --endpoint and the target before applying")
 		}

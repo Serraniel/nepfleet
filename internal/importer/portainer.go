@@ -123,9 +123,9 @@ func (s PortainerStack) Supported() error {
 	case s.Type != 1 && s.Type != 2:
 		return fmt.Errorf("%s stacks cannot be imported", s.Kind())
 	case len(s.AdditionalFiles) > 0:
-		return fmt.Errorf("it has additional compose files (%s), which the Portainer API does not return; import it with `nepfleet import compose` from a checkout of its files", strings.Join(s.AdditionalFiles, ", "))
+		return fmt.Errorf("it has additional compose files (%s), which the Portainer API does not return; copy them out of Portainer's data volume and create the stack in the fleet by hand", strings.Join(s.AdditionalFiles, ", "))
 	case s.GitConfig != nil:
-		return fmt.Errorf("it is deployed from git (%s); import the repository's compose files instead", s.GitConfig.URL)
+		return fmt.Errorf("it is deployed from git (%s); create the stack in the fleet from that repository's compose files by hand", s.GitConfig.URL)
 	}
 	return nil
 }

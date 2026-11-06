@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Importing a stack from a real Portainer CE: the compose file and env come
 # from its API, secrets are encrypted, relative bind mounts keep pointing at
-# the data in Portainer's volume, and the first apply recreates nothing.
+# the host path Portainer gave the daemon (/data/compose/<id>), and the first
+# apply recreates nothing.
 # Usage: portainer.sh <nepfleet-binary>   (needs docker, sops, age-keygen, curl, jq)
 # Portainer hands the daemon bind paths under /data/compose/<id> on the HOST,
 # so this runs in CI, or locally only with NEPFLEET_IT_LOCAL=1.
@@ -30,6 +31,7 @@ curl -fsS -X POST $API/api/endpoints -H "Authorization: Bearer $jwt" -F Name=loc
 export PORTAINER_TOKEN=$(curl -fsS -X POST $API/api/users/1/tokens -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
   -d "{\"password\":\"$pw\",\"description\":\"nepfleet-it\"}" | jq -r .rawAPIKey)
 compose=$(printf 'services:\n  web:\n    image: nginx:1.29-alpine\n    environment: {GREETING: "${GREETING}", DB_PASSWORD: "${DB_PASSWORD}"}\n    volumes: ["./html:/usr/share/nginx/html:ro"]\n')
+# A fresh Portainer gives its first stack ID 1.
 [ -e "/data/compose/1" ] && PREEXISTING=1 && fail "/data/compose/1 exists on this host; not touching it"
 # " #" starts a comment and $X expands in compose's env file: the import must
 # store what the container really got, not the raw Portainer value.
