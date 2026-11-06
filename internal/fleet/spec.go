@@ -123,12 +123,15 @@ type Stack struct {
 
 // StackSpec says where and how a stack runs.
 type StackSpec struct {
-	Target   string            `yaml:"target" schema:"required"`
-	Mode     string            `yaml:"mode" schema:"enum=compose|swarm;default=compose"` // compose | swarm
-	Apply    string            `yaml:"apply" schema:"enum=manual|auto;default=manual"`   // manual | auto
-	Template *TemplateRef      `yaml:"template"`
-	Values   map[string]string `yaml:"values"`
-	Updates  string            `yaml:"updates" schema:"enum=off|notify|auto;default=notify"` // off | notify | auto
+	Target   string       `yaml:"target" schema:"required"`
+	Mode     string       `yaml:"mode" schema:"enum=compose|swarm;default=compose"` // compose | swarm
+	Apply    string       `yaml:"apply" schema:"enum=manual|auto;default=manual"`   // manual | auto
+	Template *TemplateRef `yaml:"template"`
+	// Values are template inputs (or env variables of a plain stack): a
+	// literal, or {from: <stack>, value|secret: <name>} to use another
+	// stack's value or secret.
+	Values  map[string]Value `yaml:"values"`
+	Updates string           `yaml:"updates" schema:"enum=off|notify|auto;default=notify"` // off | notify | auto
 	// Logging overrides the fleet's default log settings for this stack.
 	Logging *Logging `yaml:"logging"`
 	// Snapshot: auto copies the volumes before an apply that recreates

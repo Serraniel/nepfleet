@@ -71,6 +71,23 @@ spec:
 
 A plain compose stack is a valid stack. You can paste any `compose.yaml` and NepFleet versions it just the same.
 
+### Values from other stacks
+
+A value can come from another stack instead of being written twice:
+
+```yaml
+  values:
+    JELLYFIN_URL: {from: jellyfin, value: URL}         # a value, or the template's default for it
+    JELLYFIN_KEY: {from: jellyfin, secret: API_KEY}    # a secret, generated ones included
+```
+
+- **Resolution:** references are resolved each time the stack is rendered.
+- **Secrets:** a referenced secret stays in the other stack's encrypted `values.secret.yaml`. It is never copied into this stack's files in the repository, only into the rendered env file on the host, and plans mask it like the stack's own secrets.
+- **Changes:** when the referenced value changes, the dependent stacks show up as changed in the next plan.
+- **Order:** `plan` and `apply` handle a stack after the stacks it takes values from.
+- **Cycles:** references that loop, whether stack to stack or value to value, are refused.
+- **Missing values:** a generated secret exists only once its stack has been applied. Until then, a reference to it fails with a hint.
+
 ## Importing running projects
 
 `nepfleet import compose` lists the Compose projects on the host. `nepfleet import compose <project>` adopts one as a plain stack:

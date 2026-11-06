@@ -160,13 +160,60 @@
         },
         "values": {
           "additionalProperties": {
-            "type": [
-              "string",
-              "number",
-              "boolean",
-              "null"
+            "anyOf": [
+              {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              {
+                "additionalProperties": false,
+                "oneOf": [
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "secret"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "from": {
+                    "description": "The stack whose value or secret is used.",
+                    "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+                    "type": "string"
+                  },
+                  "secret": {
+                    "description": "Secret is the name of a secret of that stack, generated ones included.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "value": {
+                    "description": "Value is the name of a value (or template input default) of that stack.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "required": [
+                  "from"
+                ],
+                "type": "object"
+              }
             ]
           },
+          "description": "Values are template inputs (or env variables of a plain stack): a literal, or {from: <stack>, value|secret: <name>} to use another stack's value or secret.",
           "type": [
             "object",
             "null"
