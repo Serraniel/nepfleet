@@ -68,7 +68,7 @@ func TestRoutes(t *testing.T) {
 	if err := n.Send(Event{Name: "apply.rolled_back", Severity: Warning, Stack: "web", Host: "nas", Title: "web rolled back", Message: "details"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.got) != 1 || f.got[0] != "NepFleet@nas: web rolled back|warning|details" {
+	if len(f.got) != 1 || f.got[0] != "NepFleet@nas: web rolled back|warning|details\nstack web · host nas" {
 		t.Errorf("sent %q", f.got)
 	}
 	if len(other.got) != 1 { // discord (warning ≥ warning); ci is only for forgejo
@@ -93,5 +93,15 @@ func TestDefaultsAndErrors(t *testing.T) {
 	}
 	if withTemplateJSON("generic+https://h/x?a=1") != "generic+https://h/x?a=1&template=json" || withTemplateJSON("discord://t@w") != "discord://t@w" {
 		t.Error("json format only applies to generic webhooks")
+	}
+}
+
+func TestEventText(t *testing.T) {
+	e := Event{Message: "m", Stack: "web", Host: "nas", URL: "https://ui.example.org/stacks/web"}
+	if got := e.text(); got != "m\nstack web · host nas\nhttps://ui.example.org/stacks/web" {
+		t.Errorf("text = %q", got)
+	}
+	if got := (Event{Message: "m"}).text(); got != "m" {
+		t.Errorf("text without context = %q", got)
 	}
 }

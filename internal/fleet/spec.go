@@ -40,6 +40,9 @@ type Spec struct {
 	Notifications struct {
 		Channels map[string]NotifyChannel `yaml:"channels"`
 		Routes   []NotifyRoute            `yaml:"routes"`
+		// UIURL is where the NepFleet UI is reached; messages about a
+		// stack link to <UIURL>/stacks/<name>.
+		UIURL string `yaml:"uiURL"`
 	} `yaml:"notifications"`
 	// UptimeKuma instances get maintenance windows while stacks with their
 	// monitors are being changed (docs/maintenance.md).
@@ -329,6 +332,9 @@ func Load(dir string) (*Fleet, error) {
 		case c.SigningSecret != "" && c.Format != "json":
 			return nil, fmt.Errorf("fleet.yaml: notifications.channels.%s: signingSecret needs format: json", name)
 		}
+	}
+	if u := f.Spec.Notifications.UIURL; u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+		return nil, fmt.Errorf("fleet.yaml: notifications.uiURL: %q is not an http(s) URL", u)
 	}
 	for i, r := range f.Spec.Notifications.Routes {
 		if len(r.Channels) == 0 {

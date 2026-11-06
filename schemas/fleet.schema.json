@@ -235,6 +235,14 @@
                 "array",
                 "null"
               ]
+            },
+            "uiURL": {
+              "description": "UIURL is where the NepFleet UI is reached; messages about a stack link to <UIURL>/stacks/<name>.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
             }
           },
           "type": [
