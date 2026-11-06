@@ -15,6 +15,12 @@ func TestRollingUpdate(t *testing.T) {
 		"services:\n  web:\n    labels: {kuma.web.http.name: Web}\n    deploy: {replicas: 2}\n  worker:\n    image: w\n":                    true,
 		"services:\n  worker:\n    deploy: {replicas: 3}\n":                                                                                 false,
 		"x: [}": false,
+		"services:\n  web:\n    labels: {kuma.web.http.name: Web}\n    deploy: {replicas: \"${N}\"}\n  other:\n    deploy: {replicas: \"${M}\"}\n":   false,
+		"services:\n  web:\n    labels: {kuma.web.http.name: Web}\n    deploy: {replicas: 2}\n  other:\n    deploy: {replicas: \"${M}\"}\n":          true,
+		"services:\n  web:\n    labels: {kuma.web.http.name: Web}\n    deploy: {replicas: 3, update_config: {parallelism: 0}}\n":                     false,
+		"services:\n  web:\n    labels: {kuma.web.http.name: Web}\n    deploy: {replicas: 2, update_config: {parallelism: 2}}\n":                     false,
+		"services:\n  web:\n    labels: {kuma.web.http.name: Web}\n    deploy: {replicas: 2, update_config: {parallelism: 2, order: start-first}}\n": true,
+		"services:\n  web:\n    labels: {kuma.web.http.name: Web}\n    deploy: {replicas: 3, update_config: {parallelism: 1}}\n":                     true,
 	} {
 		if got := rollingUpdate([]byte(compose)); got != want {
 			t.Errorf("%q: rolling = %v, want %v", compose, got, want)

@@ -41,6 +41,10 @@ A swarm update where every monitored service runs two or more replicas, or runs 
 - **`maintenance`:** a maintenance window, as for every other update.
 - **`none`:** nothing.
 
-`plan` shows which of the three applies. The first deployment of a stack, compose stacks and services with a single replica always get a maintenance window.
+`plan` shows which of the three applies. These always get a maintenance window:
+
+- the first deployment of a stack and compose stacks;
+- a monitored service with a single replica, or with a replica count NepFleet can't read (`${VAR}`);
+- an `update_config` that replaces all replicas at once: `parallelism: 0`, or stop-first with `parallelism` at least the replica count.
 
 Planned: host update windows announced in advance, and per-node windows for drains (see the [roadmap](roadmap.md)).

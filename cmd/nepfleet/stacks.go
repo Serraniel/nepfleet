@@ -472,15 +472,13 @@ func (e *env) addMaintenanceStep(p *prepared) {
 	if len(refs) == 0 {
 		return
 	}
-	rolling := p.plan.Mode == "swarm" && !p.plan.First && rollingUpdate(p.out.Files[render.ComposeFile])
 	var windows, incidents []string
-	for _, k := range e.fleet.Spec.UptimeKuma {
-		switch {
-		case !rolling || k.RollingUpdates == "maintenance":
-			windows = append(windows, k.Name)
-		case k.RollingUpdates == "incident":
-			incidents = append(incidents, k.Name)
-		}
+	w, inc := e.kumaSplit(p)
+	for _, k := range w {
+		windows = append(windows, k.Name)
+	}
+	for _, k := range inc {
+		incidents = append(incidents, k.Name)
 	}
 	var texts []string
 	if len(windows) > 0 {
@@ -534,16 +532,16 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 		fmt.Fprintf(stdout, "%s: ⚠ Uptime Kuma: cannot read %s: %v\n", p.stack.Metadata.Name, fleet.FleetSecretsFile, err)
 		return nil
 	}
-	rolling := p.plan.Mode == "swarm" && !p.plan.First && rollingUpdate(compose)
+	target := func(k fleet.KumaInstance) kuma.Target {
+		return kuma.Target{Name: k.Name, URL: k.URL, Username: k.Username, Password: fleetSecrets[k.PasswordSecret]}
+	}
 	var windows, incidents []kuma.Target
-	for _, k := range e.fleet.Spec.UptimeKuma {
-		t := kuma.Target{Name: k.Name, URL: k.URL, Username: k.Username, Password: fleetSecrets[k.PasswordSecret]}
-		switch {
-		case !rolling || k.RollingUpdates == "maintenance":
-			windows = append(windows, t)
-		case k.RollingUpdates == "incident":
-			incidents = append(incidents, t)
-		}
+	w, inc := e.kumaSplit(p)
+	for _, k := range w {
+		windows = append(windows, target(k))
+	}
+	for _, k := range inc {
+		incidents = append(incidents, target(k))
 	}
 	what := "update"
 	if p.plan.First {
@@ -571,6 +569,22 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 	return open
 }
 
+// kumaSplit sorts the fleet's Kuma instances into those that get a
+// maintenance window and those that get an incident (a swarm rolling update,
+// rollingUpdates: incident); rollingUpdates: none gets neither.
+func (e *env) kumaSplit(p *prepared) (windows, incidents []fleet.KumaInstance) {
+	rolling := p.plan.Mode == "swarm" && !p.plan.First && rollingUpdate(p.out.Files[render.ComposeFile])
+	for _, k := range e.fleet.Spec.UptimeKuma {
+		switch {
+		case !rolling || k.RollingUpdates == "maintenance":
+			windows = append(windows, k)
+		case k.RollingUpdates == "incident":
+			incidents = append(incidents, k)
+		}
+	}
+	return windows, incidents
+}
+
 // rollingUpdate: every service with Uptime Kuma monitors runs at least two
 // replicas (or globally), so a swarm update replaces them one by one
 // instead of stopping the service.
@@ -579,9 +593,13 @@ func rollingUpdate(compose []byte) bool {
 		Services map[string]struct {
 			Labels any `yaml:"labels"`
 			Deploy struct {
-				Mode     string `yaml:"mode"`
-				Replicas *int   `yaml:"replicas"`
-				Labels   any    `yaml:"labels"`
+				Mode         string `yaml:"mode"`
+				Replicas     any    `yaml:"replicas"`
+				Labels       any    `yaml:"labels"`
+				UpdateConfig struct {
+					Parallelism any    `yaml:"parallelism"`
+					Order       string `yaml:"order"`
+				} `yaml:"update_config"`
 			} `yaml:"deploy"`
 		} `yaml:"services"`
 	}
@@ -594,11 +612,31 @@ func rollingUpdate(compose []byte) bool {
 			continue
 		}
 		monitored++
-		if svc.Deploy.Mode != "global" && (svc.Deploy.Replicas == nil || *svc.Deploy.Replicas < 2) {
+		// Parallelism 0 replaces all replicas at once; with stop-first,
+		// parallelism >= replicas stops them all too: downtime either way.
+		par, parSet := intValue(svc.Deploy.UpdateConfig.Parallelism)
+		startFirst := svc.Deploy.UpdateConfig.Order == "start-first"
+		if svc.Deploy.Mode == "global" {
+			if parSet && par == 0 && !startFirst {
+				return false
+			}
+			continue
+		}
+		replicas, ok := intValue(svc.Deploy.Replicas)
+		if !ok || replicas < 2 { // unset is 1; a ${VAR} cannot be judged
+			return false
+		}
+		if parSet && !startFirst && (par == 0 || par >= replicas) {
 			return false
 		}
 	}
 	return monitored > 0
+}
+
+// intValue reads a YAML number (not an interpolated string).
+func intValue(v any) (int, bool) {
+	n, ok := v.(int)
+	return n, ok
 }
 
 // labelStrings reads both compose label forms.
