@@ -188,3 +188,25 @@ func TestMirrors(t *testing.T) {
 		}
 	}
 }
+
+func TestKumaRollingUpdates(t *testing.T) {
+	for raw, want := range map[string]string{
+		"":                              "incident",
+		", rollingUpdates: maintenance": "maintenance",
+		", rollingUpdates: none":        "none",
+		", rollingUpdates: sometimes":   "",
+	} {
+		dir := t.TempDir()
+		y := strings.Replace(skeleton["fleet.yaml"], "spec:\n", "spec:\n  uptimeKuma: [{name: k, url: \"https://k\""+raw+"}]\n", 1)
+		if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := Load(dir)
+		switch {
+		case want == "" && err == nil:
+			t.Errorf("%q: accepted", raw)
+		case want != "" && (err != nil || f.Spec.UptimeKuma[0].RollingUpdates != want):
+			t.Errorf("%q: %v %v", raw, f, err)
+		}
+	}
+}

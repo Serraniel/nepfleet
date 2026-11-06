@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -397,11 +398,11 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		// every configured Uptime Kuma; problems only warn.
 		// Scheduled to expire after the health gate plus a margin, so it ends
 		// even if this process dies; closed as soon as the apply is done.
-		window := e.openMaintenance(ctx, stdout, p, *wait+10*time.Minute)
+		windows := e.openMaintenance(ctx, stdout, p, *wait+10*time.Minute)
 		var res deploy.Result
 		res, err = func() (deploy.Result, error) {
 			defer func() {
-				if window != nil {
+				for _, window := range windows {
 					for _, w := range window.Close(context.WithoutCancel(ctx), nil) {
 						fmt.Fprintf(stdout, "%s: ⚠ %s\n", name, w)
 					}
@@ -471,11 +472,25 @@ func (e *env) addMaintenanceStep(p *prepared) {
 	if len(refs) == 0 {
 		return
 	}
-	var names []string
-	for _, k := range e.fleet.Spec.UptimeKuma {
-		names = append(names, k.Name)
+	var windows, incidents []string
+	w, inc := e.kumaSplit(p)
+	for _, k := range w {
+		windows = append(windows, k.Name)
 	}
-	step := deploy.Step{Kind: "maintenance", Text: fmt.Sprintf("put %d monitor(s) into maintenance in Uptime Kuma %s until the stack is healthy", len(refs), strings.Join(names, ", "))}
+	for _, k := range inc {
+		incidents = append(incidents, k.Name)
+	}
+	var texts []string
+	if len(windows) > 0 {
+		texts = append(texts, fmt.Sprintf("put %d monitor(s) into maintenance in Uptime Kuma %s until the stack is healthy", len(refs), strings.Join(windows, ", ")))
+	}
+	if len(incidents) > 0 {
+		texts = append(texts, fmt.Sprintf("rolling update: post a warning incident on the status pages of %d monitor(s) in Uptime Kuma %s until it is done", len(refs), strings.Join(incidents, ", ")))
+	}
+	if len(texts) == 0 {
+		return
+	}
+	step := deploy.Step{Kind: "maintenance", Text: strings.Join(texts, "; ")}
 	for i, s := range p.plan.Steps {
 		if s.Kind == "image" || s.Kind == "service" || s.Kind == "health" {
 			p.plan.Steps = append(p.plan.Steps[:i], append([]deploy.Step{step}, p.plan.Steps[i:]...)...)
@@ -493,14 +508,22 @@ func touchesRuntime(p *deploy.Plan) bool {
 	return false
 }
 
+// kumaCloser is an open maintenance window or incident.
+type kumaCloser interface {
+	Close(ctx context.Context, hc *http.Client) []string
+}
+
 // openMaintenance opens Uptime Kuma maintenance windows when the plan
-// changes what runs (compose file, env file or image pins).
-func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared, maxDuration time.Duration) *kuma.Window {
+// changes what runs (compose file, env file or image pins). A swarm rolling
+// update, where every monitored service keeps running replicas, gets what
+// each Kuma's rollingUpdates says instead (an incident by default).
+func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared, maxDuration time.Duration) []kumaCloser {
 	if len(e.fleet.Spec.UptimeKuma) == 0 {
 		return nil
 	}
 	runtime := touchesRuntime(p.plan)
-	refs := kuma.MonitorRefs(p.out.Files[render.ComposeFile], render.EnvValues(p.out.Files[render.EnvFile]))
+	compose := p.out.Files[render.ComposeFile]
+	refs := kuma.MonitorRefs(compose, render.EnvValues(p.out.Files[render.EnvFile]))
 	if !runtime || len(refs) == 0 {
 		return nil
 	}
@@ -509,9 +532,16 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 		fmt.Fprintf(stdout, "%s: ⚠ Uptime Kuma: cannot read %s: %v\n", p.stack.Metadata.Name, fleet.FleetSecretsFile, err)
 		return nil
 	}
-	var targets []kuma.Target
-	for _, k := range e.fleet.Spec.UptimeKuma {
-		targets = append(targets, kuma.Target{Name: k.Name, URL: k.URL, Username: k.Username, Password: fleetSecrets[k.PasswordSecret]})
+	target := func(k fleet.KumaInstance) kuma.Target {
+		return kuma.Target{Name: k.Name, URL: k.URL, Username: k.Username, Password: fleetSecrets[k.PasswordSecret]}
+	}
+	var windows, incidents []kuma.Target
+	w, inc := e.kumaSplit(p)
+	for _, k := range w {
+		windows = append(windows, target(k))
+	}
+	for _, k := range inc {
+		incidents = append(incidents, target(k))
 	}
 	what := "update"
 	if p.plan.First {
@@ -519,11 +549,113 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 	}
 	title := fmt.Sprintf("NepFleet: %s of %s", what, p.stack.Metadata.Name)
 	desc := fmt.Sprintf("Started by nepfleet apply on %s. Ends automatically when the stack is healthy or rolled back.", e.host)
-	w, warnings := kuma.Open(ctx, targets, refs, title, desc, maxDuration, nil)
-	for _, msg := range warnings {
-		fmt.Fprintf(stdout, "%s: %s\n", p.stack.Metadata.Name, msg)
+	var open []kumaCloser
+	report := func(warnings []string) {
+		for _, msg := range warnings {
+			fmt.Fprintf(stdout, "%s: %s\n", p.stack.Metadata.Name, msg)
+		}
 	}
-	return w
+	if len(windows) > 0 {
+		w, warnings := kuma.Open(ctx, windows, refs, title, desc, maxDuration, nil)
+		report(warnings)
+		open = append(open, w)
+	}
+	if len(incidents) > 0 {
+		inc, warnings := kuma.OpenIncident(ctx, incidents, refs, "Rolling update of "+p.stack.Metadata.Name,
+			"Replicas are replaced one at a time: the service stays up, responses may be slower meanwhile. Resolved automatically when the update is done.", nil)
+		report(warnings)
+		open = append(open, inc)
+	}
+	return open
+}
+
+// kumaSplit sorts the fleet's Kuma instances into those that get a
+// maintenance window and those that get an incident (a swarm rolling update,
+// rollingUpdates: incident); rollingUpdates: none gets neither.
+func (e *env) kumaSplit(p *prepared) (windows, incidents []fleet.KumaInstance) {
+	rolling := p.plan.Mode == "swarm" && !p.plan.First && rollingUpdate(p.out.Files[render.ComposeFile])
+	for _, k := range e.fleet.Spec.UptimeKuma {
+		switch {
+		case !rolling || k.RollingUpdates == "maintenance":
+			windows = append(windows, k)
+		case k.RollingUpdates == "incident":
+			incidents = append(incidents, k)
+		}
+	}
+	return windows, incidents
+}
+
+// rollingUpdate: every service with Uptime Kuma monitors runs at least two
+// replicas (or globally), so a swarm update replaces them one by one
+// instead of stopping the service.
+func rollingUpdate(compose []byte) bool {
+	var doc struct {
+		Services map[string]struct {
+			Labels any `yaml:"labels"`
+			Deploy struct {
+				Mode         string `yaml:"mode"`
+				Replicas     any    `yaml:"replicas"`
+				Labels       any    `yaml:"labels"`
+				UpdateConfig struct {
+					Parallelism any    `yaml:"parallelism"`
+					Order       string `yaml:"order"`
+				} `yaml:"update_config"`
+			} `yaml:"deploy"`
+		} `yaml:"services"`
+	}
+	if yaml.Unmarshal(compose, &doc) != nil {
+		return false
+	}
+	monitored := 0
+	for _, svc := range doc.Services {
+		if len(kuma.RefsFromLabels(labelStrings(svc.Labels), nil)) == 0 && len(kuma.RefsFromLabels(labelStrings(svc.Deploy.Labels), nil)) == 0 {
+			continue
+		}
+		monitored++
+		// Parallelism 0 replaces all replicas at once; with stop-first,
+		// parallelism >= replicas stops them all too: downtime either way.
+		par, parSet := intValue(svc.Deploy.UpdateConfig.Parallelism)
+		startFirst := svc.Deploy.UpdateConfig.Order == "start-first"
+		if svc.Deploy.Mode == "global" {
+			if parSet && par == 0 && !startFirst {
+				return false
+			}
+			continue
+		}
+		replicas, ok := intValue(svc.Deploy.Replicas)
+		if !ok || replicas < 2 { // unset is 1; a ${VAR} cannot be judged
+			return false
+		}
+		if parSet && !startFirst && (par == 0 || par >= replicas) {
+			return false
+		}
+	}
+	return monitored > 0
+}
+
+// intValue reads a YAML number (not an interpolated string).
+func intValue(v any) (int, bool) {
+	n, ok := v.(int)
+	return n, ok
+}
+
+// labelStrings reads both compose label forms.
+func labelStrings(labels any) map[string]string {
+	out := map[string]string{}
+	switch l := labels.(type) {
+	case map[string]any:
+		for k, v := range l {
+			out[k] = fmt.Sprint(v)
+		}
+	case []any:
+		for _, item := range l {
+			if s, ok := item.(string); ok {
+				k, v, _ := strings.Cut(s, "=")
+				out[k] = v
+			}
+		}
+	}
+	return out
 }
 
 func cmdRender(args []string, stdout, stderr io.Writer) error {

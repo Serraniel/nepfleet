@@ -68,6 +68,11 @@ type KumaInstance struct {
 	Username string `yaml:"username"`
 	// PasswordSecret names the key in fleet.secret.yaml holding the password.
 	PasswordSecret string `yaml:"passwordSecret"`
+	// RollingUpdates: what a swarm update whose monitored services all run
+	// two or more replicas gets, as it degrades rather than stops them: a
+	// warning incident on the status pages showing them, a maintenance
+	// window as for other updates, or nothing.
+	RollingUpdates string `yaml:"rollingUpdates" schema:"enum=incident|maintenance|none;default=incident"`
 }
 
 // APIVersion is the only version of fleet.yaml and stack.yaml so far.
@@ -272,6 +277,15 @@ func Load(dir string) (*Fleet, error) {
 	for _, u := range []struct{ key, v string }{{"images", f.Spec.Updates.Images}, {"host", f.Spec.Updates.Host}} {
 		if u.v != "" && !slices.Contains(updatePolicies, u.v) {
 			return nil, fmt.Errorf("fleet.yaml: spec.updates.%s must be off, notify or auto, got %q", u.key, u.v)
+		}
+	}
+	for i := range f.Spec.UptimeKuma {
+		k := &f.Spec.UptimeKuma[i]
+		if k.RollingUpdates == "" {
+			k.RollingUpdates = "incident"
+		}
+		if !slices.Contains([]string{"incident", "maintenance", "none"}, k.RollingUpdates) {
+			return nil, fmt.Errorf("fleet.yaml: spec.uptimeKuma[%d].rollingUpdates must be incident, maintenance or none", i)
 		}
 	}
 	for i, m := range f.Spec.Mirrors {
