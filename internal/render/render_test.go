@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
@@ -228,5 +230,57 @@ func TestBackupBuiltins(t *testing.T) {
 	none := regexp.MustCompile("/backup/volumes/(" + noBackupPattern(nil) + ")/")
 	if none.MatchString("/backup/volumes/anything/_data") || none.MatchString("/backup/volumes//") {
 		t.Error("an empty list must exclude nothing")
+	}
+}
+
+func TestSwarmUpdateDefaults(t *testing.T) {
+	in := []byte(`services:
+  web:
+    image: nginx
+    ports: [{target: 80, published: 8080, mode: ingress}]
+  db:
+    image: postgres
+    volumes: [{type: volume, source: db, target: /var/lib/postgresql}]
+  agent:
+    image: a
+    deploy: {mode: global}
+  hostport:
+    image: h
+    ports: [{target: 53, published: 53, mode: host}]
+  cache:
+    image: c
+    volumes: [{type: tmpfs, target: /tmp}]
+  own:
+    image: o
+    deploy: {update_config: {order: stop-first, failure_action: pause}}
+  onhost:
+    image: h
+    networks: {host: {}}
+  job:
+    image: j
+    deploy: {mode: replicated-job}
+`)
+	out, err := ForSwarm(in)
+	must(t, err)
+	var doc struct {
+		Services map[string]struct {
+			Deploy struct {
+				UpdateConfig   map[string]string `yaml:"update_config"`
+				RollbackConfig map[string]string `yaml:"rollback_config"`
+			} `yaml:"deploy"`
+		} `yaml:"services"`
+	}
+	must(t, yaml.Unmarshal(out, &doc))
+	for name, want := range map[string]string{"web": "start-first", "cache": "start-first", "db": "stop-first", "agent": "stop-first", "hostport": "stop-first", "onhost": "stop-first"} {
+		d := doc.Services[name].Deploy
+		if d.UpdateConfig["order"] != want || d.RollbackConfig["order"] != want || d.UpdateConfig["failure_action"] != "rollback" || d.UpdateConfig["monitor"] != "30s" {
+			t.Errorf("%s: update %v rollback %v, want order %s", name, d.UpdateConfig, d.RollbackConfig, want)
+		}
+	}
+	if job := doc.Services["job"].Deploy; job.UpdateConfig != nil || job.RollbackConfig != nil {
+		t.Errorf("a job got update settings: %+v", job)
+	}
+	if own := doc.Services["own"].Deploy.UpdateConfig; own["order"] != "stop-first" || own["failure_action"] != "pause" || own["monitor"] != "30s" {
+		t.Errorf("a service's own settings must win: %v", own)
 	}
 }
