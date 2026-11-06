@@ -36,6 +36,7 @@ import (
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/importer"
 	"github.com/Serraniel/nepfleet/internal/lock"
+	"github.com/Serraniel/nepfleet/internal/notify"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/secrets"
 	"github.com/Serraniel/nepfleet/internal/source"
@@ -384,6 +385,10 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	notifier, nerr := e.notifier()
+	if nerr != nil {
+		fmt.Fprintf(stdout, "⚠ notifications: %v\n", nerr) // never blocks an apply
+	}
 	var errs []error
 	for _, s := range stacks {
 		name := s.Metadata.Name
@@ -485,11 +490,17 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		case errors.Is(err, deploy.ErrRolledBack):
 			fmt.Fprintf(stdout, "%s: ✗ %v\n", name, err)
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			e.emit(notifier, stdout, notify.Event{Name: "apply.rolled_back", Severity: notify.Warning, Stack: name,
+				Title: name + " rolled back", Message: fmt.Sprintf("The new version of %s was not healthy; the previous one runs again.\n%v", name, err)})
 		case err != nil:
 			fmt.Fprintf(stdout, "%s: ✗ %v\n", name, err)
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			e.emit(notifier, stdout, notify.Event{Name: "apply.failed", Severity: notify.Error, Stack: name,
+				Title: "applying " + name + " failed", Message: err.Error()})
 		default:
 			fmt.Fprintf(stdout, "%s: ✓ applied and healthy\n", name)
+			e.emit(notifier, stdout, notify.Event{Name: "apply.succeeded", Severity: notify.Info, Stack: name,
+				Title: name + " applied", Message: fmt.Sprintf("%s is updated and healthy.", name)})
 		}
 	}
 	return errors.Join(errs...)

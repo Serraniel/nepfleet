@@ -35,9 +35,11 @@ type Spec struct {
 		// Age recipients (public keys) that every secret file is encrypted to.
 		Age []string `yaml:"age"`
 	} `yaml:"secrets"`
+	// Notifications: channels (shoutrrr URLs) and routes that pick which
+	// events go where (docs/notifications.md).
 	Notifications struct {
-		Channels map[string]map[string]any `yaml:"channels"`
-		Routes   []map[string]any          `yaml:"routes"`
+		Channels map[string]NotifyChannel `yaml:"channels"`
+		Routes   []NotifyRoute            `yaml:"routes"`
 	} `yaml:"notifications"`
 	// UptimeKuma instances get maintenance windows while stacks with their
 	// monitors are being changed (docs/maintenance.md).
@@ -59,6 +61,27 @@ type Spec struct {
 	// Logging is the log driver of every service that sets none itself, so
 	// container logs rotate instead of filling the disk.
 	Logging *Logging `yaml:"logging"`
+}
+
+// NotifyChannel is one notification destination.
+type NotifyChannel struct {
+	// URLSecret names the key in fleet.secret.yaml holding the shoutrrr URL
+	// (it contains tokens).
+	URLSecret string `yaml:"urlSecret"`
+	// URL is a shoutrrr URL written here: only for URLs without secrets.
+	URL string `yaml:"url"`
+	// Format json sends the raw event to a generic webhook.
+	Format string `yaml:"format" schema:"enum=text|json;default=text"`
+}
+
+// NotifyRoute sends matching events to channels.
+type NotifyRoute struct {
+	Channels []string `yaml:"channels" schema:"required"`
+	// Events are names or patterns ("*", "apply.*"); empty matches all.
+	Events []string `yaml:"events"`
+	// Stacks limits the route to these stacks; empty matches all.
+	Stacks      []string `yaml:"stacks"`
+	MinSeverity string   `yaml:"minSeverity" schema:"enum=info|warning|error"`
 }
 
 // KumaInstance is an Uptime Kuma NepFleet may open maintenance windows in.
@@ -277,6 +300,30 @@ func Load(dir string) (*Fleet, error) {
 	for _, u := range []struct{ key, v string }{{"images", f.Spec.Updates.Images}, {"host", f.Spec.Updates.Host}} {
 		if u.v != "" && !slices.Contains(updatePolicies, u.v) {
 			return nil, fmt.Errorf("fleet.yaml: spec.updates.%s must be off, notify or auto, got %q", u.key, u.v)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(f.Spec.Notifications.Channels)) {
+		c := f.Spec.Notifications.Channels[name]
+		switch {
+		case !nameRe.MatchString(name):
+			return nil, fmt.Errorf("fleet.yaml: notifications.channels.%s: a name is lowercase letters, digits, - and _", name)
+		case (c.URL == "") == (c.URLSecret == ""):
+			return nil, fmt.Errorf("fleet.yaml: notifications.channels.%s: set urlSecret (a key in fleet.secret.yaml) or url", name)
+		case c.Format != "" && c.Format != "text" && c.Format != "json":
+			return nil, fmt.Errorf("fleet.yaml: notifications.channels.%s: format is text or json", name)
+		}
+	}
+	for i, r := range f.Spec.Notifications.Routes {
+		if len(r.Channels) == 0 {
+			return nil, fmt.Errorf("fleet.yaml: notifications.routes[%d]: channels is required", i)
+		}
+		for _, c := range r.Channels {
+			if _, ok := f.Spec.Notifications.Channels[c]; !ok {
+				return nil, fmt.Errorf("fleet.yaml: notifications.routes[%d]: unknown channel %q", i, c)
+			}
+		}
+		if r.MinSeverity != "" && !slices.Contains([]string{"info", "warning", "error"}, r.MinSeverity) {
+			return nil, fmt.Errorf("fleet.yaml: notifications.routes[%d]: minSeverity is info, warning or error", i)
 		}
 	}
 	for i := range f.Spec.UptimeKuma {
