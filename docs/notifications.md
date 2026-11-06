@@ -7,9 +7,9 @@ NepFleet sends events to any number of channels. Channels are configured as [sho
 spec:
   notifications:
     channels:
-      discord: { url: "discord://TOKEN@WEBHOOK_ID" }      # store as a secret, see below
-      phone:   { url: "ntfy://ntfy.example.org/nepfleet" }
-      ci:      { url: "generic+https://hooks.example.org/nepfleet", format: json }
+      discord: { urlSecret: DISCORD_URL }                       # discord://TOKEN@WEBHOOK_ID
+      phone:   { url: "ntfy://ntfy.example.org/nepfleet" }      # no secret in it
+      ci:      { urlSecret: CI_HOOK_URL, format: json }
     routes:
       - channels: [discord]
         events: ["*"]
@@ -21,7 +21,14 @@ spec:
         stacks: [forgejo, registry]
 ```
 
-Channel URLs contain tokens, so they go into `fleet.secret.yaml`, which is encrypted with SOPS, and are referenced by name. Run `nepfleet notify test <channel>` to send a test message.
+Channel URLs usually contain tokens. Store them in `fleet.secret.yaml`, which is encrypted with SOPS, with `nepfleet secret set --global DISCORD_URL`, and refer to them with `urlSecret`. Write `url` directly only when the URL holds no secret.
+
+- **Without routes,** every event goes to every channel.
+- **Patterns in `events`:** `*`, an exact name, or `apply.*` for a whole group.
+- **`nepfleet notify test <channel>`** sends a test message.
+- **Errors never show a channel's URL,** and a failing channel never blocks an apply.
+
+Sent today: `apply.succeeded`, `apply.failed` and `apply.rolled_back`. The other events follow with their features.
 
 ## Events
 
