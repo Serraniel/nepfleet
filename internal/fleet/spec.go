@@ -48,6 +48,9 @@ type Spec struct {
 	IngressNetwork string `yaml:"ingressNetwork" schema:"default=nepfleet_ingress"`
 	// TZ is passed to stacks as ${TZ}.
 	TZ string `yaml:"tz" schema:"default=UTC"`
+	// Logging is the log driver of every service that sets none itself, so
+	// container logs rotate instead of filling the disk.
+	Logging *Logging `yaml:"logging"`
 }
 
 // KumaInstance is an Uptime Kuma NepFleet may open maintenance windows in.
@@ -121,6 +124,43 @@ type StackSpec struct {
 	Template *TemplateRef      `yaml:"template"`
 	Values   map[string]string `yaml:"values"`
 	Updates  string            `yaml:"updates" schema:"enum=off|notify|auto;default=notify"` // off | notify | auto
+	// Logging overrides the fleet's default log settings for this stack.
+	Logging *Logging `yaml:"logging"`
+}
+
+// Logging is a compose logging section applied to services without one.
+type Logging struct {
+	// Enabled: false keeps the daemon's defaults (no logging section added).
+	Enabled *bool `yaml:"enabled"`
+	// Driver is a Docker log driver, e.g. json-file or local.
+	Driver string `yaml:"driver" schema:"default=json-file"`
+	// Options are the driver's options, e.g. max-size and max-file.
+	Options map[string]string `yaml:"options"`
+}
+
+// DefaultLogging rotates json-file logs at 20 MB, keeping 5 files: logs
+// stay readable by docker logs, Dozzle and file-based collectors.
+var DefaultLogging = Logging{Driver: "json-file", Options: map[string]string{"max-size": "20m", "max-file": "5"}}
+
+// EffectiveLogging is the stack's setting, else the fleet's, else the
+// default; nil when logging defaults are switched off.
+func EffectiveLogging(f *Fleet, s *Stack) *Logging {
+	l := &DefaultLogging
+	if f != nil && f.Spec.Logging != nil {
+		l = f.Spec.Logging
+	}
+	if s != nil && s.Spec.Logging != nil {
+		l = s.Spec.Logging
+	}
+	if l.Enabled != nil && !*l.Enabled {
+		return nil
+	}
+	if l.Driver == "" {
+		c := *l
+		c.Driver = "json-file"
+		l = &c
+	}
+	return l
 }
 
 // TemplateRef selects a template from a source.

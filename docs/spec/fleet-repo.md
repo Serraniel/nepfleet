@@ -22,6 +22,18 @@ tunnels/
 
 `schemas/` in the nepfleet repository holds JSON Schemas for [`fleet.yaml`](../../schemas/fleet.schema.json), [`stack.yaml`](../../schemas/stack.schema.json) and [`template.yaml`](../../schemas/template.schema.json). They are generated from the Go types that parse these files, so they cannot drift (`go run ./tools/schema`; CI fails when they are stale), and each release attaches them. `nepfleet init`, `new` and `import` write a `# yaml-language-server: $schema=…` line, so editors with the YAML language server (VS Code, Neovim, Helix, Zed) complete and check fields as you type. `hosts/*.yaml` gets a schema once its format is implemented.
 
+## Logging
+
+Every service that sets no `logging:` of its own gets rotating logs, so containers cannot fill the disk: json-file with `max-size: 20m` and `max-file: 5` by default (still readable by `docker logs`, Dozzle and file-based collectors). Change it fleet-wide in `fleet.yaml` or per stack in `stack.yaml`:
+
+```yaml
+spec:
+  logging:
+    driver: local            # or json-file, journald, …
+    options: {max-size: 50m}
+    # enabled: false         # keep the daemon's defaults instead
+```
+
 ## `stacks/<name>/stack.yaml`
 
 ```yaml

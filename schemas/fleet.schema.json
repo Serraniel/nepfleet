@@ -41,6 +41,44 @@
             "boolean"
           ]
         },
+        "logging": {
+          "additionalProperties": false,
+          "description": "Logging is the log driver of every service that sets none itself, so container logs rotate instead of filling the disk.",
+          "properties": {
+            "driver": {
+              "default": "json-file",
+              "description": "Driver is a Docker log driver, e.g. json-file or local.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "enabled": {
+              "description": "Enabled: false keeps the daemon's defaults (no logging section added).",
+              "type": "boolean"
+            },
+            "options": {
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              "description": "Options are the driver's options, e.g. max-size and max-file.",
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "notifications": {
           "additionalProperties": false,
           "properties": {

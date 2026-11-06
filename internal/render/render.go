@@ -91,6 +91,11 @@ func Render(in Input) (*Output, error) {
 	if _, ok := out.Files[ComposeFile]; ok {
 		return nil, errors.New("a template file may not be called " + ComposeFile)
 	}
+	if l := fleet.EffectiveLogging(in.Fleet, in.Stack); l != nil {
+		if compose, err = WithLogging(compose, l); err != nil {
+			return nil, fmt.Errorf("compose file: %w", err)
+		}
+	}
 	out.Files[ComposeFile] = compose
 	envFile, err := dotenv(env)
 	if err != nil {

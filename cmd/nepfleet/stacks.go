@@ -977,7 +977,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	in := doctor.Input{Recipients: e.fleet.Spec.Secrets.Age, AgeKeyFile: ageKeyFile()}
+	in := doctor.Input{Recipients: e.fleet.Spec.Secrets.Age, AgeKeyFile: ageKeyFile(), LogRotation: fleet.EffectiveLogging(e.fleet, nil) != nil}
 	for _, k := range []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_CMD"} {
 		if os.Getenv(k) != "" {
 			in.KeyFromEnv = k

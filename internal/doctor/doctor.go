@@ -98,6 +98,9 @@ type Input struct {
 	Images []string
 	// Ingress reports whether a stack publishes 80/443 through Caddy here.
 	Ingress bool
+	// LogRotation reports whether NepFleet sets rotating log options on
+	// services (fleet.yaml spec.logging).
+	LogRotation bool
 }
 
 // Run performs every check.
@@ -110,6 +113,7 @@ func Run(ctx context.Context, e Env, in Input) []Check {
 		ServerVersion string `json:"ServerVersion"`
 		Architecture  string `json:"Architecture"`
 		DockerRootDir string `json:"DockerRootDir"`
+		LoggingDriver string `json:"LoggingDriver"`
 		CgroupVersion string `json:"CgroupVersion"`
 	}
 	raw, err := e.Docker.Run(ctx, "", "info", "--format", "{{json .}}")
@@ -157,6 +161,16 @@ func Run(ctx context.Context, e Env, in Input) []Check {
 			c.Status, c.Fix = Warn, "less than 10 GiB free; pulls and backups may fill it"
 		}
 		add(c)
+	}
+
+	// Logs: json-file without options grows without bound.
+	switch {
+	case in.LogRotation:
+		add(Check{"Log rotation", OK, "set by NepFleet on every service (fleet.yaml spec.logging)", ""})
+	case info.LoggingDriver == "json-file" || info.LoggingDriver == "":
+		add(Check{"Log rotation", Warn, "the daemon logs to json-file and NepFleet's log defaults are off", "enable spec.logging in fleet.yaml, or set log-opts max-size in /etc/docker/daemon.json"})
+	default:
+		add(Check{"Log rotation", OK, "daemon log driver " + info.LoggingDriver, ""})
 	}
 
 	// Time.
