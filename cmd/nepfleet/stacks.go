@@ -34,12 +34,12 @@ import (
 	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/importer"
-	"github.com/Serraniel/nepfleet/internal/kuma"
 	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/secrets"
 	"github.com/Serraniel/nepfleet/internal/source"
 	"github.com/Serraniel/nepfleet/internal/template"
+	"github.com/Serraniel/neptide/pkg/kuma"
 )
 
 // common holds flags every stack command shares.
