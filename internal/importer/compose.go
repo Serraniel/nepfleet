@@ -135,6 +135,9 @@ type Options struct {
 	// RewriteDir replaces a temporary project directory in the normalised
 	// compose file (from → to), e.g. with where Portainer keeps the stack.
 	RewriteDir [2]string
+	// NoAdopt: the project does not run on this host, so its state is not
+	// recorded as applied.
+	NoAdopt bool
 	// EncryptAll stores every env value encrypted, not only secret-looking ones.
 	EncryptAll bool
 }

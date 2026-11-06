@@ -5,7 +5,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -13,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -805,7 +803,7 @@ func (e *env) importOne(ctx context.Context, stdout io.Writer, p importer.Projec
 	}
 	fmt.Fprintf(stdout, "imported %s → %s\n  values: %s\n  secrets (encrypted): %s\n  volumes (kept as they are): %s\n",
 		p.Name, relTo(e.fleet.Dir, res.Dir), orNone(res.Values), orNone(res.Secrets), orNone(res.Volumes))
-	if (o.Target == host || o.Target == "local") && o.Mode != "swarm" {
+	if (o.Target == host || o.Target == "local") && o.Mode != "swarm" && !o.NoAdopt {
 		s, err := e.fleet.LoadStack(p.Name)
 		if err == nil {
 			var prep *prepared
@@ -833,7 +831,7 @@ func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
 	all := fs.Bool("all", false, "import every compose and swarm stack")
 	target := fs.String("target", "", "spec.target for the imported stacks (default: --host)")
 	encryptAll := fs.Bool("encrypt-all", false, "store every env value encrypted, not only secret-looking names")
-	dataDir := fs.String("portainer-data", "/var/lib/docker/volumes/portainer_data/_data", "where Portainer's data volume is on this host (relative bind mounts point into it)")
+	endpoint := fs.Int("endpoint", 0, "Portainer environment (endpoint) ID of this host; required when stacks of several environments are listed")
 	caFile := fs.String("ca-file", "", "CA certificate for Portainer's TLS certificate (its default one is self-signed)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -852,19 +850,18 @@ func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	var pool *x509.CertPool
 	if *caFile != "" {
 		pem, err := os.ReadFile(*caFile)
 		if err != nil {
 			return err
 		}
-		pool := x509.NewCertPool()
+		pool = x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
 			return fmt.Errorf("%s: no PEM certificate", *caFile)
 		}
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
 	}
-	pt := importer.Portainer{URL: *u, Token: token, HTTP: client}
+	pt := importer.Portainer{URL: *u, Token: token, HTTP: importer.NewPortainerHTTP(pool)}
 	ctx := context.Background()
 	stacks, err := pt.Stacks(ctx)
 	if err != nil {
@@ -877,7 +874,7 @@ func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
 			if s.Status != 1 {
 				state = "stopped"
 			}
-			fmt.Fprintf(stdout, "  %-24s %-11s %s\n", s.Name, s.Kind(), state)
+			fmt.Fprintf(stdout, "  %-24s %-11s %-8s environment %d\n", s.Name, s.Kind(), state, s.EndpointID)
 		}
 		return nil
 	}
@@ -889,17 +886,28 @@ func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
 	for _, n := range fs.Args() {
 		want[n] = true
 	}
+	// Portainer lists the stacks of every environment; each runs on its own
+	// Docker host, so import only this host's.
+	envs := map[int]bool{}
+	for _, s := range stacks {
+		if *all || want[s.Name] {
+			envs[s.EndpointID] = true
+		}
+	}
+	if *endpoint == 0 && len(envs) > 1 {
+		return errors.New("the stacks belong to several Portainer environments: pass --endpoint with this host's environment ID (see the listing)")
+	}
 	var errs []error
 	for _, s := range stacks {
-		if !*all && !want[s.Name] {
+		if (!*all && !want[s.Name]) || (*endpoint != 0 && s.EndpointID != *endpoint) {
 			continue
 		}
 		delete(want, s.Name)
-		if s.Type != 1 && s.Type != 2 {
-			errs = append(errs, fmt.Errorf("%s: %s stacks cannot be imported", s.Name, s.Kind()))
+		if err := s.Supported(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", s.Name, err))
 			continue
 		}
-		if err := e.importPortainerStack(ctx, stdout, pt, s, *dataDir, importer.Options{Target: *target, EncryptAll: *encryptAll}, c.host); err != nil {
+		if err := e.importPortainerStack(ctx, stdout, pt, s, importer.Options{Target: *target, EncryptAll: *encryptAll}, c.host); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -912,7 +920,7 @@ func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
 	return errors.Join(errs...)
 }
 
-func (e *env) importPortainerStack(ctx context.Context, stdout io.Writer, pt importer.Portainer, s importer.PortainerStack, dataDir string, o importer.Options, host string) error {
+func (e *env) importPortainerStack(ctx context.Context, stdout io.Writer, pt importer.Portainer, s importer.PortainerStack, o importer.Options, host string) error {
 	content, err := pt.File(ctx, s.ID)
 	if err != nil {
 		return fmt.Errorf("%s: %w", s.Name, err)
@@ -922,11 +930,23 @@ func (e *env) importPortainerStack(ctx context.Context, stdout io.Writer, pt imp
 		return err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	p, so, warnings, err := importer.StageProject(dir, s, content, dataDir)
+	p, so, warnings, err := importer.StageProject(dir, s, content)
 	if err != nil {
 		return fmt.Errorf("%s: %w", s.Name, err)
 	}
 	so.Target, so.EncryptAll = o.Target, o.EncryptAll
+	// Adopt only what runs here: otherwise the plan would claim the stack is
+	// deployed on this host.
+	if so.Mode != "swarm" {
+		local, err := importer.ListCompose(ctx, deploy.Docker{})
+		if err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(local, func(lp importer.Project) bool { return lp.Name == s.Name }) {
+			so.NoAdopt = true
+			warnings = append(warnings, "no compose project of this name runs on this host, so it was not adopted: check --endpoint and the target before applying")
+		}
+	}
 	return e.importOne(ctx, stdout, p, so, host, warnings)
 }
 

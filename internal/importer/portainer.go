@@ -4,6 +4,8 @@ package importer
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +37,16 @@ type PortainerStack struct {
 	Type       int    `json:"Type"` // 1 swarm, 2 compose, 3 kubernetes
 	EndpointID int    `json:"EndpointId"`
 	Status     int    `json:"Status"` // 1 active, 2 inactive
-	Env        []struct {
+	// ProjectPath is the stack's directory as Portainer's compose sees it
+	// (/data/compose/<id>); relative bind mounts become paths under it, which
+	// the daemon resolves on the host.
+	ProjectPath     string   `json:"ProjectPath"`
+	EntryPoint      string   `json:"EntryPoint"`
+	AdditionalFiles []string `json:"AdditionalFiles"`
+	GitConfig       *struct {
+		URL string `json:"URL"`
+	} `json:"GitConfig"`
+	Env []struct {
 		Name  string `json:"name"`
 		Value string `json:"value"`
 	} `json:"Env"`
@@ -62,7 +73,7 @@ func (p Portainer) get(ctx context.Context, path string, out any) error {
 	req.Header.Set("X-API-Key", p.Token)
 	client := p.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = NewPortainerHTTP(nil)
 	}
 	res, err := client.Do(req)
 	if err != nil {
@@ -102,10 +113,29 @@ func (p Portainer) File(ctx context.Context, id int) (string, error) {
 // (- ./x:/y, ["./x:/y"], source: ./x), build contexts and env files.
 var relativeBind = regexp.MustCompile(`(^|[\s\[,'":])\.{1,2}/`)
 
+// envFileRef matches env_file entries, which Portainer's compose read from
+// its own data volume (often its stack.env).
+var envFileRef = regexp.MustCompile(`(?m)^\s*env_file\s*:`)
+
+// Supported reports why a stack cannot be imported faithfully, or nil.
+func (s PortainerStack) Supported() error {
+	switch {
+	case s.Type != 1 && s.Type != 2:
+		return fmt.Errorf("%s stacks cannot be imported", s.Kind())
+	case len(s.AdditionalFiles) > 0:
+		return fmt.Errorf("it has additional compose files (%s), which the Portainer API does not return; import it with `nepfleet import compose` from a checkout of its files", strings.Join(s.AdditionalFiles, ", "))
+	case s.GitConfig != nil:
+		return fmt.Errorf("it is deployed from git (%s); import the repository's compose files instead", s.GitConfig.URL)
+	}
+	return nil
+}
+
 // StageProject writes a stack's compose file and env to dir and returns it
-// as a Project for ImportCompose. dataDir is where Portainer's data volume
-// is on this host; relative paths in the stack pointed into it.
-func StageProject(dir string, s PortainerStack, content, dataDir string) (Project, Options, []string, error) {
+// as a Project for ImportCompose, with the env exactly as Portainer passed
+// it: for compose stacks raw NAME=VALUE lines in an env file (compose
+// parses them, so quotes, $VAR and " #" behave as they did), for swarm
+// stacks literal values in the process environment.
+func StageProject(dir string, s PortainerStack, content string) (Project, Options, []string, error) {
 	var warnings []string
 	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(content), 0o600); err != nil {
 		return Project{}, Options{}, nil, err
@@ -115,14 +145,24 @@ func StageProject(dir string, s PortainerStack, content, dataDir string) (Projec
 		if strings.ContainsAny(e.Value, "\n\r") {
 			warnings = append(warnings, fmt.Sprintf("%s contains a newline; check its imported value", e.Name))
 		}
-		fmt.Fprintf(&env, "%s=%s\n", e.Name, envQuote(e.Value))
+		if s.Type == 1 {
+			fmt.Fprintf(&env, "%s=%s\n", e.Name, envQuote(e.Value))
+		} else {
+			fmt.Fprintf(&env, "%s=%s\n", e.Name, e.Value) // as Portainer's createEnvFile
+		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "stack.env"), []byte(env.String()), 0o600); err != nil {
 		return Project{}, Options{}, nil, err
 	}
-	project := filepath.Join(dataDir, "compose", fmt.Sprint(s.ID))
+	project := s.ProjectPath
+	if project == "" {
+		project = fmt.Sprintf("/data/compose/%d", s.ID)
+	}
 	if relativeBind.MatchString(content) {
-		warnings = append(warnings, fmt.Sprintf("relative bind mounts pointed into Portainer's data volume; they now point at %s; check that this is where the data is on this host", project))
+		warnings = append(warnings, fmt.Sprintf("relative paths now start at %s, the path Portainer gave the daemon, so bind mounts keep their data; env_file, build and extends paths there were read inside Portainer's container and will not exist on this host", project))
+	}
+	if envFileRef.MatchString(content) {
+		warnings = append(warnings, "env_file refers to files in Portainer's data volume (its stack.env holds the secrets in plaintext): replace it with NepFleet values before applying")
 	}
 	o := Options{Source: fmt.Sprintf("Portainer stack %s (id %d)", s.Name, s.ID), RewriteDir: [2]string{dir, project}}
 	if s.Type == 1 {
@@ -157,4 +197,21 @@ func envQuote(v string) string {
 	}
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", "$$", "\n", `\n`)
 	return `"` + r.Replace(v) + `"`
+}
+
+// NewPortainerHTTP is a client that never follows redirects, so the token
+// cannot be forwarded to another host or downgraded to http. rootCAs may be
+// nil for the system roots.
+func NewPortainerHTTP(rootCAs *x509.CertPool) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone() // keeps proxy settings
+	if rootCAs != nil {
+		tr.TLSClientConfig = &tls.Config{RootCAs: rootCAs, MinVersion: tls.VersionTLS12}
+	}
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("Portainer redirected to %s; use that URL directly", req.URL.Redacted())
+		},
+	}
 }
