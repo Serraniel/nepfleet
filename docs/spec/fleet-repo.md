@@ -109,6 +109,16 @@ Swarm stacks and Portainer follow with their own issues.
 - **How images are pinned:** in Compose mode the digest is pulled and tagged locally, so the compose file and its config hash stay unchanged. In Swarm mode the generated stack file uses `image:tag@digest`.
 - **Images that cannot be resolved,** such as local builds or private registries without credentials, run by tag. `apply` reports them.
 
+## Copies of the key and the repository
+
+Every secret is encrypted to the age keys in `fleet.yaml`. If you lose the private key, every secret is gone, so keep a copy somewhere other than this host:
+
+- **`nepfleet key backup --out /media/usb/nepfleet-key.age`:** writes the key encrypted with a passphrase that `age` asks for. With `--recipient age1…`, it's encrypted to another key instead, for example one in your password manager. The copy may not be written into the fleet repository. Restore it with `age -d nepfleet-key.age > ~/.config/sops/age/keys.txt`.
+- **A second recipient:** adding a second public key to `spec.secrets.age` (followed by `sops updatekeys`) also counts as a copy, because its holder can decrypt every secret.
+- **`spec.mirrors`:** lists git URLs of second remotes, such as another forge or a Storage Box over SSH. `nepfleet mirror` pushes every branch and tag there and adds the mirrors as push URLs of `origin`, so a normal `git push` reaches them as well.
+
+`nepfleet doctor` warns while it knows of no copy of the key, and while the repository has no mirror or this clone does not push to every mirror.
+
 ## Rules
 
 - NepFleet commits only what it owns, such as `lock.yaml`, rendered output and imported stacks. Each commit message says why the change was made.

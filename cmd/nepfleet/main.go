@@ -45,6 +45,8 @@ Usage:
   nepfleet secret set <stack> <KEY>     store a secret (encrypted, read from stdin)
   nepfleet secret set --global <KEY>    store a fleet-wide secret (fleet.secret.yaml)
   nepfleet secret check                 fail if any *.secret.yaml is not encrypted
+  nepfleet key backup --out FILE        copy the age key, encrypted with a passphrase (or --recipient)
+  nepfleet mirror                       push the fleet repository to fleet.yaml's spec.mirrors
   nepfleet history <stack>              versions of a stack in the fleet repository
   nepfleet rollback <stack> [commit]    restore an earlier version, commit and apply
   nepfleet import compose [project...]  adopt running Compose projects (lists them without args)
@@ -116,6 +118,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdSecret(args[1:], stdout, stderr)
 	case "history":
 		return cmdHistory(args[1:], stdout, stderr)
+	case "key":
+		return cmdKey(args[1:], stdout, stderr)
+	case "mirror":
+		return cmdMirror(args[1:], stdout, stderr)
 	case "rollback":
 		return cmdRollback(args[1:], stdout, stderr)
 	case "import":
