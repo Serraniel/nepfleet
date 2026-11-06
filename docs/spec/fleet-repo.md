@@ -36,6 +36,35 @@ spec:
 
 Stack settings are merged over the fleet's field by field; json-file without options still gets the rotation defaults. Services that inherit `logging` through a merge key (`<<: *defaults`) keep it, services using `extends` are left alone (their base may set it), and services pulled in with a top-level `include:` are not changed. Imported stacks are adopted as they run, without these settings: their next apply recreates every service once.
 
+## Network storage
+
+Stack volumes can live on a NAS share or a Storage Box. Name the storage once in `fleet.yaml`:
+
+```yaml
+spec:
+  storage:
+    nas:
+      type: cifs                    # cifs (SMB) | nfs
+      address: 192.168.1.10
+      share: media                  # cifs: the share name; nfs: the exported path (/exports/media)
+      username: jellyfin            # cifs
+      passwordSecret: NAS_PASSWORD  # key in fleet.secret.yaml (nepfleet secret set --global NAS_PASSWORD)
+      options: [vers=3.1.1, uid=1000, gid=1000]
+```
+
+Then point a stack's volume at it in `stack.yaml`:
+
+```yaml
+spec:
+  volumes:
+    media: {storage: nas, path: /movies}   # a folder in the share; empty = the share itself
+```
+
+- **How it's mounted:** the volume becomes a Docker `local` volume that mounts the share (`driver_opts` type, device, options). Docker mounts it when a container starts, on whichever node runs it, so it works in swarm too.
+- **Password:** it's written only to the stack's env file, as `NEPFLEET_STORAGE_<NAME>_PASSWORD`, and plans show it masked. Mount options are comma separated, so a password can't contain a comma.
+- **Volume name:** the volume gets its own name, `<stack>_<volume>_<storage>`. A local volume with the same key may already exist, and Docker never changes an existing volume's options. Data in an old local volume is not moved.
+- **Only volumes:** a stack can only put volumes it declares on network storage. A host path (bind mount) stays a host path. For mounts on the host itself, see #110.
+
 ## Shared folders
 
 Name host folders that several stacks use once, in `fleet.yaml`:

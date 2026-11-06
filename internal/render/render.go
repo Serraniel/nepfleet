@@ -39,6 +39,9 @@ type Input struct {
 	// stacks on the same host mark backup: false (caches, models), for
 	// ${NEPFLEET_NO_BACKUP_VOLUMES}.
 	NoBackupVolumes []string
+	// StoragePasswords are the passwords of fleet.yaml spec.storage entries
+	// (from fleet.secret.yaml), by storage name.
+	StoragePasswords map[string]string
 	// RenderGID is the group of the host's /dev/dri render nodes, added to
 	// services that get an intel or amd GPU, so non-root images can use it.
 	RenderGID string
@@ -115,6 +118,9 @@ func Render(in Input) (*Output, error) {
 		if compose, err = WithHardware(compose, in.Template.Spec.Hardware, env, in.Stack.Spec.Mode, in.RenderGID); err != nil {
 			return nil, fmt.Errorf("compose file: %w", err)
 		}
+	}
+	if compose, err = WithStorage(compose, in.Fleet, in.Stack, in.StoragePasswords, env, out); err != nil {
+		return nil, fmt.Errorf("compose file: %w", err)
 	}
 	if compose, err = WithBlockedHosts(compose, fleet.BlockedHosts(in.Fleet, in.Stack)); err != nil {
 		return nil, fmt.Errorf("compose file: %w", err)

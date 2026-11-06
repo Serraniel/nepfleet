@@ -63,7 +63,10 @@ type Spec struct {
 	Logging *Logging `yaml:"logging"`
 	// Egress: hosts the containers must not reach (known telemetry by
 	// default, see TelemetryHosts).
-	Egress *Egress `yaml:"egress"`
+	// Storage names network storage (NAS shares, Storage Boxes) that stack
+	// volumes can live on (stack.yaml spec.volumes).
+	Storage map[string]Storage `yaml:"storage"`
+	Egress  *Egress            `yaml:"egress"`
 }
 
 // NotifyChannel is one notification destination.
@@ -173,7 +176,10 @@ type StackSpec struct {
 	Logging *Logging `yaml:"logging"`
 	// Egress: hosts the containers must not reach (known telemetry by
 	// default, see TelemetryHosts).
-	Egress *Egress `yaml:"egress"`
+	// Volumes puts compose volumes on network storage from fleet.yaml
+	// spec.storage, e.g. media: {storage: nas, path: /movies}.
+	Volumes map[string]VolumeMount `yaml:"volumes"`
+	Egress  *Egress                `yaml:"egress"`
 	// Snapshot: auto copies the volumes before an apply that recreates
 	// running services and restores them on rollback; off skips that.
 	Snapshot string `yaml:"snapshot" schema:"enum=auto|off;default=auto"`
@@ -336,6 +342,9 @@ func Load(dir string) (*Fleet, error) {
 		if r.MinSeverity != "" && !slices.Contains([]string{"info", "warning", "error"}, r.MinSeverity) {
 			return nil, fmt.Errorf("fleet.yaml: notifications.routes[%d]: minSeverity is info, warning or error", i)
 		}
+	}
+	if err := checkStorage(&f); err != nil {
+		return nil, err
 	}
 	if err := checkEgress(f.Spec.Egress); err != nil {
 		return nil, fmt.Errorf("fleet.yaml: spec.egress: %w", err)
