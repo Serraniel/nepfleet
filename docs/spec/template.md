@@ -48,6 +48,7 @@ spec:
     autoUpdate: true
     backup: true
     sso: false                 # OIDC wiring
+    metrics: false             # nepfleet.metrics.* labels (Prometheus)
   inputs:                      # the wizard
     - name: DOMAIN
       type: hostname           # string|text|secret|hostname|url|email|int|bool|enum|path
@@ -107,7 +108,20 @@ labels:
   homepage.href: https://${DOMAIN}
 ```
 
-Write labels on the service as usual. In swarm mode, NepFleet moves them to `deploy.labels`, where Caddy, AutoKuma and Homepage look for them.
+Write labels on the service as usual. In swarm mode, NepFleet moves them to `deploy.labels`, where Caddy, AutoKuma, Homepage and Prometheus look for them.
+
+### Metrics
+
+With `supports.metrics: true`, the services that expose Prometheus metrics say where to find them:
+
+```yaml
+labels:
+  nepfleet.metrics.port: "9090"      # required: a port, or one ${VAR}
+  nepfleet.metrics.path: /metrics    # optional, default /metrics
+  nepfleet.metrics.scheme: http      # optional: http (default) or https
+```
+
+The system Prometheus stack discovers these services through the Docker socket proxy (`docker_sd_configs`, `dockerswarm_sd_configs` on swarm). It keeps only services with `nepfleet.metrics.port` and labels their metrics with `stack`, `service` and `host`. Validation enforces the same rules as for the other integrations: the flag needs the labels, and the labels need the flag. A service with any `nepfleet.metrics.*` label also needs the port, and unknown keys are refused.
 
 ## Migrations
 

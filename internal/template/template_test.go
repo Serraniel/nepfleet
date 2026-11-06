@@ -209,3 +209,52 @@ func TestHardwareValidation(t *testing.T) {
 		t.Errorf("want both hardware errors, got %v", err)
 	}
 }
+
+func TestMetricsLabels(t *testing.T) {
+	for name, c := range map[string]struct {
+		supports, labels, want string
+	}{
+		"valid":       {"ingress: true, metrics: true", `nepfleet.metrics.port: "9090", nepfleet.metrics.path: /m, nepfleet.metrics.scheme: https`, ""},
+		"variable":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "${PORT}"`, "${PORT}, which is neither"},
+		"flag only":   {"ingress: true, metrics: true", ``, "supports.metrics is true, but no service has nepfleet.metrics.port labels"},
+		"labels only": {"ingress: true", `nepfleet.metrics.port: "9090"`, "supports.metrics is false"},
+		"bad port":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "99999"`, "must be a port number"},
+		"no port":     {"ingress: true, metrics: true", `nepfleet.metrics.path: /m`, "nepfleet.metrics.port is required"},
+		"bad path":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.path: m`, "must start with /"},
+		"bad scheme":  {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.scheme: ftp`, "http or https"},
+		"unknown key": {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.interval: 5s`, "unknown label nepfleet.metrics.interval"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := copyDemo(t)
+			replaceIn(t, filepath.Join(dir, "template.yaml"), "supports: { ingress: true }", "supports: { "+c.supports+" }")
+			if c.labels != "" {
+				replaceIn(t, filepath.Join(dir, "compose.yaml"), "      caddy: ${DOMAIN}\n", "      caddy: ${DOMAIN}\n      "+strings.ReplaceAll(c.labels, ", n", "\n      n")+"\n")
+			}
+			tpl, err := Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = tpl.Validate()
+			switch {
+			case c.want == "" && err != nil:
+				t.Fatalf("valid labels refused: %v", err)
+			case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+				t.Fatalf("want %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func replaceIn(t *testing.T, path, old, new string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), old) {
+		t.Fatalf("%s lacks %q", path, old)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, new, 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
