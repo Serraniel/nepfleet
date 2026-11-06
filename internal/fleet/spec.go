@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -46,6 +48,9 @@ type Spec struct {
 	} `yaml:"updates"`
 	// IngressNetwork is the external network Caddy and the stacks share.
 	IngressNetwork string `yaml:"ingressNetwork" schema:"default=nepfleet_ingress"`
+	// Paths names host folders that stacks share (a media share, a folder
+	// one app writes and another reads). Path inputs refer to them as @name.
+	Paths map[string]string `yaml:"paths"`
 	// TZ is passed to stacks as ${TZ}.
 	TZ string `yaml:"tz" schema:"default=UTC"`
 	// Logging is the log driver of every service that sets none itself, so
@@ -263,6 +268,15 @@ func Load(dir string) (*Fleet, error) {
 			return nil, fmt.Errorf("fleet.yaml: spec.updates.%s must be off, notify or auto, got %q", u.key, u.v)
 		}
 	}
+	for _, name := range slices.Sorted(maps.Keys(f.Spec.Paths)) {
+		p := f.Spec.Paths[name]
+		switch {
+		case !nameRe.MatchString(name):
+			return nil, fmt.Errorf("fleet.yaml: spec.paths.%s: a name is lowercase letters, digits, - and _", name)
+		case !filepath.IsAbs(p) || p != filepath.Clean(p):
+			return nil, fmt.Errorf("fleet.yaml: spec.paths.%s: %q must be a clean absolute path (%s)", name, p, filepath.Clean(p))
+		}
+	}
 	seen := map[string]bool{}
 	for _, s := range f.Spec.TemplateSources {
 		if !nameRe.MatchString(s.Name) || seen[s.Name] {
@@ -388,4 +402,18 @@ func loadStack(dir string) (*Stack, error) {
 		}
 	}
 	return &s, errors.Join(errs...)
+}
+
+// ResolvePath turns a path input value into a host path: @name refers to
+// spec.paths, anything else is returned as it is.
+func (f *Fleet) ResolvePath(v string) (string, error) {
+	name, ok := strings.CutPrefix(v, "@")
+	if !ok {
+		return v, nil
+	}
+	p, ok := f.Spec.Paths[name]
+	if !ok {
+		return "", fmt.Errorf("@%s is not defined in fleet.yaml spec.paths", name)
+	}
+	return p, nil
 }

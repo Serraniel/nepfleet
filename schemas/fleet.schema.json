@@ -108,6 +108,21 @@
             "null"
           ]
         },
+        "paths": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "description": "Paths names host folders that stacks share (a media share, a folder one app writes and another reads). Path inputs refer to them as @name.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "secrets": {
           "additionalProperties": false,
           "properties": {

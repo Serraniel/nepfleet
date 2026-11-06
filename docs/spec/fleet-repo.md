@@ -36,6 +36,19 @@ spec:
 
 Stack settings are merged over the fleet's field by field; json-file without options still gets the rotation defaults. Services that inherit `logging` through a merge key (`<<: *defaults`) keep it, services using `extends` are left alone (their base may set it), and services pulled in with a top-level `include:` are not changed. Imported stacks are adopted as they run, without these settings: their next apply recreates every service once.
 
+## Shared folders
+
+Name host folders that several stacks use once, in `fleet.yaml`:
+
+```yaml
+spec:
+  paths:
+    media: /mnt/TitanMedia                      # Jellyfin, Navidrome and Tdarr read it
+    labels: /mnt/TitanData/docker/homebox/labels  # Homebox writes labels, Home Assistant prints them
+```
+
+Path inputs take `@media` instead of the path (`nepfleet new` lists the names), so stacks provably share the folder and moving a share is one change. `doctor` checks that every folder in use exists on the host.
+
 ## `stacks/<name>/stack.yaml`
 
 ```yaml

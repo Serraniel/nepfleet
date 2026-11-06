@@ -140,6 +140,14 @@ func values(in Input, env map[string]string, out *Output) error {
 			env[inp.Name] = ""
 			continue
 		}
+		if inp.Type == "path" && strings.HasPrefix(v, "@") {
+			p, err := in.Fleet.ResolvePath(v)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", inp.Name, err))
+				continue
+			}
+			v = p
+		}
 		if err := CheckInput(inp, v); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", inp.Name, err))
 		}
@@ -228,6 +236,12 @@ func check(inp template.Input, v string) error {
 			return fmt.Errorf("%q must be none, intel, amd or nvidia", v)
 		}
 	case "path":
+		if name, ok := strings.CutPrefix(v, "@"); ok {
+			if !fleet.ValidName(name) {
+				return fmt.Errorf("%q is not a path name from fleet.yaml spec.paths", v)
+			}
+			break
+		}
 		if !filepath.IsAbs(v) && !strings.HasPrefix(v, "./") {
 			return fmt.Errorf("%q must be absolute or start with ./", v)
 		}
