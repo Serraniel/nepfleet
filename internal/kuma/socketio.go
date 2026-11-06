@@ -128,42 +128,54 @@ func (c *conn) readLoop(ctx context.Context) {
 		if debugFrames != nil {
 			debugFrames("<- " + s)
 		}
-		switch {
-		case s == "2": // Engine.IO ping from the server
-			_ = c.ws.Write(ctx, websocket.MessageText, []byte("3"))
-		case strings.HasPrefix(s, "43"): // ack: 43<id>[...]
-			id, payload := splitID(s[2:])
-			c.mu.Lock()
-			ch := c.acks[id]
-			delete(c.acks, id)
-			c.mu.Unlock()
-			if ch != nil {
-				ch <- json.RawMessage(payload)
-			}
-		case strings.HasPrefix(s, "42"): // event: 42["name", data]
-			var arr []json.RawMessage
-			if json.Unmarshal([]byte(s[2:]), &arr) != nil || len(arr) == 0 {
-				continue
-			}
-			var name string
-			_ = json.Unmarshal(arr[0], &name)
-			var data json.RawMessage
-			if len(arr) > 1 {
-				data = arr[1]
-			}
-			c.mu.Lock()
-			c.events[name] = data
-			for _, w := range c.waiters[name] {
-				select {
-				case <-w: // already closed through another name
-				default:
-					close(w)
-				}
-			}
-			delete(c.waiters, name)
-			c.mu.Unlock()
+		if reply := c.handle(s); reply != "" {
+			_ = c.ws.Write(ctx, websocket.MessageText, []byte(reply))
 		}
 	}
+}
+
+// handle processes one frame from the server and returns the frame to send
+// back, if any. Frames are untrusted: anything malformed is ignored.
+func (c *conn) handle(s string) (reply string) {
+	switch {
+	case s == "2": // Engine.IO ping from the server
+		return "3"
+	case strings.HasPrefix(s, "43"): // ack: 43<id>[...]
+		id, payload := splitID(s[2:])
+		c.mu.Lock()
+		ch := c.acks[id]
+		delete(c.acks, id)
+		c.mu.Unlock()
+		if ch != nil {
+			select {
+			case ch <- json.RawMessage(payload):
+			default: // defensive: each ack channel receives at most once
+			}
+		}
+	case strings.HasPrefix(s, "42"): // event: 42["name", data]
+		var arr []json.RawMessage
+		if json.Unmarshal([]byte(s[2:]), &arr) != nil || len(arr) == 0 {
+			return ""
+		}
+		var name string
+		_ = json.Unmarshal(arr[0], &name)
+		var data json.RawMessage
+		if len(arr) > 1 {
+			data = arr[1]
+		}
+		c.mu.Lock()
+		c.events[name] = data
+		for _, w := range c.waiters[name] {
+			select {
+			case <-w: // already closed through another name
+			default:
+				close(w)
+			}
+		}
+		delete(c.waiters, name)
+		c.mu.Unlock()
+	}
+	return ""
 }
 
 func splitID(s string) (int, string) {
