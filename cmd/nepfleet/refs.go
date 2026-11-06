@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/render"
 )
 
 // resolveRefs resolves a stack's references to other stacks' values and
@@ -66,11 +67,15 @@ func (r refResolver) value(v fleet.Value, seen []string) (string, bool, error) {
 		}
 		return "", false, fmt.Errorf("%s is not set (generated secrets exist once %s has been applied; set others with nepfleet secret set)", v, v.From)
 	}
-	if raw, ok := src.Spec.Values[v.Value]; ok {
+	raw, given := src.Spec.Values[v.Value]
+	if given {
 		if raw.IsRef() {
 			return r.value(raw, append(seen, v.From))
 		}
-		return raw.Literal, false, nil
+		if raw.Literal != "" || src.Spec.Template == nil {
+			return raw.Literal, false, nil
+		}
+		// An empty value: the template decides (below) what it renders as.
 	}
 	if src.Spec.Template != nil {
 		// Only value references need the template (defaults, hints), so a
@@ -86,6 +91,11 @@ func (r refResolver) value(v fleet.Value, seen []string) (string, bool, error) {
 			if inp.Type == "secret" {
 				return "", false, fmt.Errorf("%s is a secret input: use {from: %s, secret: %s}", v, v.From, v.Value)
 			}
+			// As the source renders it: an empty typed value means its
+			// default, an empty text value clears it.
+			if given && !render.TypedInput(inp.Type) {
+				return "", false, nil
+			}
 			if inp.Default != "" {
 				return inp.Default, false, nil
 			}
@@ -95,6 +105,9 @@ func (r refResolver) value(v fleet.Value, seen []string) (string, bool, error) {
 				return "", false, fmt.Errorf("%s is a generated secret: use {from: %s, secret: %s}", v, v.From, v.Value)
 			}
 		}
+	}
+	if given {
+		return "", false, nil // set to empty on purpose
 	}
 	return "", false, fmt.Errorf("%s is not set", v)
 }

@@ -136,3 +136,15 @@ func mustStack(t *testing.T, e *env, name string) *fleet.Stack {
 	}
 	return s
 }
+
+// A reference sees an empty value as the source stack renders it.
+func TestResolveEmptyValues(t *testing.T) {
+	e := refFleet(t, "", map[string]string{
+		"a": "    X: \"\"\n",
+		"b": "    A_X: {from: a, value: X}\n",
+	})
+	v, _, err := resolve(t, e, "b")
+	if err != nil || v["A_X"] != "" {
+		t.Errorf("an empty plain value: %q, %v", v["A_X"], err)
+	}
+}
