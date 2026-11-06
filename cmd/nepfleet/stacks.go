@@ -551,6 +551,9 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 				Title: "applying " + name + " failed", Message: err.Error()})
 		default:
 			fmt.Fprintf(stdout, "%s: ✓ applied and healthy\n", name)
+			if p.plan.First {
+				e.kumaFirstRun(ctx, stdout, p)
+			}
 			e.emit(notifier, stdout, notify.Event{Name: "apply.succeeded", Severity: notify.Info, Stack: name,
 				Title: name + " applied", Message: fmt.Sprintf("%s is updated and healthy.", name)})
 		}
