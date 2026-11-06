@@ -46,7 +46,7 @@ Usage:
   nepfleet secret set --global <KEY>    store a fleet-wide secret (fleet.secret.yaml)
   nepfleet secret check                 fail if any *.secret.yaml is not encrypted
   nepfleet key backup --out FILE        copy the age key, encrypted with a passphrase (or --recipient)
-  nepfleet mirror                       push the fleet repository to fleet.yaml's spec.mirrors
+  nepfleet mirror                       push origin's branches and tags to fleet.yaml's spec.mirrors (no force, no deletes)
   nepfleet history <stack>              versions of a stack in the fleet repository
   nepfleet rollback <stack> [commit]    restore an earlier version, commit and apply
   nepfleet import compose [project...]  adopt running Compose projects (lists them without args)

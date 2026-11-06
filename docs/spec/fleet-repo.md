@@ -113,11 +113,17 @@ Swarm stacks and Portainer follow with their own issues.
 
 Every secret is encrypted to the age keys in `fleet.yaml`. If you lose the private key, every secret is gone, so keep a copy somewhere other than this host:
 
-- **`nepfleet key backup --out /media/usb/nepfleet-key.age`:** writes the key encrypted with a passphrase that `age` asks for. With `--recipient age1…`, it's encrypted to another key instead, for example one in your password manager. The copy may not be written into the fleet repository. Restore it with `age -d nepfleet-key.age > ~/.config/sops/age/keys.txt`.
-- **A second recipient:** adding a second public key to `spec.secrets.age` (followed by `sops updatekeys`) also counts as a copy, because its holder can decrypt every secret.
-- **`spec.mirrors`:** lists git URLs of second remotes, such as another forge or a Storage Box over SSH. `nepfleet mirror` pushes every branch and tag there and adds the mirrors as push URLs of `origin`, so a normal `git push` reaches them as well.
+- **`nepfleet key backup --out /media/usb/nepfleet-key.age`:** writes the key encrypted with a passphrase that `age` asks for. With `--recipient age1…`, it's encrypted to another key instead, for example one in your password manager.
+  - The file is created owner-only (0600) and never overwrites anything.
+  - It may not end up in the fleet repository, also not through symlinks.
+  - Restore it with `age -d -o ~/.config/sops/age/keys.txt -- nepfleet-key.age`, adding `-i <identity>` for a recipient copy.
+- **A second recipient:** a second public key in `spec.secrets.age` also counts as a copy, once the files are re-encrypted (`sops updatekeys`), because its holder can decrypt every secret. Keep it on a different machine.
+- **`spec.mirrors`:** lists git URLs of second remotes, such as another forge or a Storage Box over SSH.
+  - `nepfleet mirror` fetches origin and pushes its branches and all tags to every mirror. A clone that is behind still publishes the current state.
+  - It never force-pushes and never deletes. A mirror with commits of its own makes it fail rather than be overwritten.
+  - Run it from a timer, or after pushing.
 
-`nepfleet doctor` warns while it knows of no copy of the key, and while the repository has no mirror or this clone does not push to every mirror.
+`nepfleet doctor` warns while it knows of no copy of the key (including when a recorded copy has been moved away), when the key comes from `SOPS_AGE_KEY` and cannot be checked, and while the repository has no mirror or this host has not mirrored yet.
 
 ## Rules
 

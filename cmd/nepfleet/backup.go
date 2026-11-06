@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -27,7 +26,13 @@ type keyBackup struct {
 	PublicKey string    `json:"publicKey"`
 }
 
-const keyBackupFile = "key-backup.json"
+// mirrorState records when this host last mirrored the repository.
+type mirrorState map[string]time.Time
+
+const (
+	keyBackupFile = "key-backup.json"
+	mirrorFile    = "mirror.json"
+)
 
 type stringList []string
 
@@ -52,30 +57,34 @@ func cmdKey(args []string, stdout, stderr io.Writer) error {
 	if *out == "" {
 		return errors.New("--out is required")
 	}
-	if _, err := os.Stat(*out); err == nil {
-		return fmt.Errorf("%s already exists", *out)
-	}
 	e, err := c.open()
 	if err != nil {
 		return err
 	}
-	abs, err := filepath.Abs(*out)
-	if err != nil {
-		return err
-	}
-	fleetDir, err := filepath.Abs(e.fleet.Dir)
-	if err != nil {
-		return err
-	}
-	if rel, err := filepath.Rel(fleetDir, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return errors.New("the copy must not go into the fleet repository: whoever has the repository would only need the passphrase")
-	}
 	key := ageKeyFile()
-	pub, err := exec.Command("age-keygen", "-y", key).Output()
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", key, err)
+	if _, err := os.Stat(key); err != nil {
+		for _, k := range []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_CMD"} {
+			if os.Getenv(k) != "" {
+				return fmt.Errorf("the key comes from %s, not a file: back up where %s gets it from", k, k)
+			}
+		}
+		return fmt.Errorf("no age key at %s", key)
 	}
-	ageArgs := []string{"--armor", "--output", abs}
+	abs, err := backupTarget(e.fleet.Dir, *out)
+	if err != nil {
+		return err
+	}
+	pub, err := exec.Command("age-keygen", "-y", "--", key).Output()
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", key, cmdErr(err))
+	}
+	// Created here, owner-only and exclusively (no file, no symlink may be
+	// in its place); age writes to it as its output.
+	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	ageArgs := []string{"--armor"}
 	method := "passphrase"
 	if len(recipients) > 0 {
 		method = "recipients"
@@ -85,28 +94,61 @@ func cmdKey(args []string, stdout, stderr io.Writer) error {
 	} else {
 		ageArgs = append(ageArgs, "--passphrase") // age asks on the terminal
 	}
-	cmd := exec.Command("age", append(ageArgs, key)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
-	if err := cmd.Run(); err != nil {
-		_ = os.Remove(abs)
+	cmd := exec.Command("age", append(ageArgs, "--", key)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, f, stderr
+	err = cmd.Run()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(abs) // the file this command created
 		return fmt.Errorf("age: %w", err)
 	}
 	rec, err := json.MarshalIndent(keyBackup{Created: time.Now().UTC(), File: abs, Method: method, PublicKey: strings.TrimSpace(string(pub))}, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(c.stateDir, 0o700); err != nil {
+	if err := writeState(c.stateDir, keyBackupFile, rec); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(c.stateDir, keyBackupFile), rec, 0o600); err != nil {
-		return err
+	restore := fmt.Sprintf("age -d -o %s -- %s", shellQuote(key), shellQuote(abs))
+	if method == "recipients" {
+		restore = fmt.Sprintf("age -d -i <identity of a recipient> -o %s -- %s", shellQuote(key), shellQuote(abs))
 	}
-	fmt.Fprintf(stdout, "wrote %s (%s); move it off this host. Restore with: age -d %s > %s\n", abs, method, filepath.Base(abs), key)
+	fmt.Fprintf(stdout, "wrote %s (%s, owner-only); move it off this host.\nrestore with: %s\n", abs, method, restore)
 	return nil
 }
 
-// cmdMirror pushes the fleet repository to fleet.yaml's spec.mirrors and
-// adds them as push URLs of origin, so a plain git push mirrors too.
+// backupTarget is the absolute output path, refused when it is (or, through
+// symlinks, ends up) inside the git repository of the fleet, or exists.
+func backupTarget(fleetDir, out string) (string, error) {
+	abs, err := filepath.Abs(out)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Lstat(abs); err == nil {
+		return "", fmt.Errorf("%s already exists", abs)
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return "", fmt.Errorf("the folder for %s: %w", abs, err)
+	}
+	repo := fleetDir
+	if top, err := gitOut(fleetDir, "rev-parse", "--show-toplevel"); err == nil {
+		repo = strings.TrimSpace(top) // --fleet may be a subfolder of the repository
+	}
+	if repo, err = filepath.EvalSymlinks(repo); err != nil {
+		return "", err
+	}
+	if rel, err := filepath.Rel(repo, parent); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("the copy must not go into the fleet repository: whoever has the repository would only need the passphrase")
+	}
+	return filepath.Join(parent, filepath.Base(abs)), nil
+}
+
+// cmdMirror pushes the fleet repository's branches and tags to fleet.yaml's
+// spec.mirrors. It pushes what origin has (fetched first), never forces and
+// never deletes: a mirror that has other commits makes it fail instead.
 func cmdMirror(args []string, stdout, stderr io.Writer) error {
 	var c common
 	fs := flag.NewFlagSet("mirror", flag.ContinueOnError)
@@ -124,62 +166,93 @@ func cmdMirror(args []string, stdout, stderr io.Writer) error {
 		return errors.New("fleet.yaml has no spec.mirrors (git URLs of second remotes)")
 	}
 	dir := e.fleet.Dir
-	if origin, err := gitOut(dir, "remote", "get-url", "origin"); err == nil {
-		push := pushURLs(dir)
-		// The first push URL replaces the fetch URL for pushes: keep origin.
-		if len(push) == 0 {
-			if _, err := gitOut(dir, "remote", "set-url", "--add", "--push", "origin", strings.TrimSpace(origin)); err != nil {
-				return err
-			}
+	refspecs := []string{"refs/tags/*:refs/tags/*"}
+	if _, err := gitOut(dir, "remote", "get-url", "origin"); err == nil {
+		// origin is the truth: a clone that is behind must not publish its
+		// older branches.
+		if _, err := gitOut(dir, "fetch", "--quiet", "origin"); err != nil {
+			return err
 		}
-		for _, m := range mirrors {
-			if !slices.Contains(push, m) {
-				if _, err := gitOut(dir, "remote", "set-url", "--add", "--push", "origin", m); err != nil {
-					return err
-				}
-				fmt.Fprintf(stdout, "git push now also pushes to %s\n", m)
-			}
+		refs, err := gitOut(dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/")
+		if err != nil {
+			return err
 		}
+		for _, r := range strings.Fields(refs) {
+			if r == "refs/remotes/origin/HEAD" {
+				continue
+			}
+			refspecs = append(refspecs, r+":refs/heads/"+strings.TrimPrefix(r, "refs/remotes/origin/"))
+		}
+	} else {
+		refspecs = append(refspecs, "refs/heads/*:refs/heads/*")
+	}
+	state := mirrorState{}
+	if raw, err := os.ReadFile(filepath.Join(c.stateDir, mirrorFile)); err == nil {
+		_ = json.Unmarshal(raw, &state)
 	}
 	var errs []error
 	for _, m := range mirrors {
-		// Every branch and tag, also rewritten ones; branches deleted here
-		// are deleted there: it is a mirror.
-		if _, err := gitOut(dir, "push", "--prune", m, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", m, err))
+		if _, err := gitOut(dir, append([]string{"push", "--quiet", "--", m}, refspecs...)...); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w (a mirror that has commits of its own is not overwritten)", m, err))
 			continue
 		}
+		state[m] = time.Now().UTC()
 		fmt.Fprintf(stdout, "mirrored to %s\n", m)
+	}
+	if raw, err := json.MarshalIndent(state, "", "  "); err == nil {
+		if err := writeState(c.stateDir, mirrorFile, raw); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }
 
-func pushURLs(dir string) []string {
-	out, err := gitOut(dir, "config", "--get-all", "remote.origin.pushurl")
-	if err != nil {
-		return nil
+func writeState(dir, name string, raw []byte) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
 	}
-	return strings.Fields(out)
+	return os.WriteFile(filepath.Join(dir, name), raw, 0o600)
 }
 
 // backupChecks report whether the age key and the fleet repository exist
 // somewhere else: losing the key loses every secret.
-func backupChecks(e *env, stateDir string) []doctor.Check {
+func backupChecks(e *env, stateDir, keyFromEnv string) []doctor.Check {
 	var out []doctor.Check
-	switch rec := readKeyBackup(stateDir); {
+	rec := readKeyBackup(stateDir)
+	_, copyErr := os.Stat(func() string {
+		if rec != nil {
+			return rec.File
+		}
+		return ""
+	}())
+	switch {
 	case len(e.fleet.Spec.Secrets.Age) > 1:
-		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.OK, Detail: fmt.Sprintf("%d age recipients can decrypt the secrets", len(e.fleet.Spec.Secrets.Age))})
+		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.OK, Detail: fmt.Sprintf("%d recipients in fleet.yaml: once the files are re-encrypted (sops updatekeys), each key decrypts them; keep them on different machines", len(e.fleet.Spec.Secrets.Age))})
+	case keyFromEnv != "":
+		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.Warn, Detail: "the key comes from " + keyFromEnv + "; whether a copy exists cannot be checked", Fix: "keep a copy of its source off this host"})
+	case rec != nil && keyMatches(rec.PublicKey) && copyErr != nil:
+		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.Warn, Detail: rec.File + " is no longer there (moved off this host?)", Fix: "fine if you moved it; otherwise nepfleet key backup again"})
 	case rec != nil && keyMatches(rec.PublicKey):
 		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.OK, Detail: fmt.Sprintf("copied %s to %s (%s)", rec.Created.Format("2006-01-02"), rec.File, rec.Method)})
 	default:
 		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.Warn, Detail: "no copy of the age key is known: losing it loses every secret",
 			Fix: "nepfleet key backup --out /media/usb/nepfleet-key.age (or add a second recipient to fleet.yaml)"})
 	}
-	switch push := pushURLs(e.fleet.Dir); {
+	state := mirrorState{}
+	if raw, err := os.ReadFile(filepath.Join(stateDir, mirrorFile)); err == nil {
+		_ = json.Unmarshal(raw, &state)
+	}
+	var never []string
+	for _, m := range e.fleet.Spec.Mirrors {
+		if state[m].IsZero() {
+			never = append(never, m)
+		}
+	}
+	switch {
 	case len(e.fleet.Spec.Mirrors) == 0:
 		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Warn, Detail: "the fleet repository has no second remote", Fix: "add spec.mirrors to fleet.yaml, then run nepfleet mirror"})
-	case !containsAll(push, e.fleet.Spec.Mirrors):
-		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Warn, Detail: "git push does not reach every mirror from this clone", Fix: "nepfleet mirror"})
+	case len(never) > 0:
+		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Warn, Detail: "not mirrored from this host yet: " + strings.Join(never, ", "), Fix: "nepfleet mirror (from a timer, or after pushing)"})
 	default:
 		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.OK, Detail: strings.Join(e.fleet.Spec.Mirrors, ", ")})
 	}
@@ -200,15 +273,19 @@ func readKeyBackup(stateDir string) *keyBackup {
 
 // keyMatches: the recorded copy is of the key in use now.
 func keyMatches(pub string) bool {
-	out, err := exec.Command("age-keygen", "-y", ageKeyFile()).Output()
+	out, err := exec.Command("age-keygen", "-y", "--", ageKeyFile()).Output()
 	return err == nil && strings.TrimSpace(string(out)) == pub
 }
 
-func containsAll(have, want []string) bool {
-	for _, w := range want {
-		if !slices.Contains(have, w) {
-			return false
-		}
+// cmdErr adds a command's stderr to its error.
+func cmdErr(err error) error {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(ee.Stderr)))
 	}
-	return true
+	return err
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
