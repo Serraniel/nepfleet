@@ -4,6 +4,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -27,7 +28,8 @@ func isIntegration(k string) bool {
 
 // ForSwarm moves integration labels from services.*.labels to
 // services.*.deploy.labels in an interpolated compose document, so templates
-// write labels once and work in both modes. Comments and order are kept.
+// write labels once and work in both modes, and adds safe rolling-update
+// defaults (updateDefaults). Comments and order are kept.
 func ForSwarm(compose []byte) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(compose, &doc); err != nil {
@@ -42,6 +44,7 @@ func ForSwarm(compose []byte) ([]byte, error) {
 	}
 	for i := 1; i < len(services.Content); i += 2 {
 		svc := services.Content[i]
+		updateDefaults(svc)
 		labels := mapGet(svc, "labels")
 		if labels == nil {
 			continue
@@ -82,6 +85,78 @@ func ForSwarm(compose []byte) ([]byte, error) {
 		dl.Content = append(dl.Content, move...)
 	}
 	return yaml.Marshal(&doc)
+}
+
+// updateDefaults fills what a service's deploy.update_config and
+// rollback_config leave unset: a failed update rolls back by itself
+// (failure_action: rollback, watched for 30s), and stateless services start
+// the new task before stopping the old one (order: start-first), so an
+// update has no gap. Services with volumes or host-mode ports, and global
+// services, keep stop-first: two tasks must not share data or a port.
+func updateDefaults(svc *yaml.Node) {
+	if svc == nil || svc.Kind != yaml.MappingNode {
+		return
+	}
+	deploy := mapGet(svc, "deploy")
+	if deploy == nil {
+		deploy = &yaml.Node{Kind: yaml.MappingNode}
+		mapSet(svc, "deploy", deploy)
+	}
+	if deploy.Kind != yaml.MappingNode {
+		return
+	}
+	// Jobs run to completion; update settings mean nothing for them.
+	if m := mapGet(deploy, "mode"); m != nil && strings.HasSuffix(m.Value, "-job") {
+		return
+	}
+	order := "stop-first"
+	if startFirstSafe(svc, deploy) {
+		order = "start-first"
+	}
+	set := func(section string, kv ...string) {
+		c := mapGet(deploy, section)
+		if c == nil {
+			c = &yaml.Node{Kind: yaml.MappingNode}
+			mapSet(deploy, section, c)
+		}
+		if c.Kind != yaml.MappingNode {
+			return
+		}
+		for i := 0; i+1 < len(kv); i += 2 {
+			if mapGet(c, kv[i]) == nil {
+				mapSet(c, kv[i], &yaml.Node{Kind: yaml.ScalarNode, Value: kv[i+1]})
+			}
+		}
+	}
+	set("update_config", "failure_action", "rollback", "monitor", "30s", "order", order)
+	set("rollback_config", "order", order)
+}
+
+// startFirstSafe: no volumes or binds, no host-mode ports, not global.
+func startFirstSafe(svc, deploy *yaml.Node) bool {
+	if m := mapGet(deploy, "mode"); m != nil && m.Value == "global" {
+		return false
+	}
+	if v := mapGet(svc, "volumes"); v != nil && len(v.Content) > 0 {
+		for _, vol := range v.Content {
+			// tmpfs is per task; everything else may be shared.
+			if t := mapGet(vol, "type"); t == nil || t.Value != "tmpfs" {
+				return false
+			}
+		}
+	}
+	// On swarm's host network, two tasks would share the node's ports.
+	if n := mapGet(svc, "networks"); n != nil && (mapGet(n, "host") != nil || slices.ContainsFunc(n.Content, func(c *yaml.Node) bool { return c.Kind == yaml.ScalarNode && c.Value == "host" })) {
+		return false
+	}
+	if p := mapGet(svc, "ports"); p != nil {
+		for _, port := range p.Content {
+			if m := mapGet(port, "mode"); m != nil && m.Value == "host" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // PinImages rewrites services.*.image values found in pins to image@digest.
