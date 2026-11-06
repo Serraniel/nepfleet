@@ -65,6 +65,22 @@ spec:
   migrations: []               # see below
 ```
 
+## Hardware
+
+Devices and GPUs are inputs like any other, so the wizard can offer what the host has and a template still works without them:
+
+```yaml
+spec:
+  inputs:
+    - {name: ZIGBEE_DEVICE, type: device, title: Zigbee/Thread stick}   # e.g. /dev/serial/by-id/usb-…
+    - {name: GPU, type: gpu, title: Hardware transcoding, default: none} # none | intel | amd | nvidia
+  hardware:
+    - {input: ZIGBEE_DEVICE, services: [homeassistant], target: /dev/ttyUSB0}
+    - {input: GPU, services: [jellyfin]}
+```
+
+When an input has a value, NepFleet adds it to the rendered compose file: a `device` input as `devices: [<host path>:<target>]` (target defaults to the host path), `intel`/`amd` as `/dev/dri`, `nvidia` as a GPU reservation (needs the NVIDIA container toolkit). `none` or an empty value adds nothing. `nepfleet new` lists the host's USB serial devices by their stable `/dev/serial/by-id` path and its GPUs; `doctor` reports configured devices and GPUs the host lacks. Device paths may contain letters, digits and `._+@/-` (no `:`, which compose's device syntax splits on). For intel/amd, the host's render group is added by number (`group_add`), so images running as a non-root user can use `/dev/dri`. Devices inherited through a merge key (`<<: *base`) are kept. Swarm cannot map host devices or GPUs: a swarm stack with hardware chosen is refused. A device is bound when the container is created: after a stick is replugged and gets a new device number, re-apply (or restart) the stack so the container sees it again. An NVIDIA GPU is added next to existing `deploy.resources` limits.
+
 ## Variables
 
 Inside the compose file and `files/`, you can use the following variables:

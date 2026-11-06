@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/term"
 
+	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/template"
@@ -102,7 +103,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 			}
 		}
 		for !given && interactive {
-			if v, err = askInput(stdout, in, inp); err != nil {
+			if v, err = askInput(stdout, in, inp, *target == "local" || *target == c.host); err != nil {
 				return err
 			}
 			if v == "" {
@@ -175,7 +176,9 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func askInput(w io.Writer, in *bufio.Reader, inp template.Input) (string, error) {
+// askInput asks for one value. local: the stack runs on this machine, so
+// its hardware can be offered.
+func askInput(w io.Writer, in *bufio.Reader, inp template.Input, local bool) (string, error) {
 	label := inp.Title
 	if label == "" {
 		label = inp.Name
@@ -189,6 +192,23 @@ func askInput(w io.Writer, in *bufio.Reader, inp template.Input) (string, error)
 		hint = " [" + strings.Join(inp.Options, "/") + "]"
 	case "bool":
 		hint = " [true/false]"
+	case "device":
+		// Offer what this host has; stable by-id paths survive replugging.
+		if !local {
+			fmt.Fprintln(w, "  the stack runs on another host: give a device path there (/dev/serial/by-id/… is stable)")
+		} else if hw := doctor.HostHardware("/"); len(hw.Serial) > 0 {
+			fmt.Fprintln(w, "  devices on this host:")
+			for _, d := range hw.Serial {
+				fmt.Fprintf(w, "    %s\n", d)
+			}
+		} else {
+			fmt.Fprintln(w, "  no USB serial devices found under /dev/serial/by-id")
+		}
+	case "gpu":
+		hint = " [none/intel/amd/nvidia]"
+		if found := doctor.HostHardware("/").GPUs; local && len(found) > 0 {
+			hint += " (this host: " + strings.Join(found, ", ") + ")"
+		}
 	}
 	if inp.Default != "" {
 		hint += " (default " + inp.Default + ")"

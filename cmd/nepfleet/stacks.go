@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/x509"
 	"encoding/json"
@@ -160,7 +161,7 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			return nil, err
 		}
 	}
-	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec})
+	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, RenderGID: doctor.RenderGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -1032,6 +1033,36 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	checks := doctor.Run(context.Background(), doctor.Host(), in)
+	// Devices chosen in device inputs must still be there (a stick that is
+	// unplugged or moved to another port).
+	hw := doctor.HostHardware("/")
+	for _, s := range stacks {
+		if s.Spec.Template == nil {
+			continue
+		}
+		tpl, _, err := e.resolver.Template(*s.Spec.Template)
+		if err != nil {
+			continue // reported with the stack's render error
+		}
+		for _, inp := range tpl.Spec.Inputs {
+			v := cmp.Or(s.Spec.Values[inp.Name], inp.Default)
+			switch {
+			case v == "" || v == "none":
+			case inp.Type == "device":
+				if _, err := os.Stat(v); err != nil {
+					checks = append(checks, doctor.Check{Name: "Device", Status: doctor.Fail, Detail: fmt.Sprintf("%s: %s=%s is missing", s.Metadata.Name, inp.Name, v), Fix: "plug it in, or choose another device (nepfleet new lists them)"})
+				} else {
+					checks = append(checks, doctor.Check{Name: "Device", Status: doctor.OK, Detail: fmt.Sprintf("%s: %s present", s.Metadata.Name, v), Fix: ""})
+				}
+			case inp.Type == "gpu":
+				if slices.Contains(hw.GPUs, v) {
+					checks = append(checks, doctor.Check{Name: "GPU", Status: doctor.OK, Detail: fmt.Sprintf("%s: %s GPU present", s.Metadata.Name, v), Fix: ""})
+				} else {
+					checks = append(checks, doctor.Check{Name: "GPU", Status: doctor.Fail, Detail: fmt.Sprintf("%s: %s=%s, but this host has %s", s.Metadata.Name, inp.Name, v, cmp.Or(strings.Join(hw.GPUs, ", "), "no GPU NepFleet can use")), Fix: "choose the GPU this host has, or none"})
+				}
+			}
+		}
+	}
 	for _, err := range renderErrs {
 		checks = append(checks, doctor.Check{Name: "Stacks", Status: doctor.Fail, Detail: err.Error(), Fix: "fix the stack, then run doctor again"})
 	}

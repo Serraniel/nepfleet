@@ -29,6 +29,9 @@ type Input struct {
 	Template *template.Template
 	// Secrets are the decrypted values.secret.yaml.
 	Secrets map[string]string
+	// RenderGID is the group of the host's /dev/dri render nodes, added to
+	// services that get an intel or amd GPU, so non-root images can use it.
+	RenderGID string
 }
 
 // Output is the rendered stack.
@@ -90,6 +93,11 @@ func Render(in Input) (*Output, error) {
 	}
 	if _, ok := out.Files[ComposeFile]; ok {
 		return nil, errors.New("a template file may not be called " + ComposeFile)
+	}
+	if in.Template != nil && len(in.Template.Spec.Hardware) > 0 {
+		if compose, err = WithHardware(compose, in.Template.Spec.Hardware, env, in.Stack.Spec.Mode, in.RenderGID); err != nil {
+			return nil, fmt.Errorf("compose file: %w", err)
+		}
 	}
 	if l := fleet.EffectiveLogging(in.Fleet, in.Stack); l != nil {
 		if compose, err = WithLogging(compose, l); err != nil {
@@ -210,6 +218,14 @@ func check(inp template.Input, v string) error {
 	case "enum":
 		if !slices.Contains(inp.Options, v) {
 			return fmt.Errorf("%q must be one of %v", v, inp.Options)
+		}
+	case "device":
+		if !template.ValidDevice(v) {
+			return fmt.Errorf("%q is not a device path under /dev (letters, digits and ._+@/- only)", v)
+		}
+	case "gpu":
+		if !slices.Contains([]string{"none", "intel", "amd", "nvidia"}, v) {
+			return fmt.Errorf("%q must be none, intel, amd or nvidia", v)
 		}
 	case "path":
 		if !filepath.IsAbs(v) && !strings.HasPrefix(v, "./") {

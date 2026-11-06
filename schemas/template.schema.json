@@ -150,6 +150,51 @@
             "null"
           ]
         },
+        "hardware": {
+          "description": "Hardware maps device and gpu inputs to services; NepFleet adds them to the rendered compose file only when the input has a value.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "description": "Input names a spec.inputs entry of type device or gpu.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "services": {
+                "description": "Services get the device or GPU.",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "minItems": 1,
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "target": {
+                "description": "Target is the device path inside the container (device inputs; default: the same path as on the host).",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "required": [
+              "input",
+              "services"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "images": {
           "items": {
             "additionalProperties": false,
@@ -244,7 +289,9 @@
                   "int",
                   "bool",
                   "enum",
-                  "path"
+                  "path",
+                  "device",
+                  "gpu"
                 ],
                 "type": "string"
               }
