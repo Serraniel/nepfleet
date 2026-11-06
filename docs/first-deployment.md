@@ -145,4 +145,4 @@ git add -A && git commit -m "feat: initial fleet" && git push
 
 ## Known limits of this version
 
-Single host only. There is no web UI yet. Host OS updates, Swarm, tunnels, scheduled maintenance announcements and data snapshots in `nepfleet apply` itself are planned; see the [roadmap](roadmap.md). `nepfleet apply` rolls back files and images, not volume data, so keep `volume-backup` enabled. For image updates, neptide with `neptide.snapshot=true` rolls back data as well.
+Single host only. There is no web UI yet. Host OS updates, Swarm, tunnels and scheduled maintenance announcements are planned; see the [roadmap](roadmap.md). Before an apply recreates services of a running stack, `nepfleet apply` stops all its containers and copies their volumes (each volume once; the copies are deleted after a healthy apply); if the new version fails its health check, the data is restored before the previous version starts (a data-safe rollback). Large media volumes stay out with `snapshot: false` in the template or `snapshotExclude` in `stack.yaml`; `spec.snapshot: off` or `apply --no-snapshot` skips it. Bind mounts are not copied, so keep `volume-backup` enabled.

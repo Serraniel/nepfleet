@@ -126,6 +126,7 @@ func TestSchemaTagsMatchValidation(t *testing.T) {
 		{enum(StackSpec{}, "Mode"), modes, "spec.mode"},
 		{enum(StackSpec{}, "Apply"), applyPolicies, "spec.apply"},
 		{enum(StackSpec{}, "Updates"), updatePolicies, "spec.updates"},
+		{enum(StackSpec{}, "Snapshot"), snapshotModes, "spec.snapshot"},
 		{enum(Spec{}, "Updates", "Images"), updatePolicies, "fleet spec.updates.images"},
 		{enum(Spec{}, "Updates", "Host"), updatePolicies, "fleet spec.updates.host"},
 	} {

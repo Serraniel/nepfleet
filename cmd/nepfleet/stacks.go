@@ -25,7 +25,9 @@ import (
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/term"
 
+	nengine "github.com/Serraniel/neptide/pkg/engine"
 	"github.com/Serraniel/neptide/pkg/registry"
+	"github.com/Serraniel/neptide/pkg/snapshot"
 
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/doctor"
@@ -72,18 +74,22 @@ func defaultState() string {
 
 // prepared is one stack rendered and planned.
 type prepared struct {
-	stack   *fleet.Stack
-	out     *render.Output
-	plan    *deploy.Plan
-	secrets map[string]string
+	// dataSafe: apply snapshots the volumes first (see DataSafety).
+	dataSafe bool
+	tpl      *template.Template // nil for a plain compose stack
+	stack    *fleet.Stack
+	out      *render.Output
+	plan     *deploy.Plan
+	secrets  map[string]string
 }
 
 type env struct {
 	common
-	fleet    *fleet.Fleet
-	store    secrets.SOPS
-	resolver *source.Resolver
-	reg      *registry.Client
+	noSnapshot bool // apply --no-snapshot
+	fleet      *fleet.Fleet
+	store      secrets.SOPS
+	resolver   *source.Resolver
+	reg        *registry.Client
 }
 
 func (c common) open() (*env, error) {
@@ -168,9 +174,22 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	}
 	// Exact per-service steps from compose; without docker they stay marked approximate.
 	_ = p.RefineServices(context.Background(), deploy.Docker{}, out)
-	pr := &prepared{stack: s, out: out, plan: p, secrets: sec}
-	e.addMaintenanceStep(pr)
+	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec}
+	e.finishPlan(pr)
 	return pr, nil
+}
+
+// finishPlan adds what apply does around the compose steps. Called again
+// whenever the plan is recomputed (--update-lock).
+func (e *env) finishPlan(pr *prepared) {
+	p := pr.plan
+	// Data-safe rollback: an apply that recreates running services copies
+	// the stack's volumes first (compose stacks; swarm rolls back by itself).
+	pr.dataSafe = !e.noSnapshot && pr.stack.Spec.Snapshot != "off" && !p.First && p.Mode != "swarm" && p.Recreates()
+	if pr.dataSafe {
+		p.UseSnapshots()
+	}
+	e.addMaintenanceStep(pr)
 }
 
 func printPlan(w io.Writer, p *deploy.Plan) {
@@ -271,6 +290,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	fs.Var(&confirm, "confirm", "allow destructive changes for this stack (repeatable)")
 	wait := fs.Duration("wait", 3*time.Minute, "health gate timeout per stack")
 	noLock := fs.Bool("no-lock", false, "do not pin images to digests (lock.yaml)")
+	noSnapshot := fs.Bool("no-snapshot", false, "do not copy volumes before recreating services (a failed apply then rolls back files and images, not data)")
 	updateLock := fs.Bool("update-lock", false, "re-resolve every image tag to its current digest (shown in the plan before confirming)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -282,6 +302,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	e.noSnapshot = *noSnapshot
 	stacks, err := e.stacks(fs.Args())
 	if err != nil {
 		return err
@@ -339,6 +360,12 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 		opts := deploy.Options{
 			WaitTimeout: *wait, Commit: commit, Dirty: dirty, IngressNetwork: e.fleet.Spec.IngressNetwork,
+		}
+		if p.dataSafe {
+			if opts.DataSafety, err = e.dataSafety(ctx, p, stdout); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", name, err))
+				continue
+			}
 		}
 		if !*noLock {
 			if updated != nil {
@@ -412,6 +439,7 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
 	if err == nil {
 		_ = p.plan.RefineServices(ctx, deploy.Docker{}, p.out)
+		e.finishPlan(p)
 	}
 	return updated, err
 }
@@ -1103,4 +1131,30 @@ func archGate(ctx context.Context, stdout io.Writer, name string, p *prepared, p
 		return fmt.Errorf("%s: refusing to deploy images this host cannot run:\n  %s\n  use other images, or install emulation with: nepfleet new binfmt", name, strings.Join(bad, "\n  "))
 	}
 	return nil
+}
+
+// dataSafety connects the snapshotter for one stack's apply.
+func (e *env) dataSafety(ctx context.Context, p *prepared, stdout io.Writer) (*deploy.DataSafety, error) {
+	eng, err := nengine.New("")
+	if err != nil {
+		return nil, fmt.Errorf("docker API for snapshots: %w", err)
+	}
+	root, err := eng.DockerRoot(ctx)
+	if err != nil || root == "" {
+		root = "/var/lib/docker"
+	}
+	d := &deploy.DataSafety{
+		Snapshots: &snapshot.Snapshotter{Engine: eng, Keep: 3, DockerRoot: root},
+		Engine:    eng,
+		Exclude:   p.stack.Spec.SnapshotExclude,
+		Log:       func(msg string) { fmt.Fprintf(stdout, "%s: %s\n", p.stack.Metadata.Name, msg) },
+	}
+	if p.tpl != nil {
+		for _, v := range p.tpl.Spec.Volumes {
+			if v.Snapshot != nil && !*v.Snapshot {
+				d.ExcludeVolumes = append(d.ExcludeVolumes, v.Name)
+			}
+		}
+	}
+	return d, nil
 }

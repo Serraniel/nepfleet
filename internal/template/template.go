@@ -115,6 +115,9 @@ type File struct {
 type Volume struct {
 	Name   string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$" json:"name,omitempty"`
 	Backup bool   `yaml:"backup" json:"backup,omitempty"`
+	// Snapshot: false keeps the volume out of the data snapshot taken
+	// before an apply (large media, caches).
+	Snapshot *bool `yaml:"snapshot" json:"snapshot,omitempty"`
 	// Shared marks data that must follow the service across swarm nodes.
 	Shared bool `yaml:"shared" json:"shared,omitempty"`
 }

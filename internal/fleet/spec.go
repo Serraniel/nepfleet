@@ -126,6 +126,11 @@ type StackSpec struct {
 	Updates  string            `yaml:"updates" schema:"enum=off|notify|auto;default=notify"` // off | notify | auto
 	// Logging overrides the fleet's default log settings for this stack.
 	Logging *Logging `yaml:"logging"`
+	// Snapshot: auto copies the volumes before an apply that recreates
+	// running services and restores them on rollback; off skips that.
+	Snapshot string `yaml:"snapshot" schema:"enum=auto|off;default=auto"`
+	// SnapshotExclude lists mount paths in the containers never copied.
+	SnapshotExclude []string `yaml:"snapshotExclude"`
 }
 
 // Logging is a compose logging section applied to services without one.
@@ -213,6 +218,7 @@ var (
 	modes          = []string{"compose", "swarm"}
 	applyPolicies  = []string{"manual", "auto"}
 	updatePolicies = []string{"off", "notify", "auto"}
+	snapshotModes  = []string{"auto", "off"}
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`) // Compose project names allow _
@@ -366,6 +372,12 @@ func loadStack(dir string) (*Stack, error) {
 	}
 	if !slices.Contains(updatePolicies, s.Spec.Updates) {
 		bad("spec.updates must be off, notify or auto")
+	}
+	if s.Spec.Snapshot == "" {
+		s.Spec.Snapshot = "auto"
+	}
+	if !slices.Contains(snapshotModes, s.Spec.Snapshot) {
+		bad("spec.snapshot must be auto or off")
 	}
 	if t := s.Spec.Template; t != nil && (t.Source == "" || t.Name == "") {
 		bad("spec.template needs source and name")
