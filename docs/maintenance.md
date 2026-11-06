@@ -37,7 +37,7 @@ A swarm update where every monitored service runs two or more replicas, or runs 
       rollingUpdates: incident     # incident (default) | maintenance | none
 ```
 
-- **`incident`:** a warning incident ("Rolling update of <stack>") goes on every status page that shows one of the stack's monitors, and it is resolved when the update is done or rolled back. Only that incident is resolved. On Kuma 2.0, which shows a single incident per page, a page that already has one is skipped, so an incident you wrote is never hidden.
+- **`incident`:** a warning incident ("Rolling update of <stack>") goes on every status page that shows one of the stack's monitors, and it is resolved when the update is done or rolled back. Only that incident is resolved, so incidents you wrote stay. This needs Uptime Kuma 2.1 or newer; 2.0.x cannot resolve a single incident, so it gets a warning and no incident. If NepFleet is killed during the update, the incident stays until you resolve it in Kuma.
 - **`maintenance`:** a maintenance window, as for every other update.
 - **`none`:** nothing.
 
