@@ -66,6 +66,8 @@ spec:
   migrations: []               # see below
 ```
 
+An empty value for an `enum`, `bool`, `int`, `hostname`, `url`, `email` or `gpu` input means unset: the default applies, or a required input is reported as missing. For `string`, `text`, `path`, `device` and `secret`, an empty value clears an optional default.
+
 ## Hardware
 
 Devices and GPUs are inputs like any other, so the wizard can offer what the host has and a template still works without them:
@@ -80,7 +82,7 @@ spec:
     - {input: GPU, services: [jellyfin]}
 ```
 
-When an input has a value, NepFleet adds it to the rendered compose file: a `device` input as `devices: [<host path>:<target>]` (target defaults to the host path), `intel`/`amd` as `/dev/dri`, `nvidia` as a GPU reservation (needs the NVIDIA container toolkit). `none` or an empty value adds nothing. `nepfleet new` lists the host's USB serial devices by their stable `/dev/serial/by-id` path and its GPUs; `doctor` reports configured devices and GPUs the host lacks. Device paths may contain letters, digits and `._+@/-` (no `:`, which compose's device syntax splits on). For intel/amd, the host's render group is added by number (`group_add`), so images running as a non-root user can use `/dev/dri`. Devices inherited through a merge key (`<<: *base`) are kept. Swarm cannot map host devices or GPUs: a swarm stack with hardware chosen is refused. A device is bound when the container is created: after a stick is replugged and gets a new device number, re-apply (or restart) the stack so the container sees it again. An NVIDIA GPU is added next to existing `deploy.resources` limits.
+When an input has a value, NepFleet adds it to the rendered compose file: a `device` input as `devices: [<host path>:<target>]` (target defaults to the host path), `intel`/`amd` as `/dev/dri`, `nvidia` as a GPU reservation (needs the NVIDIA container toolkit). `none` (or an empty device) adds nothing. `nepfleet new` lists the host's USB serial devices by their stable `/dev/serial/by-id` path and its GPUs; `doctor` reports configured devices and GPUs the host lacks. Device paths may contain letters, digits and `._+@/-` (no `:`, which compose's device syntax splits on). For intel/amd, the host's render group is added by number (`group_add`), so images running as a non-root user can use `/dev/dri`. Devices inherited through a merge key (`<<: *base`) are kept. Swarm cannot map host devices or GPUs: a swarm stack with hardware chosen is refused. A device is bound when the container is created: after a stick is replugged and gets a new device number, re-apply (or restart) the stack so the container sees it again. An NVIDIA GPU is added next to existing `deploy.resources` limits.
 
 ## Variables
 

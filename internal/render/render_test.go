@@ -190,3 +190,15 @@ func TestRenderRefs(t *testing.T) {
 		t.Errorf("unresolved: %v", err)
 	}
 }
+
+func TestEmptyTypedValueTakesDefault(t *testing.T) {
+	f, tpl := setup(t)
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org", "MODE": ""}), Template: tpl})
+	must(t, err)
+	if got := EnvValues(out.Files[EnvFile])["MODE"]; got != "a" {
+		t.Errorf("MODE = %q, want the default a", got)
+	}
+	if _, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": ""}), Template: tpl}); err == nil || !strings.Contains(err.Error(), "DOMAIN is required") {
+		t.Errorf("an empty required host name: %v", err)
+	}
+}

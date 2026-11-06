@@ -167,7 +167,10 @@ func values(in Input, env map[string]string, out *Output) error {
 				v, given = in.Secrets[inp.Name]
 			}
 		}
-		if !given {
+		// An empty value means unset for inputs whose type has no empty
+		// value (an enum, a number, a host name…): the default applies, or
+		// the input is missing. Otherwise "" would skip every check.
+		if !given || (v == "" && TypedInput(inp.Type)) {
 			v = inp.Default
 		}
 		if v == "" {
@@ -219,6 +222,12 @@ func values(in Input, env map[string]string, out *Output) error {
 var (
 	hostnameRe = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
 )
+
+// TypedInput reports an input type that has no empty value, so
+// an empty value means unset (the default applies).
+func TypedInput(typ string) bool {
+	return slices.Contains([]string{"enum", "bool", "int", "hostname", "url", "email", "gpu"}, typ)
+}
 
 // CheckInput validates one value against its input definition. Errors about
 // secret inputs never contain the value.
