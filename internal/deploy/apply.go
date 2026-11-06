@@ -138,7 +138,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	}
 	var g *guard
 	if o.DataSafety != nil && prev != nil && p.Mode != "swarm" {
-		if g, err = o.DataSafety.take(ctx, r, p.Stack, p.Dir); err != nil {
+		if g, err = o.DataSafety.take(ctx, p.Stack); err != nil {
 			res.LockChanged = false
 			_ = restore(p.Dir, out.Files, prev)
 			return res, err
@@ -146,6 +146,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	}
 	err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
 	if err == nil {
+		g.discard(context.WithoutCancel(ctx))
 		return res, writeManifest(p.Dir, out.Files, pins, o)
 	}
 	res.LockChanged = false // the new pins did not run successfully; never ask to commit them
@@ -153,12 +154,22 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 		// Nothing to go back to. Leave it as is for inspection.
 		return res, fmt.Errorf("first deploy of %s failed (left as is for inspection, `docker compose -p %s logs`): %w", p.Stack, p.Stack, err)
 	}
+	if g != nil {
+		// The stack was stopped for the snapshot: finish the rollback even if
+		// nepfleet is being stopped, or it would stay down.
+		ctx = context.WithoutCancel(ctx)
+		// Nothing may write while the data is restored, including services
+		// only the failed version has: stop the whole project first.
+		if rerr := g.stopAll(ctx); rerr != nil {
+			return res, fmt.Errorf("%w; stopping the failed version before restoring its data failed, the snapshot is kept: %w", err, rerr)
+		}
+	}
 	if rerr := restore(p.Dir, out.Files, prev); rerr != nil {
 		return res, fmt.Errorf("%w; restoring the previous files also failed: %w", err, rerr)
 	}
 	// The new version may have migrated the data: put it back before the
 	// previous version starts on it, or leave the stack stopped.
-	if rerr := g.restore(ctx, r, p.Stack, p.Dir); rerr != nil {
+	if rerr := g.restore(ctx); rerr != nil {
 		return res, fmt.Errorf("%w; restoring the data snapshot failed, so the stack stays stopped rather than run the previous version on changed data: %w", err, rerr)
 	}
 	// The failed attempt may have moved local tags: put back what they were,
@@ -173,6 +184,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, rollbackPins, o.WaitTimeout); rerr != nil {
 		return res, fmt.Errorf("%w; the previous version did not come back up either: %w", err, rerr)
 	}
+	g.discard(ctx)
 	return res, fmt.Errorf("%w: %w", ErrRolledBack, err)
 }
 

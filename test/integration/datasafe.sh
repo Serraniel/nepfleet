@@ -8,7 +8,8 @@ NF=$(realpath "$1"); T=$(mktemp -d); P=nepfleet-datasafe-it
 fail() { echo "FAIL: $*"; exit 1; }
 cleanup() {
   docker compose -p $P down -v >/dev/null 2>&1 || true
-  docker volume rm $(docker volume ls -q --filter label=neptide.snapshot.of) >/dev/null 2>&1 || true
+  # Only this test's snapshot volumes, never other neptide snapshots.
+  docker volume rm $(docker volume ls -q --filter label=neptide.snapshot.of=${P}-app-1) >/dev/null 2>&1 || true
   docker network rm nepfleet_datasafe_it >/dev/null 2>&1 || true
   rm -rf "$T"
 }
@@ -34,4 +35,5 @@ echo "$out" | grep -qi "rolled back" || fail "v2 was not rolled back"
 case "$(log)" in *v2*) fail "the broken version's data stayed: '$(log)'";; esac
 [ "$(log)" = "v1 v1 " ] || fail "after rollback, the restored v1 should have started once more: '$(log)'"
 [ "$(docker inspect -f '{{.State.Running}}' "$(docker compose -p $P ps -q app)")" = true ] || fail "v1 not running"
+[ -z "$(docker volume ls -q --filter label=neptide.snapshot.of=${P}-app-1)" ] || fail "snapshot volumes left behind"
 echo PASS

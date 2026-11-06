@@ -175,14 +175,21 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	// Exact per-service steps from compose; without docker they stay marked approximate.
 	_ = p.RefineServices(context.Background(), deploy.Docker{}, out)
 	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec}
+	e.finishPlan(pr)
+	return pr, nil
+}
+
+// finishPlan adds what apply does around the compose steps. Called again
+// whenever the plan is recomputed (--update-lock).
+func (e *env) finishPlan(pr *prepared) {
+	p := pr.plan
 	// Data-safe rollback: an apply that recreates running services copies
-	// their volumes first (compose stacks; swarm rolls back by itself).
-	if !e.noSnapshot && s.Spec.Snapshot != "off" && !p.First && p.Mode != "swarm" && p.Recreates() {
+	// the stack's volumes first (compose stacks; swarm rolls back by itself).
+	pr.dataSafe = !e.noSnapshot && pr.stack.Spec.Snapshot != "off" && !p.First && p.Mode != "swarm" && p.Recreates()
+	if pr.dataSafe {
 		p.UseSnapshots()
-		pr.dataSafe = true
 	}
 	e.addMaintenanceStep(pr)
-	return pr, nil
 }
 
 func printPlan(w io.Writer, p *deploy.Plan) {
@@ -432,6 +439,7 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
 	if err == nil {
 		_ = p.plan.RefineServices(ctx, deploy.Docker{}, p.out)
+		e.finishPlan(p)
 	}
 	return updated, err
 }
@@ -1144,7 +1152,7 @@ func (e *env) dataSafety(ctx context.Context, p *prepared, stdout io.Writer) (*d
 	if p.tpl != nil {
 		for _, v := range p.tpl.Spec.Volumes {
 			if v.Snapshot != nil && !*v.Snapshot {
-				d.ExcludeVolumes = append(d.ExcludeVolumes, p.stack.Metadata.Name+"_"+v.Name)
+				d.ExcludeVolumes = append(d.ExcludeVolumes, v.Name)
 			}
 		}
 	}
