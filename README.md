@@ -1,5 +1,7 @@
 # NepFleet
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Serraniel/nepfleet/badge)](https://scorecard.dev/viewer/?uri=github.com/Serraniel/nepfleet)
+
 Manage Linux servers and Docker deployments from one git repository.
 
 - **Git is the source of truth.** Every stack, volume definition, tunnel and host setting lives in a *fleet repository*. Every change is a commit, so you can roll back a single stack or move the whole fleet to a new backend.
