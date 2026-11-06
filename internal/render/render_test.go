@@ -322,3 +322,42 @@ func TestWithBlockedHosts(t *testing.T) {
 		t.Error("a service sharing another's network cannot have extra_hosts")
 	}
 }
+
+func TestWithStorage(t *testing.T) {
+	f := &fleet.Fleet{}
+	f.Spec.Storage = map[string]fleet.Storage{
+		"nas": {Type: "cifs", Address: "192.168.1.10", Share: "media", Username: "jelly", PasswordSecret: "NAS_PW", Options: []string{"vers=3.1.1", "uid=1000"}},
+		"box": {Type: "nfs", Address: "nfs.example.org", Share: "/exports/data", Options: []string{"nfsvers=4"}},
+	}
+	s := &fleet.Stack{}
+	s.Metadata.Name = "jf"
+	s.Spec.Volumes = map[string]fleet.VolumeMount{"media": {Storage: "nas", Path: "/movies"}, "data": {Storage: "box"}}
+	in := []byte("services:\n  app: {image: a, volumes: [media:/media, data:/data]}\nvolumes:\n  media:\n  data:\n  cache:\n")
+	env, out := map[string]string{}, &Output{Secret: map[string]bool{}}
+	got, err := WithStorage(in, f, s, map[string]string{"nas": "s3cret"}, env, out)
+	must(t, err)
+	text := string(got)
+	for _, want := range []string{"device: //192.168.1.10/media/movies", "o: addr=192.168.1.10,username=jelly,password=${NEPFLEET_STORAGE_NAS_PASSWORD},vers=3.1.1,uid=1000",
+		"name: jf_media_nas", "device: :/exports/data", "o: addr=nfs.example.org,nfsvers=4", "type: nfs", "cache:"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "s3cret") || env["NEPFLEET_STORAGE_NAS_PASSWORD"] != "s3cret" || !out.Secret["NEPFLEET_STORAGE_NAS_PASSWORD"] {
+		t.Errorf("the password must go to the masked env only: %v", env)
+	}
+	if _, err := WithStorage(in, f, s, nil, env, out); err == nil {
+		t.Error("a missing password must fail")
+	}
+	if _, err := WithStorage(in, f, s, map[string]string{"nas": "a,b"}, env, out); err == nil {
+		t.Error("a comma would end the password in the mount options")
+	}
+	s.Spec.Volumes = map[string]fleet.VolumeMount{"nope": {Storage: "box"}}
+	if _, err := WithStorage(in, f, s, nil, env, out); err == nil {
+		t.Error("a volume the compose file lacks must fail")
+	}
+	s.Spec.Volumes = map[string]fleet.VolumeMount{"data": {Storage: "missing"}}
+	if _, err := WithStorage(in, f, s, nil, env, out); err == nil {
+		t.Error("an unknown storage must fail")
+	}
+}

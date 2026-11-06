@@ -44,7 +44,7 @@
         },
         "egress": {
           "additionalProperties": false,
-          "description": "Egress: hosts the containers must not reach (known telemetry by default, see TelemetryHosts).",
+          "description": "Egress limits what a stack's containers reach on the internet.",
           "properties": {
             "block": {
               "description": "Block lists more host names to resolve to 0.0.0.0.",
@@ -242,6 +242,35 @@
             ]
           },
           "description": "Values are template inputs (or env variables of a plain stack): a literal, or {from: <stack>, value|secret: <name>} to use another stack's value or secret.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "volumes": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "description": "Path is a folder inside the share (empty = the share itself).",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "storage": {
+                "description": "Storage names a fleet.yaml spec.storage entry.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "storage"
+            ],
+            "type": "object"
+          },
+          "description": "Egress: hosts the containers must not reach (known telemetry by default, see TelemetryHosts). Volumes puts compose volumes on network storage from fleet.yaml spec.storage, e.g. media: {storage: nas, path: /movies}.",
           "type": [
             "object",
             "null"
