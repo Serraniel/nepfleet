@@ -319,3 +319,20 @@ func TestRefineServicesUsesComposeHashes(t *testing.T) {
 		t.Fatalf("approximate=%v calls=%d service steps=%v", p.Approximate, r.calls, svc)
 	}
 }
+
+type digests map[string]string
+
+func (d digests) Digest(_ context.Context, ref string) (string, error) { return d[ref], nil }
+
+// --update-lock moves image digests and keeps the template pin.
+func TestResolveUpdateKeepsTemplatePin(t *testing.T) {
+	pin := &lock.TemplatePin{Source: "official", Commit: strings.Repeat("ab", 20)}
+	old := &lock.Lock{Images: map[string]string{"nginx:1.29": "sha256:" + strings.Repeat("0", 64)}, Template: pin}
+	next, _, err := ResolveUpdate(context.Background(), &fakeRunner{}, "web", output("services: {}\n", ""), old, digests{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Template == nil || *next.Template != *pin {
+		t.Errorf("the template pin was dropped: %+v", next.Template)
+	}
+}

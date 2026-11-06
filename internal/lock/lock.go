@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -27,6 +28,15 @@ const File = "lock.yaml"
 // interpolation, e.g. nginx:1.29-alpine) to the digest they resolved to.
 type Lock struct {
 	Images map[string]string `yaml:"images"`
+	// Template is the commit of the template source the stack was last
+	// applied from; it renders from that commit until --update-lock.
+	Template *TemplatePin `yaml:"template,omitempty"`
+}
+
+// TemplatePin is a template source at a commit.
+type TemplatePin struct {
+	Source string `yaml:"source"`
+	Commit string `yaml:"commit"`
 }
 
 // Load reads dir/lock.yaml; a missing file is an empty lock.
@@ -44,6 +54,9 @@ func Load(dir string) (*Lock, error) {
 	if l.Images == nil {
 		l.Images = map[string]string{}
 	}
+	if t := l.Template; t != nil && (t.Source == "" || !commitRe.MatchString(t.Commit)) {
+		return nil, fmt.Errorf("%s: template: want a source and a full commit hash", File)
+	}
 	for ref, d := range l.Images {
 		if !strings.HasPrefix(d, "sha256:") || len(d) != 71 {
 			return nil, fmt.Errorf("%s: %s: %q is not a sha256 digest", File, ref, d)
@@ -52,13 +65,15 @@ func Load(dir string) (*Lock, error) {
 	return l, nil
 }
 
+var commitRe = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
 // Save writes the lock with a header, keys sorted (yaml sorts map keys).
 func (l *Lock) Save(dir string) error {
 	raw, err := yaml.Marshal(l)
 	if err != nil {
 		return err
 	}
-	header := "# Image digests, written by NepFleet on apply. Commit this file: it makes\n# every revision of the stack reproducible. Update with `nepfleet apply --update-lock`.\n"
+	header := "# Image digests and the template commit, written by NepFleet on apply. Commit\n# this file: it makes every revision of the stack reproducible. Update with\n# `nepfleet apply --update-lock`.\n"
 	return os.WriteFile(filepath.Join(dir, File), append([]byte(header), raw...), 0o644) //nolint:gosec // not secret, committed to git
 }
 

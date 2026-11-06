@@ -55,6 +55,10 @@ type Plan struct {
 	// Approximate means the per-service steps were derived without asking
 	// compose (no docker available); compose may recreate more.
 	Approximate bool `json:"approximate,omitempty"`
+	// Template is the template source commit this plan renders from, and
+	// TemplateFrom the pinned one it moves away from (--update-lock).
+	Template     string `json:"template,omitempty"`
+	TemplateFrom string `json:"templateFrom,omitempty"`
 }
 
 // Empty reports whether nothing would change.
