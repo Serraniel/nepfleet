@@ -41,13 +41,16 @@ Fix everything marked ✗. Run it again after adding stacks: it also checks that
 The wizard asks for each template's inputs, stores secrets encrypted and checks the values before writing anything:
 
 ```sh
-nepfleet new caddy            # ACME e-mail, DNS provider, token (hidden)
-nepfleet new dozzle
-nepfleet new uptime-kuma
-nepfleet new homepage
-nepfleet new volume-backup
-nepfleet new neptide
+nepfleet enable               # lists the features and which are on
+nepfleet enable ingress       # Caddy: ACME e-mail, DNS provider, token (hidden)
+nepfleet enable logs          # Dozzle
+nepfleet enable uptime        # Uptime Kuma
+nepfleet enable dashboard     # Homepage
+nepfleet enable backups       # volume-backup
+nepfleet enable updates       # neptide
 ```
+
+`nepfleet enable <feature>` is `nepfleet new <template>` with the feature's system template. It takes the same flags (`--set`, `--target`), and it refuses a second stack for the same feature unless you give it a name, for example Dozzle on another host: `nepfleet enable logs dozzle-nas --target nas`.
 
 Each stack is just a directory with a `stack.yaml`, so you can also write it by hand. `target: local` means this host. For example, ingress:
 
