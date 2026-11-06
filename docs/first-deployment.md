@@ -96,7 +96,11 @@ nepfleet secret set --global KUMA_PASSWORD
 ```sh
 nepfleet import compose                # lists the Compose projects on this host
 nepfleet import compose tdarr          # adopts one; nothing is restarted
+nepfleet import portainer --url https://portainer.lan:9443   # lists Portainer's stacks
+nepfleet import portainer --url https://portainer.lan:9443 nextcloud
 ```
+
+Stacks Portainer manages keep their compose files in Portainer's data volume, out of reach for `import compose`; `import portainer` reads them and their environment through the Portainer API instead, exactly as Portainer passed them to compose. Create an access token in Portainer (My account → Access tokens) and pass it as `PORTAINER_TOKEN` or at the prompt, never as a flag. With several Portainer environments, pass `--endpoint` with this host's (the listing shows them); only stacks running here are adopted. Relative bind mounts keep the host path Portainer gave the daemon (`/data/compose/<id>/…`), so they keep their data. Stacks with additional compose files or deployed from git are refused; create those in the fleet by hand from their files. Portainer's default certificate is self-signed: pass it with `--ca-file`. Afterwards leave those stacks alone in Portainer, since deleting one there removes its containers.
 
 The import moves secrets into `values.secret.yaml` (encrypted), keeps bind mounts pointing at the existing data, and records the running containers as the applied state. The first plan is therefore empty. Read the warnings it prints.
 

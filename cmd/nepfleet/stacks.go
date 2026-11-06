@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -735,8 +736,11 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 func cmdImport(args []string, stdout, stderr io.Writer) error {
+	if len(args) >= 1 && args[0] == "portainer" {
+		return cmdImportPortainer(args[1:], stdout, stderr)
+	}
 	if len(args) < 1 || args[0] != "compose" {
-		return errors.New("usage: nepfleet import compose [project...] [--all] [--target host]")
+		return errors.New("usage: nepfleet import compose [project...] [--all] [--target host] | nepfleet import portainer --url URL [stack...] [--all]")
 	}
 	var c common
 	fs := flag.NewFlagSet("import compose", flag.ContinueOnError)
@@ -777,31 +781,8 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 		delete(want, p.Name)
-		res, err := importer.ImportCompose(ctx, deploy.Docker{}, e.fleet, e.store, p, importer.Options{Target: *target, EncryptAll: *encryptAll})
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", p.Name, err))
-			continue
-		}
-		fmt.Fprintf(stdout, "imported %s → %s\n  values: %s\n  secrets (encrypted): %s\n  volumes (kept as they are): %s\n",
-			p.Name, relTo(e.fleet.Dir, res.Dir), orNone(res.Values), orNone(res.Secrets), orNone(res.Volumes))
-		if *target == c.host || *target == "local" {
-			// The running containers are the applied state: record it, so the
-			// first plan is empty and apply has nothing to change.
-			s, err := e.fleet.LoadStack(p.Name)
-			if err == nil {
-				var prep *prepared
-				if prep, err = e.prepare(s); err == nil {
-					err = deploy.Adopt(prep.plan.Dir, prep.out)
-				}
-			}
-			if err != nil {
-				errs = append(errs, fmt.Errorf("%s: imported, but recording the running state failed: %w", p.Name, err))
-				continue
-			}
-			fmt.Fprintf(stdout, "  adopted: the running containers are now the applied state (plan is empty)\n")
-		}
-		for _, w := range res.Warnings {
-			fmt.Fprintf(stdout, "  ⚠ %s\n", w)
+		if err := e.importOne(ctx, stdout, p, importer.Options{Target: *target, EncryptAll: *encryptAll}, c.host, nil); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	for n := range want {
@@ -811,6 +792,166 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, "\nNext: review and commit the stack. `nepfleet plan` shows nothing to do; manage these projects only through NepFleet from now on.")
 	}
 	return errors.Join(errs...)
+}
+
+// importOne imports one project and, when it runs on this host, records the
+// running containers as the applied state, so the first plan is empty.
+func (e *env) importOne(ctx context.Context, stdout io.Writer, p importer.Project, o importer.Options, host string, extra []string) error {
+	res, err := importer.ImportCompose(ctx, deploy.Docker{}, e.fleet, e.store, p, o)
+	if err != nil {
+		return fmt.Errorf("%s: %w", p.Name, err)
+	}
+	fmt.Fprintf(stdout, "imported %s → %s\n  values: %s\n  secrets (encrypted): %s\n  volumes (kept as they are): %s\n",
+		p.Name, relTo(e.fleet.Dir, res.Dir), orNone(res.Values), orNone(res.Secrets), orNone(res.Volumes))
+	if (o.Target == host || o.Target == "local") && o.Mode != "swarm" && !o.NoAdopt {
+		s, err := e.fleet.LoadStack(p.Name)
+		if err == nil {
+			var prep *prepared
+			if prep, err = e.prepare(s); err == nil {
+				err = deploy.Adopt(prep.plan.Dir, prep.out)
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("%s: imported, but recording the running state failed: %w", p.Name, err)
+		}
+		fmt.Fprintf(stdout, "  adopted: the running containers are now the applied state (plan is empty)\n")
+	}
+	for _, w := range append(extra, res.Warnings...) {
+		fmt.Fprintf(stdout, "  ⚠ %s\n", w)
+	}
+	return nil
+}
+
+func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
+	var c common
+	fs := flag.NewFlagSet("import portainer", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	c.register(fs)
+	u := fs.String("url", envOr("NEPFLEET_PORTAINER_URL", ""), "Portainer URL, e.g. https://portainer.example.org:9443")
+	all := fs.Bool("all", false, "import every compose and swarm stack")
+	target := fs.String("target", "", "spec.target for the imported stacks (default: --host)")
+	encryptAll := fs.Bool("encrypt-all", false, "store every env value encrypted, not only secret-looking names")
+	endpoint := fs.Int("endpoint", 0, "Portainer environment (endpoint) ID of this host; required when stacks of several environments are listed")
+	caFile := fs.String("ca-file", "", "CA certificate for Portainer's TLS certificate (its default one is self-signed)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := importer.ValidPortainerURL(*u); err != nil {
+		return err
+	}
+	if *target == "" {
+		*target = c.host
+	}
+	// Never a flag: it would end up in the shell history.
+	token := os.Getenv("PORTAINER_TOKEN")
+	if token == "" {
+		var err error
+		if token, err = readSecret(stderr, "Portainer access token"); err != nil {
+			return err
+		}
+	}
+	var pool *x509.CertPool
+	if *caFile != "" {
+		pem, err := os.ReadFile(*caFile)
+		if err != nil {
+			return err
+		}
+		pool = x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return fmt.Errorf("%s: no PEM certificate", *caFile)
+		}
+	}
+	pt := importer.Portainer{URL: *u, Token: token, HTTP: importer.NewPortainerHTTP(pool)}
+	ctx := context.Background()
+	stacks, err := pt.Stacks(ctx)
+	if err != nil {
+		return err
+	}
+	if fs.NArg() == 0 && !*all {
+		fmt.Fprintln(stdout, "Portainer stacks (import with `nepfleet import portainer <name>` or --all):")
+		for _, s := range stacks {
+			state := "running"
+			if s.Status != 1 {
+				state = "stopped"
+			}
+			fmt.Fprintf(stdout, "  %-24s %-11s %-8s environment %d\n", s.Name, s.Kind(), state, s.EndpointID)
+		}
+		return nil
+	}
+	e, err := c.open()
+	if err != nil {
+		return err
+	}
+	want := map[string]bool{}
+	for _, n := range fs.Args() {
+		want[n] = true
+	}
+	// Portainer lists the stacks of every environment; each runs on its own
+	// Docker host, so import only this host's.
+	envs := map[int]bool{}
+	for _, s := range stacks {
+		if *all || want[s.Name] {
+			envs[s.EndpointID] = true
+		}
+	}
+	if *endpoint == 0 && len(envs) > 1 {
+		return errors.New("the stacks belong to several Portainer environments: pass --endpoint with this host's environment ID (see the listing)")
+	}
+	var errs []error
+	for _, s := range stacks {
+		if (!*all && !want[s.Name]) || (*endpoint != 0 && s.EndpointID != *endpoint) {
+			continue
+		}
+		delete(want, s.Name)
+		if err := s.Supported(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", s.Name, err))
+			continue
+		}
+		if err := e.importPortainerStack(ctx, stdout, pt, s, importer.Options{Target: *target, EncryptAll: *encryptAll}, c.host); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for n := range want {
+		errs = append(errs, fmt.Errorf("no Portainer stack %q", n))
+	}
+	if len(errs) == 0 {
+		fmt.Fprintln(stdout, "\nNext: review and commit the stacks; `nepfleet plan` shows nothing to do. Do not touch them in Portainer any more (deleting a stack there removes its containers); once every stack is imported, Portainer can be stopped.")
+	}
+	return errors.Join(errs...)
+}
+
+func (e *env) importPortainerStack(ctx context.Context, stdout io.Writer, pt importer.Portainer, s importer.PortainerStack, o importer.Options, host string) error {
+	content, err := pt.File(ctx, s.ID)
+	if err != nil {
+		return fmt.Errorf("%s: %w", s.Name, err)
+	}
+	dir, err := os.MkdirTemp("", "nepfleet-portainer-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	p, so, warnings, err := importer.StageProject(dir, s, content)
+	if err != nil {
+		return fmt.Errorf("%s: %w", s.Name, err)
+	}
+	so.Target, so.EncryptAll = o.Target, o.EncryptAll
+	// Adopt only what runs here: otherwise the plan would claim the stack is
+	// deployed on this host.
+	if so.Mode != "swarm" {
+		local, err := importer.ListCompose(ctx, deploy.Docker{})
+		if err != nil {
+			return err
+		}
+		// Same name and Portainer's working directory: a local project that
+		// only shares the name was not deployed by this stack.
+		if !slices.ContainsFunc(local, func(lp importer.Project) bool {
+			return lp.Name == s.Name && (s.ProjectPath == "" || lp.WorkingDir == s.ProjectPath)
+		}) {
+			so.NoAdopt = true
+			warnings = append(warnings, "no compose project of this name runs on this host, so it was not adopted: check --endpoint and the target before applying")
+		}
+	}
+	return e.importOne(ctx, stdout, p, so, host, warnings)
 }
 
 func orNone(s []string) string {

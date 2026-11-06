@@ -7,6 +7,7 @@ package importer
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -126,6 +127,17 @@ var stackName = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
 // Options tune an import.
 type Options struct {
 	Target string
+	// Mode is the stack mode (default compose).
+	Mode string
+	// Source names where the project came from, for the file header
+	// (default: its config files).
+	Source string
+	// RewriteDir replaces a temporary project directory in the normalised
+	// compose file (from → to), e.g. with where Portainer keeps the stack.
+	RewriteDir [2]string
+	// NoAdopt: the project does not run on this host, so its state is not
+	// recorded as applied.
+	NoAdopt bool
 	// EncryptAll stores every env value encrypted, not only secret-looking ones.
 	EncryptAll bool
 }
@@ -214,7 +226,14 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
-	header := fmt.Sprintf("# Imported by NepFleet on %s from %s\n", time.Now().UTC().Format("2006-01-02"), strings.Join(p.ConfigFiles, ", "))
+	if from, to := o.RewriteDir[0], o.RewriteDir[1]; from != "" {
+		cfg = []byte(strings.ReplaceAll(string(cfg), from, to))
+	}
+	source := o.Source
+	if source == "" {
+		source = strings.Join(p.ConfigFiles, ", ")
+	}
+	header := fmt.Sprintf("# Imported by NepFleet on %s from %s\n", time.Now().UTC().Format("2006-01-02"), source)
 	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), append([]byte(header), cfg...), 0o600); err != nil {
 		return nil, err
 	}
@@ -224,7 +243,7 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 		"metadata":   map[string]string{"name": p.Name},
 		"spec": map[string]any{
 			"target": o.Target,
-			"mode":   "compose",
+			"mode":   cmp.Or(o.Mode, "compose"),
 			"apply":  "manual",
 		},
 	}

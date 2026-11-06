@@ -48,6 +48,7 @@ Usage:
   nepfleet history <stack>              versions of a stack in the fleet repository
   nepfleet rollback <stack> [commit]    restore an earlier version, commit and apply
   nepfleet import compose [project...]  adopt running Compose projects (lists them without args)
+  nepfleet import portainer --url URL [stack...]  adopt Portainer stacks (token in PORTAINER_TOKEN or prompted)
   nepfleet template validate <path>...  validate templates (searches recursively)
   nepfleet template index <root>        print index.json, the catalogue of the templates under root
   nepfleet serve [flags]                run the optional HTTP API
