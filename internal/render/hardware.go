@@ -91,31 +91,51 @@ func appendSeq(m *yaml.Node, key, value string) {
 		mapSet(m, key, seq)
 	}
 	for _, n := range seq.Content {
-		if n.Value == value {
+		// "/dev/dri" and "/dev/dri:/dev/dri" are the same entry.
+		if n.Value == value || n.Value+":"+n.Value == value {
 			return
 		}
 	}
 	seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: value})
 }
 
-// nvidia reserves all NVIDIA GPUs (needs the NVIDIA container toolkit).
+// nvidia reserves all NVIDIA GPUs (needs the NVIDIA container toolkit),
+// next to limits or reservations the service already has.
 func nvidia(svc *yaml.Node) error {
-	var res yaml.Node
-	if err := res.Encode(map[string]any{"reservations": map[string]any{"devices": []map[string]any{
-		{"driver": "nvidia", "count": "all", "capabilities": []string{"gpu"}},
-	}}}); err != nil {
+	var gpus yaml.Node
+	if err := gpus.Encode([]map[string]any{{"driver": "nvidia", "count": "all", "capabilities": []string{"gpu"}}}); err != nil {
 		return err
 	}
-	deploy := mapGet(svc, "deploy")
-	if deploy == nil {
-		deploy = &yaml.Node{Kind: yaml.MappingNode}
-		mapSet(svc, "deploy", deploy)
+	deploy, err := child(svc, "deploy")
+	if err != nil {
+		return err
 	}
-	if mapGet(deploy, "resources") != nil {
-		return fmt.Errorf("spec.hardware: the service already sets deploy.resources; add the GPU there")
+	resources, err := child(deploy, "resources")
+	if err != nil {
+		return err
 	}
-	mapSet(deploy, "resources", &res)
+	reservations, err := child(resources, "reservations")
+	if err != nil {
+		return err
+	}
+	if mapGet(reservations, "devices") != nil {
+		return fmt.Errorf("spec.hardware: the service already reserves devices in deploy.resources.reservations; add the GPU there")
+	}
+	mapSet(reservations, "devices", &gpus)
 	return nil
+}
+
+// child returns m[key] as a mapping, creating it when missing or null.
+func child(m *yaml.Node, key string) (*yaml.Node, error) {
+	c := mapGet(m, key)
+	switch {
+	case c == nil || (c.Kind == yaml.ScalarNode && (c.Tag == "!!null" || c.Value == "")):
+		c = &yaml.Node{Kind: yaml.MappingNode}
+		mapSet(m, key, c)
+	case c.Kind != yaml.MappingNode:
+		return nil, fmt.Errorf("spec.hardware: %s is not a mapping", key)
+	}
+	return c, nil
 }
 
 // mergedSeq finds the list m inherits for key through merge keys.

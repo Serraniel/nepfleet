@@ -159,6 +159,7 @@ var (
 	composeRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
 
 	inputTypes    = []string{"string", "text", "secret", "hostname", "url", "email", "int", "bool", "enum", "path", "device", "gpu"}
+	gpuKinds      = []string{"none", "intel", "amd", "nvidia"}
 	encodings     = []string{"", "base64url", "hex", "alnum"}
 	tracks        = []string{"patch", "minor", "major"}
 	tiers         = []string{"system", "app"}
@@ -286,6 +287,12 @@ func (t *Template) Validate() error {
 		if h.Target != "" && (!ValidDevice(h.Target) || in.Type == "gpu") {
 			bad("spec.hardware[%d]: target must be a /dev path, for device inputs only", i)
 		}
+		if in.Type == "gpu" && in.Default != "" && !slices.Contains(gpuKinds, in.Default) {
+			bad("spec.inputs %q: a gpu default must be one of %v", in.Name, gpuKinds)
+		}
+		if in.Type == "device" && in.Default != "" && !ValidDevice(in.Default) {
+			bad("spec.inputs %q: default is not a device path", in.Name)
+		}
 	}
 	if s.Compose == "" {
 		bad("spec.compose is required")
@@ -346,6 +353,13 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		return []error{fmt.Errorf("%s: no services", t.Spec.Compose)}
 	}
 	var errs []error
+	for i, h := range t.Spec.Hardware {
+		for _, name := range h.Services {
+			if _, ok := doc.Services[name]; !ok {
+				errs = append(errs, fmt.Errorf("spec.hardware[%d]: service %q is not in %s", i, name, t.Spec.Compose))
+			}
+		}
+	}
 
 	// Every image is pinned and has a policy; every policy is used.
 	used := map[string]bool{}
