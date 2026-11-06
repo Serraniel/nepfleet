@@ -3,6 +3,8 @@
 package deploy
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
@@ -82,7 +84,20 @@ func splitLines(s string) []string {
 	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
 }
 
+// markKey is random per process: a mark tells two values apart within one
+// plan, but cannot be compared across runs or used to test guesses of a
+// secret offline (a plain hash prefix of a weak password could be).
+var markKey = func() []byte {
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		panic(err) // crypto/rand does not fail on supported systems
+	}
+	return k
+}()
+
+// fingerprint is a short mark of s, keyed with markKey.
 func fingerprint(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:3])
+	m := hmac.New(sha256.New, markKey)
+	m.Write([]byte(s))
+	return hex.EncodeToString(m.Sum(nil)[:3])
 }

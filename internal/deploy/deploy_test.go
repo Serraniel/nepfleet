@@ -4,6 +4,8 @@ package deploy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -334,5 +336,17 @@ func TestResolveUpdateKeepsTemplatePin(t *testing.T) {
 	}
 	if next.Template == nil || *next.Template != *pin {
 		t.Errorf("the template pin was dropped: %+v", next.Template)
+	}
+}
+
+// Secret marks show that a value changed, never anything testable offline.
+func TestSecretMarks(t *testing.T) {
+	a, b := fingerprint("PASSWORD='hunter2'\n"), fingerprint("PASSWORD='hunter3'\n")
+	if a == b || a != fingerprint("PASSWORD='hunter2'\n") {
+		t.Errorf("marks must tell values apart and be stable within a run: %s %s", a, b)
+	}
+	plain := sha256.Sum256([]byte("PASSWORD='hunter2'\n"))
+	if a == hex.EncodeToString(plain[:3]) {
+		t.Error("a mark must not be a plain hash prefix of the secret")
 	}
 }
