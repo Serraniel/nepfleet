@@ -132,6 +132,25 @@ Every secret is encrypted to the age keys in `fleet.yaml`. If you lose the priva
 
 `nepfleet doctor` warns while it knows of no copy of the key (including when a recorded copy has been moved away), when the key comes from `SOPS_AGE_KEY` and cannot be checked, and while the repository has no mirror or this host has not mirrored yet.
 
+## Blocked hosts (telemetry)
+
+Some software in containers reports usage without asking, such as onnxruntime in Immich's machine learning, Scarf in many images, PostHog in Stirling-PDF and n8n, and Syncthing's reports. NepFleet resolves those hosts to `0.0.0.0` in every service, through `extra_hosts`, so the connection fails at once and nothing else is affected:
+
+```yaml
+spec:
+  egress:
+    blockTelemetry: true        # default; false turns the list off (fleet.yaml or stack.yaml)
+    block: [ads.example.org]    # more exact host names (no wildcards)
+```
+
+- **Where it's set:** a stack's `egress` adds to the fleet's, and a stack's `blockTelemetry` wins.
+- **What's on the list:** `TelemetryHosts` in `internal/fleet/egress.go`. It holds only hosts that serve telemetry alone, never update or package servers.
+- **Overrides:** an `extra_hosts` entry a service sets itself for the same host is kept.
+- **Not covered:** services that share another container's network (`network_mode: service:…`) can't have `extra_hosts`. They're left out, and they usually share the other container's hosts anyway.
+- **When enabled:** the first apply after enabling shows the new `extra_hosts` lines in the plan and recreates the services once.
+
+Default-deny egress with allowlists is planned (#127).
+
 ## Rules
 
 - NepFleet commits only what it owns, such as `lock.yaml`, rendered output and imported stacks. Each commit message says why the change was made.

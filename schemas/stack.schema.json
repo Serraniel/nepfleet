@@ -42,6 +42,34 @@
           ],
           "type": "string"
         },
+        "egress": {
+          "additionalProperties": false,
+          "description": "Egress: hosts the containers must not reach (known telemetry by default, see TelemetryHosts).",
+          "properties": {
+            "block": {
+              "description": "Block lists more host names to resolve to 0.0.0.0.",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "blockTelemetry": {
+              "description": "BlockTelemetry resolves the known telemetry hosts (TelemetryHosts) to 0.0.0.0 in every service; on unless set to false.",
+              "type": "boolean"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "logging": {
           "additionalProperties": false,
           "description": "Logging overrides the fleet's default log settings for this stack.",

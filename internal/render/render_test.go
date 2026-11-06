@@ -3,6 +3,7 @@
 package render
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -282,5 +283,42 @@ func TestSwarmUpdateDefaults(t *testing.T) {
 	}
 	if own := doc.Services["own"].Deploy.UpdateConfig; own["order"] != "stop-first" || own["failure_action"] != "pause" || own["monitor"] != "30s" {
 		t.Errorf("a service's own settings must win: %v", own)
+	}
+}
+
+func TestWithBlockedHosts(t *testing.T) {
+	in := []byte(`services:
+  web:
+    image: nginx
+  listed:
+    image: a
+    extra_hosts: ["scarf.sh:10.0.0.1", "db.local:10.0.0.2"]
+  mapped:
+    image: b
+    extra_hosts: {scarf.sh: 10.0.0.3}
+  sidecar:
+    image: c
+    network_mode: service:web
+`)
+	out, err := WithBlockedHosts(in, []string{"scarf.sh", "mobile.events.data.microsoft.com"})
+	must(t, err)
+	var doc struct {
+		Services map[string]struct {
+			ExtraHosts any `yaml:"extra_hosts"`
+		} `yaml:"services"`
+	}
+	must(t, yaml.Unmarshal(out, &doc))
+	s := fmt.Sprint(doc.Services["web"].ExtraHosts)
+	if !strings.Contains(s, "scarf.sh:0.0.0.0") || !strings.Contains(s, "mobile.events.data.microsoft.com:0.0.0.0") {
+		t.Errorf("web: %s", s)
+	}
+	if s := fmt.Sprint(doc.Services["listed"].ExtraHosts); !strings.Contains(s, "scarf.sh:10.0.0.1") || strings.Contains(s, "scarf.sh:0.0.0.0") || !strings.Contains(s, "db.local") {
+		t.Errorf("a service's own mapping must win: %s", s)
+	}
+	if m, ok := doc.Services["mapped"].ExtraHosts.(map[string]any); !ok || fmt.Sprint(m["scarf.sh"]) != "10.0.0.3" || m["mobile.events.data.microsoft.com"] != "0.0.0.0" {
+		t.Errorf("map form: %v", doc.Services["mapped"].ExtraHosts)
+	}
+	if doc.Services["sidecar"].ExtraHosts != nil {
+		t.Error("a service sharing another's network cannot have extra_hosts")
 	}
 }
