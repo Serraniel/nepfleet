@@ -37,6 +37,27 @@ type Event struct {
 	Host     string
 	Title    string
 	Message  string
+	// URL links to the stack in the UI (empty: no link).
+	URL string
+}
+
+// text is the message body with where it happened and the link.
+func (e Event) text() string {
+	var where []string
+	if e.Stack != "" {
+		where = append(where, "stack "+e.Stack)
+	}
+	if e.Host != "" {
+		where = append(where, "host "+e.Host)
+	}
+	out := e.Message
+	if len(where) > 0 {
+		out += "\n" + strings.Join(where, " · ")
+	}
+	if e.URL != "" {
+		out += "\n" + e.URL
+	}
+	return out
 }
 
 // Channel is one destination.
@@ -170,7 +191,7 @@ func (n *Notifier) SendTo(channels []string, e Event) error {
 		if e.Host != "" {
 			title = "NepFleet@" + e.Host + ": " + e.Title
 		}
-		msg := e.Message
+		msg := e.text()
 		params := types.Params{types.TitleKey: title, types.LevelKey: e.Severity}
 		if n.ownTitle[c] {
 			delete(params, types.TitleKey)

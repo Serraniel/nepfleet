@@ -42,7 +42,7 @@ Sent today: `apply.succeeded`, `apply.failed` and `apply.rolled_back`. The other
 | `host.unreachable` / `node.drained` | error / info |
 | `security.login_failed_repeatedly` / `security.token_created` | warning / info |
 
-Discord, Slack and Teams receive a formatted message with a colour for the severity.
+Discord, Slack, Teams, ntfy and Telegram receive the title and a colour or priority for the severity. The message ends with the stack and host. For applies, it also lists what changed (`changed compose.yaml, changed image nginx:1.29`, …). With `notifications.uiURL` set, for example `uiURL: https://nepfleet.example.org`, messages about a stack link to `<uiURL>/stacks/<name>`. Signed webhooks get the link as `url`.
 
 ## Signed JSON webhooks
 

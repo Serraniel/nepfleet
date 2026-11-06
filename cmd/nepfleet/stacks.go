@@ -583,7 +583,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 				e.kumaFirstRun(ctx, stdout, p)
 			}
 			e.emit(notifier, stdout, notify.Event{Name: "apply.succeeded", Severity: notify.Info, Stack: name,
-				Title: name + " applied", Message: fmt.Sprintf("%s is updated and healthy.", name)})
+				Title: name + " applied", Message: fmt.Sprintf("%s is updated and healthy.%s", name, changeSummary(p.plan))})
 		}
 	}
 	return errors.Join(errs...)
@@ -603,6 +603,21 @@ func (e *env) pinnedTemplate(s *fleet.Stack) (*template.Template, error) {
 	}
 	tpl, _, err := e.resolver.Template(*ref)
 	return tpl, err
+}
+
+// changeSummary lists what an apply changed, for notifications.
+func changeSummary(p *deploy.Plan) string {
+	var parts []string
+	for _, c := range p.Changes {
+		parts = append(parts, string(c.Kind)+" "+c.Path)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) > 8 {
+		parts = append(parts[:8], fmt.Sprintf("and %d more", len(parts)-8))
+	}
+	return "\nChanged: " + strings.Join(parts, ", ")
 }
 
 // savePin records the template commit in lock.yaml, keeping the image pins.
