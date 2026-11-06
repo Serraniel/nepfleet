@@ -26,8 +26,14 @@ type keyBackup struct {
 	PublicKey string    `json:"publicKey"`
 }
 
-// mirrorState records when this host last mirrored the repository.
-type mirrorState map[string]time.Time
+// mirrorState records, per mirror, this host's last successful push and the
+// error of the last run if it failed.
+type mirrorState map[string]mirrorRun
+
+type mirrorRun struct {
+	OK    time.Time `json:"ok"`
+	Error string    `json:"error,omitempty"`
+}
 
 const (
 	keyBackupFile = "key-backup.json"
@@ -192,11 +198,15 @@ func cmdMirror(args []string, stdout, stderr io.Writer) error {
 	}
 	var errs []error
 	for _, m := range mirrors {
-		if _, err := gitOut(dir, append([]string{"push", "--quiet", "--", m}, refspecs...)...); err != nil {
+		// No "git pull" advice: a mirror is not merged into.
+		if _, err := gitOut(dir, append([]string{"-c", "advice.pushUpdateRejected=false", "push", "--quiet", "--", m}, refspecs...)...); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w (a mirror that has commits of its own is not overwritten)", m, err))
+			run := state[m]
+			run.Error = err.Error()
+			state[m] = run
 			continue
 		}
-		state[m] = time.Now().UTC()
+		state[m] = mirrorRun{OK: time.Now().UTC()}
 		fmt.Fprintf(stdout, "mirrored to %s\n", m)
 	}
 	if raw, err := json.MarshalIndent(state, "", "  "); err == nil {
@@ -231,7 +241,7 @@ func backupChecks(e *env, stateDir, keyFromEnv string) []doctor.Check {
 	case keyFromEnv != "":
 		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.Warn, Detail: "the key comes from " + keyFromEnv + "; whether a copy exists cannot be checked", Fix: "keep a copy of its source off this host"})
 	case rec != nil && keyMatches(rec.PublicKey) && copyErr != nil:
-		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.Warn, Detail: rec.File + " is no longer there (moved off this host?)", Fix: "fine if you moved it; otherwise nepfleet key backup again"})
+		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.OK, Detail: fmt.Sprintf("copied %s (%s); no longer at %s, moved off this host as it should be", rec.Created.Format("2006-01-02"), rec.Method, rec.File)})
 	case rec != nil && keyMatches(rec.PublicKey):
 		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.OK, Detail: fmt.Sprintf("copied %s to %s (%s)", rec.Created.Format("2006-01-02"), rec.File, rec.Method)})
 	default:
@@ -242,13 +252,18 @@ func backupChecks(e *env, stateDir, keyFromEnv string) []doctor.Check {
 	if raw, err := os.ReadFile(filepath.Join(stateDir, mirrorFile)); err == nil {
 		_ = json.Unmarshal(raw, &state)
 	}
-	var never []string
+	var never, failing []string
 	for _, m := range e.fleet.Spec.Mirrors {
-		if state[m].IsZero() {
+		switch run := state[m]; {
+		case run.Error != "":
+			failing = append(failing, m)
+		case run.OK.IsZero():
 			never = append(never, m)
 		}
 	}
 	switch {
+	case len(failing) > 0:
+		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Fail, Detail: "the last nepfleet mirror failed for " + strings.Join(failing, ", "), Fix: "run nepfleet mirror to see why (a mirror with commits of its own is not overwritten)"})
 	case len(e.fleet.Spec.Mirrors) == 0:
 		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Warn, Detail: "the fleet repository has no second remote", Fix: "add spec.mirrors to fleet.yaml, then run nepfleet mirror"})
 	case len(never) > 0:

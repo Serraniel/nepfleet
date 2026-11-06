@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Serraniel/nepfleet/internal/doctor"
 )
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -99,6 +101,16 @@ func TestMirrorNeverDeletesOrRewinds(t *testing.T) {
 	}
 	if got := git(t, mirror, "rev-parse", "main"); got != diverged {
 		t.Error("a diverged mirror was overwritten")
+	}
+	// doctor notices the failing mirror.
+	e, err := common{fleetDir: clone, stateDir: state, host: "h"}.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range backupChecks(e, state, "") {
+		if c.Name == "Repository mirror" && c.Status != doctor.Fail {
+			t.Errorf("a failing mirror shows as %v: %s", c.Status, c.Detail)
+		}
 	}
 }
 
