@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/Serraniel/nepfleet/internal/fleet"
-	"github.com/Serraniel/nepfleet/internal/template"
 )
 
 // resolveRefs resolves a stack's references to other stacks' values and
@@ -57,12 +56,6 @@ func (r refResolver) value(v fleet.Value, seen []string) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("%s: %w", v, err)
 	}
-	var tpl *template.Template
-	if src.Spec.Template != nil {
-		if tpl, _, err = r.e.resolver.Template(*src.Spec.Template); err != nil {
-			return "", false, fmt.Errorf("%s: %w", v, err)
-		}
-	}
 	if v.Secret != "" {
 		sec, err := r.load(src)
 		if err != nil {
@@ -79,7 +72,13 @@ func (r refResolver) value(v fleet.Value, seen []string) (string, bool, error) {
 		}
 		return raw.Literal, false, nil
 	}
-	if tpl != nil {
+	if src.Spec.Template != nil {
+		// Only value references need the template (defaults, hints), so a
+		// secret reference works offline with an uncached source too.
+		tpl, _, err := r.e.resolver.Template(*src.Spec.Template)
+		if err != nil {
+			return "", false, fmt.Errorf("%s: %w", v, err)
+		}
 		for _, inp := range tpl.Spec.Inputs {
 			if inp.Name != v.Value {
 				continue

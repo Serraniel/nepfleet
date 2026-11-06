@@ -185,6 +185,9 @@ func OrderByRefs(stacks []*Stack) ([]*Stack, error) {
 		}
 		state[name] = visiting
 		for _, dep := range s.Refs() {
+			if dep == name {
+				return fmt.Errorf("%s: a stack cannot take values from itself", name)
+			}
 			if d := byName[dep]; d != nil {
 				if err := visit(d, append(path, name)); err != nil {
 					return err

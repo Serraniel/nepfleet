@@ -38,6 +38,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+      # Tests that encrypt for real (secrets, references to secrets) skip without them.
+      - name: Install sops and age
+        run: |
+          go install github.com/getsops/sops/v3/cmd/sops@latest
+          go install filippo.io/age/cmd/...@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: go test -race -count=1 ./...
       - run: go build ./...
       # The Go tests compare schemas and parser with a small validator; this
