@@ -192,3 +192,20 @@ func schemaEnum(tag string) []string {
 	}
 	return nil
 }
+
+func TestHardwareValidation(t *testing.T) {
+	tpl, err := Load("testdata/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl.Spec.Inputs = append(tpl.Spec.Inputs, Input{Name: "ZIGBEE", Type: "device"}, Input{Name: "GPU", Type: "gpu"})
+	tpl.Spec.Hardware = []Hardware{{Input: "ZIGBEE", Services: []string{"web"}, Target: "/dev/ttyUSB0"}, {Input: "GPU", Services: []string{"web"}}}
+	if err := tpl.Validate(); err != nil {
+		t.Fatalf("valid hardware rejected: %v", err)
+	}
+	tpl.Spec.Hardware = []Hardware{{Input: "DOMAIN", Services: []string{"web"}}, {Input: "GPU", Services: []string{"web"}, Target: "/dev/dri"}}
+	err = tpl.Validate()
+	if err == nil || !strings.Contains(err.Error(), "device or gpu") || !strings.Contains(err.Error(), "device inputs only") {
+		t.Errorf("want both hardware errors, got %v", err)
+	}
+}

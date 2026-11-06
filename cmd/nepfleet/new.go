@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/term"
 
+	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/template"
@@ -189,6 +190,22 @@ func askInput(w io.Writer, in *bufio.Reader, inp template.Input) (string, error)
 		hint = " [" + strings.Join(inp.Options, "/") + "]"
 	case "bool":
 		hint = " [true/false]"
+	case "device":
+		// Offer what this host has; stable by-id paths survive replugging.
+		if hw := doctor.HostHardware("/"); len(hw.Serial) > 0 {
+			fmt.Fprintln(w, "  devices on this host:")
+			for _, d := range hw.Serial {
+				fmt.Fprintf(w, "    %s\n", d)
+			}
+		} else {
+			fmt.Fprintln(w, "  no USB serial devices found under /dev/serial/by-id")
+		}
+	case "gpu":
+		found := doctor.HostHardware("/").GPUs
+		hint = " [none/intel/amd/nvidia]"
+		if len(found) > 0 {
+			hint += " (this host: " + strings.Join(found, ", ") + ")"
+		}
 	}
 	if inp.Default != "" {
 		hint += " (default " + inp.Default + ")"

@@ -59,6 +59,20 @@ type Spec struct {
 	Files      []File      `yaml:"files"`
 	Volumes    []Volume    `yaml:"volumes"`
 	Migrations []Migration `yaml:"migrations"`
+	// Hardware maps device and gpu inputs to services; NepFleet adds them
+	// to the rendered compose file only when the input has a value.
+	Hardware []Hardware `yaml:"hardware"`
+}
+
+// Hardware connects one device or gpu input to services.
+type Hardware struct {
+	// Input names a spec.inputs entry of type device or gpu.
+	Input string `yaml:"input" schema:"required"`
+	// Services get the device or GPU.
+	Services []string `yaml:"services" schema:"required;minItems=1"`
+	// Target is the device path inside the container (device inputs;
+	// default: the same path as on the host).
+	Target string `yaml:"target"`
 }
 
 // Image sets the update policy for one image the compose file uses. The tag
@@ -88,7 +102,7 @@ type Supports struct {
 // Input is a value the wizard asks the user for.
 type Input struct {
 	Name        string   `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$" json:"name,omitempty"`
-	Type        string   `yaml:"type" schema:"required;enum=string|text|secret|hostname|url|email|int|bool|enum|path" json:"type,omitempty"`
+	Type        string   `yaml:"type" schema:"required;enum=string|text|secret|hostname|url|email|int|bool|enum|path|device|gpu" json:"type,omitempty"`
 	Title       string   `yaml:"title" json:"title,omitempty"`
 	Description string   `yaml:"description" json:"description,omitempty"`
 	Required    bool     `yaml:"required" json:"required,omitempty"`
@@ -144,7 +158,7 @@ var (
 	semverRe  = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
 	composeRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)`)
 
-	inputTypes    = []string{"string", "text", "secret", "hostname", "url", "email", "int", "bool", "enum", "path"}
+	inputTypes    = []string{"string", "text", "secret", "hostname", "url", "email", "int", "bool", "enum", "path", "device", "gpu"}
 	encodings     = []string{"", "base64url", "hex", "alnum"}
 	tracks        = []string{"patch", "minor", "major"}
 	tiers         = []string{"system", "app"}
@@ -257,6 +271,22 @@ func (t *Template) Validate() error {
 		}
 	}
 
+	byName := map[string]Input{}
+	for _, in := range s.Inputs {
+		byName[in.Name] = in
+	}
+	for i, h := range s.Hardware {
+		in, ok := byName[h.Input]
+		if !ok || (in.Type != "device" && in.Type != "gpu") {
+			bad("spec.hardware[%d]: input %q must be a declared input of type device or gpu", i, h.Input)
+		}
+		if len(h.Services) == 0 {
+			bad("spec.hardware[%d]: services is required", i)
+		}
+		if h.Target != "" && (!ValidDevice(h.Target) || in.Type == "gpu") {
+			bad("spec.hardware[%d]: target must be a /dev path, for device inputs only", i)
+		}
+	}
 	if s.Compose == "" {
 		bad("spec.compose is required")
 	} else if t.Dir != "" {
@@ -432,4 +462,14 @@ func checkImageRef(ref string) error {
 
 func local(p string) bool {
 	return p != "" && filepath.IsLocal(p)
+}
+
+// deviceRe allows the characters of real device names (including
+// /dev/serial/by-id names) but not ":", which compose's device syntax
+// splits on, nor "$", whitespace or newlines.
+var deviceRe = regexp.MustCompile(`^/dev/[A-Za-z0-9._+@/-]+$`)
+
+// ValidDevice reports a clean device path under /dev.
+func ValidDevice(p string) bool {
+	return deviceRe.MatchString(p) && p == filepath.Clean(p)
 }
