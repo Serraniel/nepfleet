@@ -15,9 +15,9 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    # 12 targets × 4 min plus builds; raise when targets are added, or the
+    # 17 targets × 4 min plus builds; raise when targets are added, or the
     # job is killed before crashers are uploaded.
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
