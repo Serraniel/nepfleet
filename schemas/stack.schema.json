@@ -90,6 +90,30 @@
           ],
           "type": "string"
         },
+        "snapshot": {
+          "default": "auto",
+          "description": "Snapshot: auto copies the volumes before an apply that recreates running services and restores them on rollback; off skips that.",
+          "enum": [
+            "",
+            "auto",
+            "off"
+          ],
+          "type": "string"
+        },
+        "snapshotExclude": {
+          "description": "SnapshotExclude lists mount paths in the containers never copied.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "target": {
           "minLength": 1,
           "type": "string"

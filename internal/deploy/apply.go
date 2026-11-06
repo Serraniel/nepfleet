@@ -61,6 +61,9 @@ type Options struct {
 	Lock       *lock.Lock
 	Resolver   lock.Resolver
 	UpdateLock bool
+	// DataSafety, when set, snapshots the running stack's volumes before
+	// the new version starts and restores them on rollback (compose only).
+	DataSafety *DataSafety
 }
 
 // Result reports side effects the caller has to persist.
@@ -133,6 +136,14 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 			}
 		}
 	}
+	var g *guard
+	if o.DataSafety != nil && prev != nil && p.Mode != "swarm" {
+		if g, err = o.DataSafety.take(ctx, r, p.Stack, p.Dir); err != nil {
+			res.LockChanged = false
+			_ = restore(p.Dir, out.Files, prev)
+			return res, err
+		}
+	}
 	err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
 	if err == nil {
 		return res, writeManifest(p.Dir, out.Files, pins, o)
@@ -144,6 +155,11 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	}
 	if rerr := restore(p.Dir, out.Files, prev); rerr != nil {
 		return res, fmt.Errorf("%w; restoring the previous files also failed: %w", err, rerr)
+	}
+	// The new version may have migrated the data: put it back before the
+	// previous version starts on it, or leave the stack stopped.
+	if rerr := g.restore(ctx, r, p.Stack, p.Dir); rerr != nil {
+		return res, fmt.Errorf("%w; restoring the data snapshot failed, so the stack stays stopped rather than run the previous version on changed data: %w", err, rerr)
 	}
 	// The failed attempt may have moved local tags: put back what they were,
 	// then re-pin the previous digests on top.

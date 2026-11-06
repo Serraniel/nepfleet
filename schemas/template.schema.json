@@ -420,6 +420,10 @@
               "shared": {
                 "description": "Shared marks data that must follow the service across swarm nodes.",
                 "type": "boolean"
+              },
+              "snapshot": {
+                "description": "Snapshot: false keeps the volume out of the data snapshot taken before an apply (large media, caches).",
+                "type": "boolean"
               }
             },
             "required": [

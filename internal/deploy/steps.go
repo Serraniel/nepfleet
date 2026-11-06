@@ -241,3 +241,31 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// UseSnapshots records in the steps that the apply copies the running
+// stack's volumes first and restores them on rollback.
+func (p *Plan) UseSnapshots() {
+	var steps []Step
+	inserted := false
+	for _, st := range p.Steps {
+		if !inserted && st.Kind == "service" {
+			steps = append(steps, Step{Kind: "snapshot", Text: "stop the running services and copy their volumes (data-safe rollback)"})
+			inserted = true
+		}
+		if st.Kind == "health" && p.Mode != "swarm" {
+			st.Text = "wait until every service is healthy; on failure restore the previous files, images and volume data and start the previous version"
+		}
+		steps = append(steps, st)
+	}
+	p.Steps = steps
+}
+
+// Recreates reports whether the plan creates, recreates or removes services.
+func (p *Plan) Recreates() bool {
+	for _, st := range p.Steps {
+		if st.Kind == "service" {
+			return true
+		}
+	}
+	return false
+}

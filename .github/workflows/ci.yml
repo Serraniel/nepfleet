@@ -80,6 +80,8 @@ jobs:
         run: test/integration/lock.sh /tmp/nepfleet
       - name: Import a stack from a real Portainer CE
         run: test/integration/portainer.sh /tmp/nepfleet
+      - name: Data-safe rollback restores volume data
+        run: test/integration/datasafe.sh /tmp/nepfleet
       - name: Build the image
         run: docker build -t nepfleet-it:ci .
       - name: Container install with only Docker on the host (compose.yaml)
