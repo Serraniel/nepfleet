@@ -46,6 +46,7 @@ Usage:
   nepfleet secret set <stack> <KEY>     store a secret (encrypted, read from stdin)
   nepfleet secret set --global <KEY>    store a fleet-wide secret (fleet.secret.yaml)
   nepfleet secret check                 fail if any *.secret.yaml is not encrypted
+  nepfleet notify test <channel>        send a test message to a notification channel
   nepfleet key backup --out FILE        copy the age key, encrypted with a passphrase (or --recipient)
   nepfleet mirror                       push origin's branches and tags to fleet.yaml's spec.mirrors (no force, no deletes)
   nepfleet history <stack>              versions of a stack in the fleet repository
@@ -119,6 +120,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdSecret(args[1:], stdout, stderr)
 	case "history":
 		return cmdHistory(args[1:], stdout, stderr)
+	case "notify":
+		return cmdNotify(args[1:], stdout, stderr)
 	case "enable":
 		return cmdEnable(args[1:], stdout, stderr)
 	case "key":

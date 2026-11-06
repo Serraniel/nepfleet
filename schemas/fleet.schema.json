@@ -95,10 +95,39 @@
         },
         "notifications": {
           "additionalProperties": false,
+          "description": "Notifications: channels (shoutrrr URLs) and routes that pick which events go where (docs/notifications.md).",
           "properties": {
             "channels": {
               "additionalProperties": {
-                "additionalProperties": {},
+                "additionalProperties": false,
+                "properties": {
+                  "format": {
+                    "default": "text",
+                    "description": "Format json sends the raw event to a generic webhook.",
+                    "enum": [
+                      "",
+                      "text",
+                      "json"
+                    ],
+                    "type": "string"
+                  },
+                  "url": {
+                    "description": "URL is a shoutrrr URL written here: only for URLs without secrets.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "urlSecret": {
+                    "description": "URLSecret names the key in fleet.secret.yaml holding the shoutrrr URL (it contains tokens).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
                 "type": "object"
               },
               "type": [
@@ -108,7 +137,62 @@
             },
             "routes": {
               "items": {
-                "additionalProperties": {},
+                "additionalProperties": false,
+                "properties": {
+                  "channels": {
+                    "items": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  },
+                  "events": {
+                    "description": "Events are names or patterns (\"*\", \"apply.*\"); empty matches all.",
+                    "items": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  },
+                  "minSeverity": {
+                    "enum": [
+                      "",
+                      "info",
+                      "warning",
+                      "error"
+                    ],
+                    "type": "string"
+                  },
+                  "stacks": {
+                    "description": "Stacks limits the route to these stacks; empty matches all.",
+                    "items": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "channels"
+                ],
                 "type": "object"
               },
               "type": [
