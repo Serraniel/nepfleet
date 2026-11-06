@@ -431,6 +431,10 @@
             "logs": {
               "type": "boolean"
             },
+            "metrics": {
+              "description": "Metrics: services expose Prometheus metrics, declared with nepfleet.metrics.port (and optional .path, .scheme) labels.",
+              "type": "boolean"
+            },
             "monitoring": {
               "type": "boolean"
             },
