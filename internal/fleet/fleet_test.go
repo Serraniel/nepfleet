@@ -149,3 +149,23 @@ func TestSchemaTagsMatchValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedPaths(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"media: /mnt/media": true,
+		"media: mnt/rel":         false,
+		"media: /mnt/x/":         false,
+		"media: /mnt/../etc":     false,
+		"Media: /mnt/x":          false,
+	} {
+		dir := t.TempDir()
+		y := strings.Replace(skeleton["fleet.yaml"], "spec:\n", "spec:\n  paths: {"+raw+"}\n", 1)
+		if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(dir)
+		if (err == nil) != ok {
+			t.Errorf("%s: err = %v", raw, err)
+		}
+	}
+}

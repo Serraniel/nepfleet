@@ -8,8 +8,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -98,18 +100,18 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	for _, inp := range tpl.Spec.Inputs {
 		v, given := set[inp.Name]
 		if given && v != "" {
-			if err := render.CheckInput(inp, v); err != nil {
+			if err := checkValue(e.fleet, inp, v); err != nil {
 				return fmt.Errorf("%s: %w", inp.Name, err)
 			}
 		}
 		for !given && interactive {
-			if v, err = askInput(stdout, in, inp, *target == "local" || *target == c.host); err != nil {
+			if v, err = askInput(stdout, in, inp, *target == "local" || *target == c.host, e.fleet.Spec.Paths); err != nil {
 				return err
 			}
 			if v == "" {
 				break
 			}
-			if err := render.CheckInput(inp, v); err != nil {
+			if err := checkValue(e.fleet, inp, v); err != nil {
 				fmt.Fprintf(stdout, "  ✗ %v, try again\n", err)
 				continue
 			}
@@ -177,8 +179,8 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 }
 
 // askInput asks for one value. local: the stack runs on this machine, so
-// its hardware can be offered.
-func askInput(w io.Writer, in *bufio.Reader, inp template.Input, local bool) (string, error) {
+// its hardware can be offered; paths are the fleet's shared folders.
+func askInput(w io.Writer, in *bufio.Reader, inp template.Input, local bool, paths map[string]string) (string, error) {
 	label := inp.Title
 	if label == "" {
 		label = inp.Name
@@ -209,6 +211,13 @@ func askInput(w io.Writer, in *bufio.Reader, inp template.Input, local bool) (st
 		if found := doctor.HostHardware("/").GPUs; local && len(found) > 0 {
 			hint += " (this host: " + strings.Join(found, ", ") + ")"
 		}
+	case "path":
+		if len(paths) > 0 {
+			fmt.Fprintln(w, "  shared folders (fleet.yaml spec.paths), use as @name:")
+			for _, n := range slices.Sorted(maps.Keys(paths)) {
+				fmt.Fprintf(w, "    @%-12s %s\n", n, paths[n])
+			}
+		}
 	}
 	if inp.Default != "" {
 		hint += " (default " + inp.Default + ")"
@@ -226,4 +235,16 @@ func askInput(w io.Writer, in *bufio.Reader, inp template.Input, local bool) (st
 		return "", err
 	}
 	return strings.TrimSpace(line), nil
+}
+
+// checkValue validates an input value, and that an @name is defined.
+func checkValue(f *fleet.Fleet, inp template.Input, v string) error {
+	if err := render.CheckInput(inp, v); err != nil {
+		return err
+	}
+	if inp.Type == "path" && strings.HasPrefix(v, "@") {
+		_, err := f.ResolvePath(v)
+		return err
+	}
+	return nil
 }

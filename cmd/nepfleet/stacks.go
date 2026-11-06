@@ -1033,12 +1033,13 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	checks := doctor.Run(context.Background(), doctor.Host(), in)
-	// Devices chosen in device inputs must still be there (a stick that is
-	// unplugged or moved to another port).
+	// Hardware and shared folders that the stacks' inputs use must be there:
+	// a stick that is unplugged, a GPU this host lacks, an unmounted share.
 	hw := doctor.HostHardware("/")
+	used := map[string][]string{}
 	for _, s := range stacks {
 		if s.Spec.Template == nil {
-			continue
+			continue // plain stacks: values pass through
 		}
 		tpl, _, err := e.resolver.Template(*s.Spec.Template)
 		if err != nil {
@@ -1060,7 +1061,20 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 				} else {
 					checks = append(checks, doctor.Check{Name: "GPU", Status: doctor.Fail, Detail: fmt.Sprintf("%s: %s=%s, but this host has %s", s.Metadata.Name, inp.Name, v, cmp.Or(strings.Join(hw.GPUs, ", "), "no GPU NepFleet can use")), Fix: "choose the GPU this host has, or none"})
 				}
+			case inp.Type == "path" && strings.HasPrefix(v, "@"):
+				name := strings.TrimPrefix(v, "@")
+				if _, defined := e.fleet.Spec.Paths[name]; defined { // undefined: a render error already
+					used[name] = append(used[name], s.Metadata.Name)
+				}
 			}
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(used)) {
+		p, _ := e.fleet.ResolvePath("@" + name)
+		if _, serr := os.Stat(p); serr != nil {
+			checks = append(checks, doctor.Check{Name: "Shared folder", Status: doctor.Fail, Detail: fmt.Sprintf("@%s (%s, used by %s) is missing", name, p, strings.Join(used[name], ", ")), Fix: "create it, or mount the share it lives on"})
+		} else {
+			checks = append(checks, doctor.Check{Name: "Shared folder", Status: doctor.OK, Detail: fmt.Sprintf("@%s %s (used by %s)", name, p, strings.Join(used[name], ", ")), Fix: ""})
 		}
 	}
 	for _, err := range renderErrs {
