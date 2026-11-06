@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
-
-	"github.com/Serraniel/nepfleet/internal/fleet"
 )
 
 // isIntegration reports whether a label is read from swarm *service* labels
@@ -149,41 +147,4 @@ func listToMap(seq *yaml.Node) *yaml.Node {
 			&yaml.Node{Kind: yaml.ScalarNode, Value: v, Style: yaml.DoubleQuotedStyle})
 	}
 	return out
-}
-
-// WithLogging adds a logging section to every service that has none.
-// Services with their own logging keep it; comments and order are kept.
-func WithLogging(compose []byte, l *fleet.Logging) ([]byte, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(compose, &doc); err != nil {
-		return nil, err
-	}
-	if len(doc.Content) == 0 {
-		return compose, nil
-	}
-	services := mapGet(doc.Content[0], "services")
-	if services == nil || services.Kind != yaml.MappingNode {
-		return compose, nil
-	}
-	changed := false
-	for i := 1; i < len(services.Content); i += 2 {
-		svc := services.Content[i]
-		if svc.Kind != yaml.MappingNode || mapGet(svc, "logging") != nil {
-			continue
-		}
-		var node yaml.Node
-		section := map[string]any{"driver": l.Driver}
-		if len(l.Options) > 0 {
-			section["options"] = l.Options
-		}
-		if err := node.Encode(section); err != nil {
-			return nil, err
-		}
-		mapSet(svc, "logging", &node)
-		changed = true
-	}
-	if !changed {
-		return compose, nil
-	}
-	return yaml.Marshal(&doc)
 }

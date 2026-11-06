@@ -168,7 +168,7 @@ func Run(ctx context.Context, e Env, in Input) []Check {
 	case in.LogRotation:
 		add(Check{"Log rotation", OK, "set by NepFleet on every service (fleet.yaml spec.logging)", ""})
 	case info.LoggingDriver == "json-file" || info.LoggingDriver == "":
-		add(Check{"Log rotation", Warn, "the daemon logs to json-file and NepFleet's log defaults are off", "enable spec.logging in fleet.yaml, or set log-opts max-size in /etc/docker/daemon.json"})
+		add(Check{"Log rotation", Warn, "NepFleet's log defaults are off and the daemon logs to json-file, which grows without bound unless /etc/docker/daemon.json sets log-opts", "enable spec.logging in fleet.yaml (or check daemon.json's log-opts max-size)"})
 	default:
 		add(Check{"Log rotation", OK, "daemon log driver " + info.LoggingDriver, ""})
 	}

@@ -55,3 +55,32 @@ func TestEffectiveLogging(t *testing.T) {
 		t.Errorf("stack opt-out: %+v", l)
 	}
 }
+
+func TestWithLoggingKeepsInheritedLogging(t *testing.T) {
+	in := []byte("x-defaults: &defaults\n  restart: always\n  logging: {driver: syslog}\nservices:\n  web:\n    <<: *defaults\n    image: nginx\n  list:\n    <<: [*defaults]\n    image: x\n  ext:\n    extends: {file: base.yaml, service: web}\n  plain:\n    image: y\n")
+	out, err := WithLogging(in, &fleet.DefaultLogging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(out), "json-file"); n != 1 {
+		t.Errorf("only the plain service may get the default, got %d in:\n%s", n, out)
+	}
+	if !strings.Contains(string(out), "\n  web:\n") {
+		t.Errorf("two-space indent expected:\n%s", out)
+	}
+}
+
+func TestEffectiveLoggingMerges(t *testing.T) {
+	on := true
+	f := &fleet.Fleet{}
+	f.Spec.Logging = &fleet.Logging{Driver: "local"}
+	s := &fleet.Stack{}
+	s.Spec.Logging = &fleet.Logging{Options: map[string]string{"max-size": "50m"}}
+	if l := fleet.EffectiveLogging(f, s); l.Driver != "local" || l.Options["max-size"] != "50m" {
+		t.Errorf("stack options over fleet driver: %+v", l)
+	}
+	f.Spec.Logging = &fleet.Logging{Enabled: &on, Driver: "json-file"}
+	if l := fleet.EffectiveLogging(f, nil); !l.Rotates() {
+		t.Errorf("json-file without options must still rotate: %+v", l)
+	}
+}

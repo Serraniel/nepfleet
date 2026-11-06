@@ -34,6 +34,8 @@ spec:
     # enabled: false         # keep the daemon's defaults instead
 ```
 
+Stack settings are merged over the fleet's field by field; json-file without options still gets the rotation defaults. Services that inherit `logging` through a merge key (`<<: *defaults`) keep it, services using `extends` are left alone (their base may set it), and services pulled in with a top-level `include:` are not changed. Imported stacks are adopted as they run, without these settings: their next apply recreates every service once.
+
 ## `stacks/<name>/stack.yaml`
 
 ```yaml

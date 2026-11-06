@@ -142,25 +142,57 @@ type Logging struct {
 // stay readable by docker logs, Dozzle and file-based collectors.
 var DefaultLogging = Logging{Driver: "json-file", Options: map[string]string{"max-size": "20m", "max-file": "5"}}
 
-// EffectiveLogging is the stack's setting, else the fleet's, else the
-// default; nil when logging defaults are switched off.
+// EffectiveLogging merges the stack's setting over the fleet's over the
+// default, field by field; nil when logging defaults are switched off.
+// json-file without options gets the default rotation, so a setting that
+// only names the driver never turns rotation off.
 func EffectiveLogging(f *Fleet, s *Stack) *Logging {
-	l := &DefaultLogging
-	if f != nil && f.Spec.Logging != nil {
-		l = f.Spec.Logging
+	l := Logging{Driver: DefaultLogging.Driver}
+	enabled := true
+	for _, layer := range []*Logging{fleetLogging(f), stackLogging(s)} {
+		if layer == nil {
+			continue
+		}
+		if layer.Enabled != nil {
+			enabled = *layer.Enabled
+		}
+		if layer.Driver != "" && layer.Driver != l.Driver {
+			l.Driver, l.Options = layer.Driver, nil // options belong to a driver
+		}
+		for k, v := range layer.Options {
+			if l.Options == nil {
+				l.Options = map[string]string{}
+			}
+			l.Options[k] = v
+		}
 	}
-	if s != nil && s.Spec.Logging != nil {
-		l = s.Spec.Logging
-	}
-	if l.Enabled != nil && !*l.Enabled {
+	if !enabled {
 		return nil
 	}
-	if l.Driver == "" {
-		c := *l
-		c.Driver = "json-file"
-		l = &c
+	if l.Driver == "json-file" && len(l.Options) == 0 {
+		l.Options = DefaultLogging.Options // local rotates by itself
 	}
-	return l
+	return &l
+}
+
+func fleetLogging(f *Fleet) *Logging {
+	if f == nil {
+		return nil
+	}
+	return f.Spec.Logging
+}
+
+func stackLogging(s *Stack) *Logging {
+	if s == nil {
+		return nil
+	}
+	return s.Spec.Logging
+}
+
+// Rotates reports whether l limits log size: json-file needs max-size,
+// local rotates by default, other drivers send logs away.
+func (l *Logging) Rotates() bool {
+	return l != nil && (l.Driver != "json-file" || l.Options["max-size"] != "")
 }
 
 // TemplateRef selects a template from a source.
