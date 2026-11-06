@@ -45,6 +45,9 @@ type Channel struct {
 	URL  string
 	// Format "json" sends the event as JSON to a generic webhook.
 	Format string
+	// SigningSecret signs json webhooks (X-NepFleet-Signature); NepFleet
+	// then posts the event itself instead of through shoutrrr.
+	SigningSecret string
 }
 
 // Route sends matching events to channels. Empty Events or Stacks match
@@ -63,6 +66,7 @@ type Sender interface {
 
 // Notifier delivers events.
 type Notifier struct {
+	webhooks map[string]*webhook
 	senders  map[string]Sender
 	ownTitle map[string]bool
 	routes   []Route
@@ -71,9 +75,18 @@ type Notifier struct {
 // New creates senders for the channels. Without routes, every event goes to
 // every channel.
 func New(channels []Channel, routes []Route) (*Notifier, error) {
-	n := &Notifier{senders: map[string]Sender{}, ownTitle: map[string]bool{}, routes: routes}
+	n := &Notifier{senders: map[string]Sender{}, webhooks: map[string]*webhook{}, ownTitle: map[string]bool{}, routes: routes}
 	var names []string
 	for _, c := range channels {
+		if c.SigningSecret != "" {
+			w, err := newWebhook(c.URL, c.SigningSecret)
+			if err != nil {
+				return nil, fmt.Errorf("notification channel %s: %w", c.Name, err)
+			}
+			n.webhooks[c.Name] = w
+			names = append(names, c.Name)
+			continue
+		}
 		raw := c.URL
 		if c.Format == "json" {
 			raw = withTemplateJSON(raw)
@@ -92,7 +105,8 @@ func New(channels []Channel, routes []Route) (*Notifier, error) {
 	}
 	for i, r := range n.routes {
 		for _, c := range r.Channels {
-			if _, ok := n.senders[c]; !ok {
+			_, isWebhook := n.webhooks[c]
+			if _, ok := n.senders[c]; !ok && !isWebhook {
 				return nil, fmt.Errorf("notification route %d: unknown channel %q", i+1, c)
 			}
 		}
@@ -141,6 +155,12 @@ func (n *Notifier) SendTo(channels []string, e Event) error {
 	}
 	var errs []error
 	for _, c := range channels {
+		if w, ok := n.webhooks[c]; ok {
+			if err := w.send(e); err != nil {
+				errs = append(errs, fmt.Errorf("channel %s: %w", c, err))
+			}
+			continue
+		}
 		s, ok := n.senders[c]
 		if !ok {
 			errs = append(errs, fmt.Errorf("unknown channel %q", c))

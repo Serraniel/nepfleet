@@ -75,6 +75,9 @@ type NotifyChannel struct {
 	URL string `yaml:"url"`
 	// Format json sends the raw event to a generic webhook.
 	Format string `yaml:"format" schema:"enum=text|json;default=text"`
+	// SigningSecret names the key in fleet.secret.yaml with the HMAC key that
+	// signs json webhooks (X-NepFleet-Signature).
+	SigningSecret string `yaml:"signingSecret"`
 }
 
 // NotifyRoute sends matching events to channels.
@@ -317,6 +320,8 @@ func Load(dir string) (*Fleet, error) {
 			return nil, fmt.Errorf("fleet.yaml: notifications.channels.%s: set urlSecret (a key in fleet.secret.yaml) or url", name)
 		case c.Format != "" && c.Format != "text" && c.Format != "json":
 			return nil, fmt.Errorf("fleet.yaml: notifications.channels.%s: format is text or json", name)
+		case c.SigningSecret != "" && c.Format != "json":
+			return nil, fmt.Errorf("fleet.yaml: notifications.channels.%s: signingSecret needs format: json", name)
 		}
 	}
 	for i, r := range f.Spec.Notifications.Routes {
