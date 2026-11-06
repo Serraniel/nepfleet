@@ -245,7 +245,7 @@ func TestMetricsLabels(t *testing.T) {
 	}
 }
 
-func replaceIn(t *testing.T, path, old, new string) {
+func replaceIn(t *testing.T, path, old, repl string) {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -254,7 +254,7 @@ func replaceIn(t *testing.T, path, old, new string) {
 	if !strings.Contains(string(raw), old) {
 		t.Fatalf("%s lacks %q", path, old)
 	}
-	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, new, 1)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, repl, 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
