@@ -84,11 +84,16 @@ type prepared struct {
 	out      *render.Output
 	plan     *deploy.Plan
 	secrets  map[string]string
+	// pin is the template source commit this stack renders from; pinMoved
+	// means lock.yaml does not record it yet (first apply, --update-lock).
+	pin      *lock.TemplatePin
+	pinMoved bool
 }
 
 type env struct {
 	common
 	noSnapshot bool // apply --no-snapshot
+	updateLock bool // plan/apply --update-lock: templates from the source's current commit
 	fleet      *fleet.Fleet
 	store      secrets.SOPS
 	resolver   *source.Resolver
@@ -169,10 +174,29 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, err
 	}
+	l, err := lock.Load(s.Dir)
+	if err != nil {
+		return nil, err
+	}
+	// A template renders from the commit lock.yaml pins, so a stack's
+	// revision means the same files later; --update-lock moves the pin.
 	var tpl *template.Template
-	if s.Spec.Template != nil {
-		if tpl, _, err = e.resolver.Template(*s.Spec.Template); err != nil {
+	var pin *lock.TemplatePin
+	pinMoved := false
+	if ref := s.Spec.Template; ref != nil {
+		var res source.Resolved
+		old := l.Template
+		if old != nil && old.Source == ref.Source && !e.updateLock {
+			tpl, res, err = e.resolver.TemplateAt(*ref, old.Commit)
+		} else {
+			tpl, res, err = e.resolver.Template(*ref)
+		}
+		if err != nil {
 			return nil, err
+		}
+		if res.Pinnable && res.Commit != "" {
+			pin = &lock.TemplatePin{Source: ref.Source, Commit: res.Commit}
+			pinMoved = old == nil || *old != *pin
 		}
 	}
 	refs, refSecret, err := e.resolveRefs(s)
@@ -189,17 +213,19 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
-	l, err := lock.Load(s.Dir)
-	if err != nil {
-		return nil, err
-	}
 	p, err := deploy.PlanStack(s.Metadata.Name, s.Spec.Mode, deploy.StackDir(e.stateDir, s.Metadata.Name), out, l.Images)
 	if err != nil {
 		return nil, err
 	}
 	// Exact per-service steps from compose; without docker they stay marked approximate.
 	_ = p.RefineServices(context.Background(), deploy.Docker{}, out)
-	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec}
+	if pin != nil {
+		p.Template = pin.Source + "@" + pin.Commit[:12]
+		if pinMoved && l.Template != nil {
+			p.TemplateFrom = l.Template.Source + "@" + l.Template.Commit[:min(12, len(l.Template.Commit))]
+		}
+	}
+	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved}
 	e.finishPlan(pr)
 	return pr, nil
 }
@@ -276,6 +302,9 @@ func printPlan(w io.Writer, p *deploy.Plan) {
 		state = "new"
 	}
 	fmt.Fprintf(w, "\n%s (%s, %s)\n", p.Stack, state, p.Mode)
+	if p.TemplateFrom != "" {
+		fmt.Fprintf(w, "  template %s → %s\n", p.TemplateFrom, p.Template)
+	}
 	for _, c := range p.Changes {
 		fmt.Fprintf(w, "  %-8s %s\n", c.Kind, c.Path)
 		for _, line := range strings.Split(strings.TrimSuffix(c.Diff, "\n"), "\n") {
@@ -320,6 +349,7 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	e.updateLock = *updateLock
 	stacks, err := e.stacks(fs.Args())
 	if err != nil {
 		return err
@@ -377,6 +407,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	e.noSnapshot = *noSnapshot
+	e.updateLock = *updateLock
 	stacks, err := e.stacks(fs.Args())
 	if err != nil {
 		return err
@@ -407,6 +438,15 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 		printPlan(stdout, p.plan)
 		if p.plan.Empty() {
+			// Same files from another commit (or a stack from before pins):
+			// only the pin moves.
+			if p.pinMoved {
+				if err := savePin(s.Dir, p.pin); err != nil {
+					errs = append(errs, err)
+				} else {
+					fmt.Fprintf(stdout, "%s: template pinned to %s; commit %s\n", name, p.plan.Template, filepath.Join(s.Dir, lock.File))
+				}
+			}
 			continue
 		}
 		pins := updated
@@ -486,6 +526,13 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 				fmt.Fprintf(stdout, "%s: image digests pinned; commit %s\n", name, filepath.Join(s.Dir, lock.File))
 			}
 		}
+		if err == nil && p.pinMoved {
+			if perr := savePin(s.Dir, p.pin); perr != nil {
+				errs = append(errs, perr)
+			} else {
+				fmt.Fprintf(stdout, "%s: template pinned to %s; commit %s\n", name, p.plan.Template, filepath.Join(s.Dir, lock.File))
+			}
+		}
 		switch {
 		case errors.Is(err, deploy.ErrRolledBack):
 			fmt.Fprintf(stdout, "%s: ✗ %v\n", name, err)
@@ -506,6 +553,16 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	return errors.Join(errs...)
 }
 
+// savePin records the template commit in lock.yaml, keeping the image pins.
+func savePin(dir string, pin *lock.TemplatePin) error {
+	l, err := lock.Load(dir)
+	if err != nil {
+		return err
+	}
+	l.Template = pin
+	return l.Save(dir)
+}
+
 // previewUpdate resolves current digests for a prepared stack and re-plans
 // with them, so the plan lists every image that would move.
 func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) (*lock.Lock, error) {
@@ -520,8 +577,10 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 	for _, s := range skipped {
 		fmt.Fprintf(stderr, "%s: ⚠ cannot resolve %s, its pin stays as is\n", p.stack.Metadata.Name, s)
 	}
+	tplNow, tplFrom := p.plan.Template, p.plan.TemplateFrom
 	p.plan, err = deploy.PlanStack(p.stack.Metadata.Name, p.stack.Spec.Mode, deploy.StackDir(e.stateDir, p.stack.Metadata.Name), p.out, updated.Images)
 	if err == nil {
+		p.plan.Template, p.plan.TemplateFrom = tplNow, tplFrom
 		_ = p.plan.RefineServices(ctx, deploy.Docker{}, p.out)
 		e.finishPlan(p)
 	}
