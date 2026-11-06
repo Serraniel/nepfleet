@@ -27,5 +27,10 @@ NepFleet's approach:
 
 ## Rolling operations
 
-- Service updates use `update_config: {parallelism: 1, order: start-first, failure_action: rollback}`. NepFleet adds this by default when a template does not set it.
+- **Service updates, by default:** NepFleet adds these settings wherever a service doesn't set them itself (a service's own `update_config` always wins):
+  - `failure_action: rollback`: an update whose new task fails rolls back by itself.
+  - `monitor: 30s`: how long a new task is watched before it counts as healthy.
+  - `order: start-first`: the new task starts before the old one stops, so the update has no gap.
+  - Swarm's own `parallelism: 1` applies.
+- **Exception, stop-first:** services with volumes or bind mounts, host-mode ports, or `mode: global` stay on `order: stop-first`. Two tasks must not write the same data, such as a database, or bind the same host port. `rollback_config` uses the same order.
 - Node maintenance follows these steps: drain → remove the node's DNS record → do the work → wait until the node is ready → reactivate → wait for its services to become healthy → move to the next node. Managers go one at a time and only while quorum holds.
