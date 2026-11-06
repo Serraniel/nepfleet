@@ -53,6 +53,8 @@ Or run it as a container: `ghcr.io/serraniel/nepfleet:latest` (`:edge` for the n
 - [Security model](docs/security.md)
 - [Swarm: storage, ingress, DNS](docs/swarm.md)
 - [Host updates](docs/host-updates.md)
+- [Trusted TLS on a home network](docs/home-tls.md)
+- [Backups and restore](docs/backups.md)
 - [Notifications](docs/notifications.md): Discord, Slack, Telegram, ntfy, webhooks …
 - [Maintenance windows](docs/maintenance.md): Uptime Kuma during applies
 - [Releases](docs/releases.md) and [supply chain / SBOMs](docs/supply-chain.md)
