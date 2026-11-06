@@ -18,7 +18,7 @@ nepfleet restore immich --archive … --volume db        # only the database vol
 
 1. **Read the archive:** it is decrypted with the `age` CLI (needed on the host) and the key sops uses (`--identity` for another one).
    - NepFleet lists the stack's volumes in it: the volumes compose created for the stack's project, found by their labels rather than by name, so stack `app` never touches stack `app_x`.
-   - Volumes with an explicit `name:` and bind mounts aren't covered.
+   - External volumes and bind mounts aren't covered.
    - An unknown `--volume` key is an error. Nothing changes during this step.
 2. **Confirm:** type the stack name, or pass `--yes`.
 3. **Stop and check:** the stack is stopped if it was running. The restore is refused while containers outside the stack still use one of the volumes.

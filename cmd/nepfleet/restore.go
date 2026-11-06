@@ -67,6 +67,9 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	members, err := archiveVolumes(rc)
+	// Read to the end: age writes the gzip trailer after tar's end marker,
+	// and a closed pipe would make it fail on a valid archive.
+	_, _ = io.Copy(io.Discard, rc)
 	if cerr := rc.Close(); err == nil {
 		err = cerr
 	}
