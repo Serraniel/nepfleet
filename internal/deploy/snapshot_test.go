@@ -100,3 +100,14 @@ func TestStopAllStopsServicesOfTheFailedVersion(t *testing.T) {
 		t.Errorf("discard removed %v", f.removed)
 	}
 }
+
+func TestOneOffContainersAreNotTheStack(t *testing.T) {
+	f := &fakeEngine{cts: []engine.ContainerSummary{
+		{ID: "app", State: "running", Labels: map[string]string{"com.docker.compose.project": "web"}},
+		{ID: "run-shell", State: "running", Labels: map[string]string{"com.docker.compose.project": "web", "com.docker.compose.oneoff": "True"}},
+	}}
+	cts, err := (&DataSafety{Engine: f}).project(context.Background(), "web")
+	if err != nil || len(cts) != 1 || cts[0].ID != "app" {
+		t.Errorf("project = %+v, %v", cts, err)
+	}
+}

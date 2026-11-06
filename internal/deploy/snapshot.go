@@ -50,7 +50,18 @@ type guard struct {
 	snaps   []*snapshot.Snapshot
 }
 
-const stopTimeout = 30 * time.Second
+// stop stops a container with its own grace period (compose writes
+// stop_grace_period into StopTimeout), so a database shuts down cleanly
+// and the snapshot is not a crash state.
+func (d *DataSafety) stop(ctx context.Context, id string) error {
+	timeout := 10 * time.Second // Docker's default
+	if ct, err := d.Engine.Inspect(ctx, id); err == nil {
+		if s, ok := ct.Config["StopTimeout"].(float64); ok && s > 0 {
+			timeout = time.Duration(s) * time.Second
+		}
+	}
+	return d.Engine.Stop(ctx, id, timeout)
+}
 
 // project lists every container of the compose project, running or not,
 // orphans included.
@@ -61,7 +72,9 @@ func (d *DataSafety) project(ctx context.Context, stack string) ([]engine.Contai
 	}
 	var out []engine.ContainerSummary
 	for _, c := range all {
-		if c.Labels["com.docker.compose.project"] == stack {
+		// docker compose run containers are one-off commands, not the stack
+		// (with --rm they vanish when stopped).
+		if c.Labels["com.docker.compose.project"] == stack && c.Labels["com.docker.compose.oneoff"] != "True" {
 			out = append(out, c)
 		}
 	}
@@ -91,8 +104,13 @@ func (d *DataSafety) take(ctx context.Context, stack string) (*guard, error) {
 	}
 	for _, c := range cts {
 		if c.State == "running" || c.State == "paused" || c.State == "restarting" {
+			if err := ctx.Err(); err != nil {
+				return fail(err)
+			}
 			g.running = append(g.running, c.ID)
-			if err := d.Engine.Stop(ctx, c.ID, stopTimeout); err != nil {
+			// Not cancelled midway: the daemon would keep stopping anyway,
+			// and a start sent meanwhile could be lost.
+			if err := d.stop(context.WithoutCancel(ctx), c.ID); err != nil {
 				return fail(fmt.Errorf("stop %s: %w", name(c), err))
 			}
 		}
@@ -172,7 +190,7 @@ func (g *guard) stopAll(ctx context.Context) error {
 	var errs []error
 	for _, c := range cts {
 		if c.State == "running" || c.State == "paused" || c.State == "restarting" {
-			errs = append(errs, g.d.Engine.Stop(ctx, c.ID, stopTimeout))
+			errs = append(errs, g.d.stop(ctx, c.ID))
 		}
 	}
 	return errors.Join(errs...)
