@@ -43,7 +43,19 @@ func (e *env) notifier() (*notify.Notifier, error) {
 				return nil, fmt.Errorf("notification channel %s: %s is not set (nepfleet secret set --global %s)", name, c.URLSecret, c.URLSecret)
 			}
 		}
-		channels = append(channels, notify.Channel{Name: name, URL: url, Format: c.Format})
+		ch := notify.Channel{Name: name, URL: url, Format: c.Format}
+		if c.SigningSecret != "" {
+			if secrets == nil {
+				var err error
+				if secrets, err = e.store.Load(filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile)); err != nil {
+					return nil, err
+				}
+			}
+			if ch.SigningSecret = secrets[c.SigningSecret]; ch.SigningSecret == "" {
+				return nil, fmt.Errorf("notification channel %s: %s is not set (nepfleet secret set --global %s)", name, c.SigningSecret, c.SigningSecret)
+			}
+		}
+		channels = append(channels, ch)
 	}
 	var routes []notify.Route
 	for _, r := range cfg.Routes {

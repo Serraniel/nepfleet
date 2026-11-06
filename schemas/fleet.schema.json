@@ -139,6 +139,14 @@
                     ],
                     "type": "string"
                   },
+                  "signingSecret": {
+                    "description": "SigningSecret names the key in fleet.secret.yaml with the HMAC key that signs json webhooks (X-NepFleet-Signature).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
                   "url": {
                     "description": "URL is a shoutrrr URL written here: only for URLs without secrets.",
                     "type": [

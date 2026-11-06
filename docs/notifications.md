@@ -42,6 +42,28 @@ Sent today: `apply.succeeded`, `apply.failed` and `apply.rolled_back`. The other
 | `host.unreachable` / `node.drained` | error / info |
 | `security.login_failed_repeatedly` / `security.token_created` | warning / info |
 
-Discord, Slack and Teams receive a formatted message with a colour for the severity and a link to the stack in the UI. A `generic` webhook with `format: json` receives the raw event and an `X-NepFleet-Signature` HMAC header, so the receiver can verify where the event came from.
+Discord, Slack and Teams receive a formatted message with a colour for the severity.
+
+## Signed JSON webhooks
+
+A `generic` webhook with `format: json` receives the event as JSON. Add `signingSecret` to have it signed, so the receiver can check that the event came from NepFleet and wasn't changed:
+
+```yaml
+    channels:
+      ci: { urlSecret: CI_HOOK_URL, format: json, signingSecret: CI_HOOK_KEY }   # both keys in fleet.secret.yaml
+```
+
+The request is a `POST` with the body `{"event", "severity", "stack", "host", "title", "message", "time"}` and these headers:
+
+- `X-NepFleet-Event`: the event name.
+- `X-NepFleet-Timestamp`: Unix seconds.
+- `X-NepFleet-Signature: sha256=<hex>`: the HMAC-SHA256 of `<timestamp>.<body>`, keyed with the signing secret.
+
+To verify, recompute the HMAC over the raw body, compare it in constant time, and reject timestamps more than a few minutes old to stop replays. In Python:
+
+```python
+expected = "sha256=" + hmac.new(key, f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+ok = hmac.compare_digest(expected, request.headers["X-NepFleet-Signature"]) and abs(time.time() - int(ts)) < 300
+```
 
 Uptime alerts stay in Uptime Kuma, which has its own notification integrations. NepFleet does not duplicate them.
