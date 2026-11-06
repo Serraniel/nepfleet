@@ -51,6 +51,9 @@ type Spec struct {
 	// Paths names host folders that stacks share (a media share, a folder
 	// one app writes and another reads). Path inputs refer to them as @name.
 	Paths map[string]string `yaml:"paths"`
+	// Mirrors are git URLs of second remotes the fleet repository is pushed
+	// to (nepfleet mirror), so it survives the loss of its main remote.
+	Mirrors []string `yaml:"mirrors"`
 	// TZ is passed to stacks as ${TZ}.
 	TZ string `yaml:"tz" schema:"default=UTC"`
 	// Logging is the log driver of every service that sets none itself, so
@@ -269,6 +272,12 @@ func Load(dir string) (*Fleet, error) {
 	for _, u := range []struct{ key, v string }{{"images", f.Spec.Updates.Images}, {"host", f.Spec.Updates.Host}} {
 		if u.v != "" && !slices.Contains(updatePolicies, u.v) {
 			return nil, fmt.Errorf("fleet.yaml: spec.updates.%s must be off, notify or auto, got %q", u.key, u.v)
+		}
+	}
+	for i, m := range f.Spec.Mirrors {
+		// Passed to git: an option-like or blank URL must not get there.
+		if m == "" || strings.HasPrefix(m, "-") || strings.ContainsAny(m, " \t\n") {
+			return nil, fmt.Errorf("fleet.yaml: spec.mirrors[%d]: %q is not a git URL", i, m)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(f.Spec.Paths)) {
