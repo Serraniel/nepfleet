@@ -146,7 +146,7 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 // projectVolumes maps the Docker volumes compose created for a project to
 // their keys in the compose file.
 func projectVolumes(project string) (map[string]string, error) {
-	out, err := exec.Command("docker", "volume", "ls", "--filter", "label=com.docker.compose.project="+project,
+	out, err := exec.Command("docker", "volume", "ls", "--filter", "label=com.docker.compose.project="+project, //nolint:gosec // a validated stack name, no shell
 		"--format", `{{.Name}} {{.Label "com.docker.compose.volume"}}`).Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing volumes: %w", err)
