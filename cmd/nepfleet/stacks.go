@@ -815,6 +815,9 @@ func (e *env) importOne(ctx context.Context, stdout io.Writer, p importer.Projec
 			return fmt.Errorf("%s: imported, but recording the running state failed: %w", p.Name, err)
 		}
 		fmt.Fprintf(stdout, "  adopted: the running containers are now the applied state (plan is empty)\n")
+		if fleet.EffectiveLogging(e.fleet, nil) != nil {
+			fmt.Fprintf(stdout, "  note: the running containers do not have NepFleet's log rotation yet; the next apply of %s recreates all its services\n", p.Name)
+		}
 	}
 	for _, w := range append(extra, res.Warnings...) {
 		fmt.Fprintf(stdout, "  ⚠ %s\n", w)
@@ -977,7 +980,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	in := doctor.Input{Recipients: e.fleet.Spec.Secrets.Age, AgeKeyFile: ageKeyFile()}
+	in := doctor.Input{Recipients: e.fleet.Spec.Secrets.Age, AgeKeyFile: ageKeyFile(), LogRotation: fleet.EffectiveLogging(e.fleet, nil).Rotates()}
 	for _, k := range []string{"SOPS_AGE_KEY", "SOPS_AGE_KEY_CMD"} {
 		if os.Getenv(k) != "" {
 			in.KeyFromEnv = k
