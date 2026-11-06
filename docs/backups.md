@@ -16,7 +16,7 @@ nepfleet restore immich --archive /srv/backups/backup-2026-11-06T03-00-00.tar.gz
 nepfleet restore immich --archive … --volume db        # only the database volume
 ```
 
-1. **Read the archive:** it is decrypted with the key sops uses (`--identity` for another one), and NepFleet lists the stack's volumes in it (`<stack>_<volume>`). Nothing changes yet.
+1. **Read the archive:** it is decrypted with the key sops uses (`--identity` for another one), and NepFleet lists the stack's volumes in it: the volumes compose created for the stack's project (by label, not by name, so stack `app` never touches stack `app_x`). Nothing changes yet.
 2. **Confirm:** type the stack name, or pass `--yes`.
 3. **Stop and keep a safety copy:** the stack is stopped. Each volume's current content is copied to `<volume>-before-restore-<time>`, a new volume labelled `nepfleet.restore.of=<volume>`, so a restore never loses data.
 4. **Restore and start:** each volume is emptied, the archive's copy is extracted with owners, permissions and links kept, and the stack is started again.

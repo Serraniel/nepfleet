@@ -68,28 +68,31 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", *archive, err)
 	}
-	prefix := s.Metadata.Name + "_"
+	// The stack's volumes are the ones compose labelled with its project,
+	// not a name prefix: stack "app" must never touch stack "app_x".
+	own, err := projectVolumes(s.Metadata.Name)
+	if err != nil {
+		return err
+	}
+	if len(own) == 0 {
+		return fmt.Errorf("%s has no volumes on this host: apply it here first", s.Metadata.Name)
+	}
 	var vols []string
 	for _, v := range inArchive {
-		k, ok := strings.CutPrefix(v, prefix)
+		key, ok := own[v]
 		if !ok {
 			continue
 		}
-		if *only != "" && !slices.Contains(strings.Split(*only, ","), k) {
+		if *only != "" && !slices.Contains(strings.Split(*only, ","), key) {
 			continue
+		}
+		if !volumeName.MatchString(v) {
+			return fmt.Errorf("%q is not a volume name", v)
 		}
 		vols = append(vols, v)
 	}
 	if len(vols) == 0 {
 		return fmt.Errorf("the archive has no volumes of %s (it has: %s)", s.Metadata.Name, strings.Join(inArchive, ", "))
-	}
-	for _, v := range vols {
-		if !volumeName.MatchString(v) {
-			return fmt.Errorf("%q is not a volume name", v)
-		}
-		if err := exec.Command("docker", "volume", "inspect", v).Run(); err != nil {
-			return fmt.Errorf("volume %s does not exist on this host: apply %s here first", v, s.Metadata.Name)
-		}
 	}
 
 	stamp := time.Now().Format("20060102-150405")
@@ -138,6 +141,23 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "%s: restored and started. Check it, then remove the safety copies: docker volume rm %s\n", s.Metadata.Name, strings.Join(keep, " "))
 	return nil
+}
+
+// projectVolumes maps the Docker volumes compose created for a project to
+// their keys in the compose file.
+func projectVolumes(project string) (map[string]string, error) {
+	out, err := exec.Command("docker", "volume", "ls", "--filter", "label=com.docker.compose.project="+project,
+		"--format", `{{.Name}} {{.Label "com.docker.compose.volume"}}`).Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing volumes: %w", err)
+	}
+	vols := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if name, key, ok := strings.Cut(line, " "); ok {
+			vols[name] = key
+		}
+	}
+	return vols, nil
 }
 
 func restoreFailed(stdout io.Writer, stack string, done, keep []string, err error) error {
