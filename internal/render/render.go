@@ -35,6 +35,10 @@ type Input struct {
 	// RefSecret marks references whose value comes from a secret, also
 	// through a chain of value references: they are masked.
 	RefSecret map[string]bool
+	// NoBackupVolumes are the Docker names of volumes that templates of
+	// stacks on the same host mark backup: false (caches, models), for
+	// ${NEPFLEET_NO_BACKUP_VOLUMES}.
+	NoBackupVolumes []string
 	// RenderGID is the group of the host's /dev/dri render nodes, added to
 	// services that get an intel or amd GPU, so non-root images can use it.
 	RenderGID string
@@ -64,6 +68,9 @@ func Render(in Input) (*Output, error) {
 		"NEPFLEET_STACK":           in.Stack.Metadata.Name,
 		"NEPFLEET_INGRESS_NETWORK": in.Fleet.Spec.IngressNetwork,
 		"TZ":                       in.Fleet.Spec.TZ,
+		// Backups encrypted to these can be read with the fleet's key.
+		"NEPFLEET_AGE_RECIPIENTS":    strings.Join(in.Fleet.Spec.Secrets.Age, ","),
+		"NEPFLEET_NO_BACKUP_VOLUMES": noBackupPattern(in.NoBackupVolumes),
 	}
 	var compose []byte
 	var err error
@@ -137,6 +144,21 @@ func (in Input) value(key string, v fleet.Value, out *Output) (string, error) {
 		out.Secret[key] = true
 	}
 	return r, nil
+}
+
+// noBackupPattern joins volume names into a regular expression alternation
+// ("a_cache|b_models"), names quoted; it never matches when there are none,
+// so an exclude built from it cannot exclude everything.
+func noBackupPattern(names []string) string {
+	if len(names) == 0 {
+		return "$^" // matches nothing
+	}
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = regexp.QuoteMeta(n)
+	}
+	sort.Strings(quoted)
+	return strings.Join(quoted, "|")
 }
 
 // values validates stack values against the template's inputs and fills env.

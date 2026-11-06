@@ -178,7 +178,13 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
-	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret, RenderGID: doctor.RenderGID("/")})
+	var noBackup []string
+	if usesBuiltin(tpl, "NEPFLEET_NO_BACKUP_VOLUMES") {
+		if noBackup, err = e.noBackupVolumes(s); err != nil {
+			return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
+		}
+	}
+	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret, NoBackupVolumes: noBackup, RenderGID: doctor.RenderGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -195,6 +201,55 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec}
 	e.finishPlan(pr)
 	return pr, nil
+}
+
+// usesBuiltin reports whether a template's compose file or files use ${name}.
+func usesBuiltin(tpl *template.Template, name string) bool {
+	if tpl == nil {
+		return false
+	}
+	paths := []string{tpl.Spec.Compose}
+	for _, f := range tpl.Spec.Files {
+		paths = append(paths, f.Src)
+	}
+	for _, p := range paths {
+		if raw, err := os.ReadFile(filepath.Join(tpl.Dir, p)); err == nil && strings.Contains(string(raw), "${"+name+"}") {
+			return true
+		}
+	}
+	return false
+}
+
+// noBackupVolumes lists the Docker names (<stack>_<volume>) of volumes that
+// templates of stacks on the same host as s mark backup: false. Plain
+// stacks' volumes are not known, so they stay in the backup.
+func (e *env) noBackupVolumes(s *fleet.Stack) ([]string, error) {
+	all, err := e.fleet.Stacks()
+	if err != nil {
+		return nil, err
+	}
+	host := func(t string) string {
+		if t == "local" {
+			return e.host
+		}
+		return t
+	}
+	var out []string
+	for _, o := range all {
+		if o.Spec.Template == nil || host(o.Spec.Target) != host(s.Spec.Target) {
+			continue
+		}
+		tpl, _, err := e.resolver.Template(*o.Spec.Template)
+		if err != nil {
+			continue // that stack's own plan reports it
+		}
+		for _, v := range tpl.Spec.Volumes {
+			if !v.Backup {
+				out = append(out, o.Metadata.Name+"_"+v.Name)
+			}
+		}
+	}
+	return out, nil
 }
 
 // finishPlan adds what apply does around the compose steps. Called again

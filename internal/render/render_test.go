@@ -5,6 +5,7 @@ package render
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -200,5 +201,32 @@ func TestEmptyTypedValueTakesDefault(t *testing.T) {
 	}
 	if _, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": ""}), Template: tpl}); err == nil || !strings.Contains(err.Error(), "DOMAIN is required") {
 		t.Errorf("an empty required host name: %v", err)
+	}
+}
+
+func TestBackupBuiltins(t *testing.T) {
+	f, tpl := setup(t)
+	f.Spec.Secrets.Age = []string{"age1aaa", "age1bbb"}
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, NoBackupVolumes: []string{"immich_model-cache", "ollama_models.v1"}})
+	must(t, err)
+	env := EnvValues(out.Files[EnvFile])
+	if env["NEPFLEET_AGE_RECIPIENTS"] != "age1aaa,age1bbb" {
+		t.Errorf("recipients = %q", env["NEPFLEET_AGE_RECIPIENTS"])
+	}
+	re := regexp.MustCompile("/backup/volumes/(" + env["NEPFLEET_NO_BACKUP_VOLUMES"] + ")/")
+	for path, want := range map[string]bool{
+		"/backup/volumes/immich_model-cache/_data/x": true,
+		"/backup/volumes/ollama_models.v1/_data":     true,
+		"/backup/volumes/ollama_modelsXv1/_data":     false, // the dot is literal
+		"/backup/volumes/immich_db/_data":            false,
+	} {
+		if re.MatchString(path) != want {
+			t.Errorf("%s: excluded = %v", path, !want)
+		}
+	}
+	// None: the pattern matches nothing, not everything.
+	none := regexp.MustCompile("/backup/volumes/(" + noBackupPattern(nil) + ")/")
+	if none.MatchString("/backup/volumes/anything/_data") || none.MatchString("/backup/volumes//") {
+		t.Error("an empty list must exclude nothing")
 	}
 }

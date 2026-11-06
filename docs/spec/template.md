@@ -89,7 +89,12 @@ When an input has a value, NepFleet adds it to the rendered compose file: a `dev
 Inside the compose file and `files/`, you can use the following variables:
 
 - Every `inputs` and `generate` name.
-- The builtins: `NEPFLEET_STACK` (the stack name), `NEPFLEET_INGRESS_NETWORK` (the external network Caddy listens on) and `TZ`.
+- The builtins:
+  - `NEPFLEET_STACK`: the stack name.
+  - `NEPFLEET_INGRESS_NETWORK`: the external network Caddy listens on.
+  - `TZ`.
+  - `NEPFLEET_AGE_RECIPIENTS`: the fleet's age public keys, comma separated. Encrypt backups to these, and the fleet key can read them.
+  - `NEPFLEET_NO_BACKUP_VOLUMES`: a regular expression alternation of the Docker volume names (`<stack>_<volume>`) that templates of stacks on the same host mark `backup: false`, such as caches and models. It's `$^` (matches nothing) when there are none, so `/backup/volumes/(${NEPFLEET_NO_BACKUP_VOLUMES})/` is a safe exclude. It's only computed for templates that use it.
 
 Using any other `${VAR}` is a validation error, so a typo never silently becomes an empty string. Write `$${VAR}` to get a literal `${VAR}`.
 
