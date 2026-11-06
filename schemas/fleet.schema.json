@@ -34,7 +34,7 @@
       "properties": {
         "egress": {
           "additionalProperties": false,
-          "description": "Egress: hosts the containers must not reach (known telemetry by default, see TelemetryHosts).",
+          "description": "Egress limits what a stack's containers reach on the internet.",
           "properties": {
             "block": {
               "description": "Block lists more host names to resolve to 0.0.0.0.",
@@ -275,6 +275,72 @@
               ]
             }
           },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "storage": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "address": {
+                "description": "Address is the server's host name or IP address.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "options": {
+                "description": "Options are extra mount options, e.g. vers=3.1.1, uid=1000, nfsvers=4.",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "passwordSecret": {
+                "description": "PasswordSecret names the key in fleet.secret.yaml holding the password (cifs).",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "share": {
+                "description": "Share is the SMB share name (cifs) or the exported path (nfs).",
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "description": "Type is cifs (SMB, Windows and most NAS) or nfs.",
+                "enum": [
+                  "cifs",
+                  "nfs"
+                ],
+                "type": "string"
+              },
+              "username": {
+                "description": "Username for cifs.",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "share",
+              "type"
+            ],
+            "type": "object"
+          },
+          "description": "Egress: hosts the containers must not reach (known telemetry by default, see TelemetryHosts). Storage names network storage (NAS shares, Storage Boxes) that stack volumes can live on (stack.yaml spec.volumes).",
           "type": [
             "object",
             "null"

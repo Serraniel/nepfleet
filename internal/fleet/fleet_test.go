@@ -230,3 +230,25 @@ func TestBlockedHosts(t *testing.T) {
 		t.Error("wildcards cannot be mapped")
 	}
 }
+
+func TestStorageValidation(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		`{nas: {type: cifs, address: 192.168.1.10, share: media, username: u, passwordSecret: P}}`: true,
+		`{box: {type: nfs, address: nfs.example.org, share: /exports}}`:                            true,
+		`{x: {type: smb, address: a, share: s}}`:                                                   false,
+		`{x: {type: nfs, address: a, share: exports}}`:                                             false,
+		`{x: {type: cifs, address: "a b", share: s}}`:                                              false,
+		`{x: {type: cifs, address: a, share: s, options: ["password=x"]}}`:                         false,
+		`{x: {type: cifs, address: a, share: s, options: ["vers=3.0,sec=none"]}}`:                  false,
+		`{x: {type: cifs, address: a, share: ../etc}}`:                                             false,
+	} {
+		dir := t.TempDir()
+		y := strings.Replace(skeleton["fleet.yaml"], "spec:\n", "spec:\n  storage: "+raw+"\n", 1)
+		if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(dir); (err == nil) != ok {
+			t.Errorf("%s: err = %v", raw, err)
+		}
+	}
+}

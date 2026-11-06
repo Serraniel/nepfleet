@@ -214,7 +214,12 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 		}
 	}
-	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret, NoBackupVolumes: noBackup, RenderGID: doctor.RenderGID("/")})
+	storagePw, err := e.storagePasswords(s)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
+	}
+	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret,
+		NoBackupVolumes: noBackup, StoragePasswords: storagePw, RenderGID: doctor.RenderGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -233,6 +238,29 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved}
 	e.finishPlan(pr)
 	return pr, nil
+}
+
+// storagePasswords reads the passwords of the network storage a stack's
+// volumes use from fleet.secret.yaml (only when it uses any).
+func (e *env) storagePasswords(s *fleet.Stack) (map[string]string, error) {
+	var keys []string
+	for _, m := range s.Spec.Volumes {
+		if st, ok := e.fleet.Spec.Storage[m.Storage]; ok && st.PasswordSecret != "" {
+			keys = append(keys, m.Storage)
+		}
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	sec, err := e.store.Load(filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, k := range keys {
+		out[k] = sec[e.fleet.Spec.Storage[k].PasswordSecret]
+	}
+	return out, nil
 }
 
 // usesBuiltin reports whether a template's compose file or files use ${name}.
