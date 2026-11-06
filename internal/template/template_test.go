@@ -214,21 +214,30 @@ func TestMetricsLabels(t *testing.T) {
 	for name, c := range map[string]struct {
 		supports, labels, want string
 	}{
-		"valid":       {"ingress: true, metrics: true", `nepfleet.metrics.port: "9090", nepfleet.metrics.path: /m, nepfleet.metrics.scheme: https`, ""},
-		"variable":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "${PORT}"`, "${PORT}, which is neither"},
-		"flag only":   {"ingress: true, metrics: true", ``, "supports.metrics is true, but no service has nepfleet.metrics.port labels"},
-		"labels only": {"ingress: true", `nepfleet.metrics.port: "9090"`, "supports.metrics is false"},
-		"bad port":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "99999"`, "must be a port number"},
-		"no port":     {"ingress: true, metrics: true", `nepfleet.metrics.path: /m`, "nepfleet.metrics.port is required"},
-		"bad path":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.path: m`, "must start with /"},
-		"bad scheme":  {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.scheme: ftp`, "http or https"},
-		"unknown key": {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.interval: 5s`, "unknown label nepfleet.metrics.interval"},
+		"valid":        {"ingress: true, metrics: true", `nepfleet.metrics.port: "9090", nepfleet.metrics.path: /m, nepfleet.metrics.scheme: https`, ""},
+		"variable":     {"ingress: true, metrics: true", `nepfleet.metrics.port: "${PORT}"`, "${PORT}, which is neither"},
+		"flag only":    {"ingress: true, metrics: true", ``, "supports.metrics is true, but no service has nepfleet.metrics.port labels"},
+		"labels only":  {"ingress: true", `nepfleet.metrics.port: "9090"`, "supports.metrics is false"},
+		"bad port":     {"ingress: true, metrics: true", `nepfleet.metrics.port: "99999"`, "must be a port number"},
+		"no port":      {"ingress: true, metrics: true", `nepfleet.metrics.path: /m`, "nepfleet.metrics.port is required"},
+		"bad path":     {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.path: m`, "must start with /"},
+		"bad scheme":   {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.scheme: ftp`, "http or https"},
+		"unknown key":  {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.interval: 5s`, "unknown label nepfleet.metrics.interval"},
+		"declared var": {"ingress: true, metrics: true", `nepfleet.metrics.port: "${DOMAIN}"`, ""},
+		"unquoted":     {"ingress: true, metrics: true", `nepfleet.metrics.port: 9090`, ""},
+		"plus sign":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "+90"`, "must be a port number"},
+		"null path":    {"ingress: true, metrics: true", `nepfleet.metrics.port: "1", nepfleet.metrics.path:`, `must start with /, got ""`},
+		"no ingress":   {"ingress: true, metrics: true", `nepfleet.metrics.port: "1"`, "not on the ingress network"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := copyDemo(t)
 			replaceIn(t, filepath.Join(dir, "template.yaml"), "supports: { ingress: true }", "supports: { "+c.supports+" }")
 			if c.labels != "" {
 				replaceIn(t, filepath.Join(dir, "compose.yaml"), "      caddy: ${DOMAIN}\n", "      caddy: ${DOMAIN}\n      "+strings.ReplaceAll(c.labels, ", n", "\n      n")+"\n")
+			}
+			if name == "no ingress" {
+				replaceIn(t, filepath.Join(dir, "compose.yaml"), "    networks: [ingress]\n", "    networks: [backend]\n")
+				appendFile(t, filepath.Join(dir, "compose.yaml"), "  backend: {}\n")
 			}
 			tpl, err := Load(dir)
 			if err != nil {
