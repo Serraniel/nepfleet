@@ -1,0 +1,506 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The HTTP API of `nepfleet serve`, served at /api/v1/openapi.yaml.
+# openapi_test.go keeps this and the code's routes and field names the same.
+openapi: 3.1.0
+info:
+  title: NepFleet API
+  version: v1
+  license:
+    name: AGPL-3.0-or-later
+    identifier: AGPL-3.0-or-later
+  description: >-
+    Manage a fleet's stacks. Programs use an API token, people a session from
+    signing in. A token limited to stacks gets 404 for all others. See docs/api.md.
+servers:
+  - url: http://127.0.0.1:7480
+    description: The default address of `nepfleet serve`
+security:
+  - token: []
+  - session: []
+tags:
+  - name: stacks
+  - name: signing-in
+  - name: server
+paths:
+  /healthz:
+    get:
+      tags: [server]
+      operationId: health
+      summary: Whether the server is up
+      security: []
+      responses:
+        "204": { description: Up }
+  /api/v1/openapi.yaml:
+    get:
+      tags: [server]
+      operationId: openapi
+      summary: This document
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI document
+          content:
+            application/yaml:
+              schema: { type: string }
+  /api/v1/info:
+    get:
+      tags: [server]
+      operationId: info
+      summary: Name, version and API version
+      security: []
+      responses:
+        "200":
+          description: About this server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Info" }
+  /api/v1/stacks:
+    get:
+      tags: [stacks]
+      operationId: listStacks
+      summary: The stacks the token covers
+      description: Needs the read scope.
+      responses:
+        "200":
+          description: Stacks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StackInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
+  /api/v1/templates:
+    get:
+      tags: [stacks]
+      operationId: listTemplates
+      summary: The catalogue of each template source of the fleet
+      description: >-
+        Needs the read scope. Each source has its commit and its catalogue, in the
+        index.json format. Templates that don't validate are listed as invalid.
+      responses:
+        "200":
+          description: Template sources
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/stacks/{name}/plan:
+    get:
+      tags: [stacks]
+      operationId: planStack
+      summary: What an apply would change
+      description: Needs the read scope. Secrets are masked. The id goes into an apply.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: The plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/stacks/{name}/apply:
+    post:
+      tags: [stacks]
+      operationId: applyStack
+      summary: Start applying a reviewed plan
+      description: Needs the apply scope. Refused if the plan has changed since it was read.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan: { type: string, description: The plan's id }
+                confirmDestructive: { type: boolean }
+      responses:
+        "202":
+          description: The job that applies it
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { description: No plan ID was sent }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The plan is out of date or destructive, or the stack is busy" }
+  /api/v1/stacks/{name}/rollback:
+    post:
+      tags: [stacks]
+      operationId: rollbackStack
+      summary: Start rolling back to a commit from the stack's history
+      description: Needs the apply scope.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [commit]
+              properties:
+                commit: { type: string, description: The full commit ID }
+                confirmDestructive: { type: boolean }
+      responses:
+        "202":
+          description: The job that rolls it back
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { description: No commit ID was sent }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The rollback is destructive, or the stack is busy" }
+  /api/v1/stacks/{name}/history:
+    get:
+      tags: [stacks]
+      operationId: stackHistory
+      summary: The commits that touched a stack, newest first
+      description: Needs the read scope.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+        - name: n
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+      responses:
+        "200":
+          description: Commits
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/HistoryEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/jobs/{id}:
+    get:
+      tags: [stacks]
+      operationId: getJob
+      summary: A job's state, error and log
+      description: Needs the read scope.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/events:
+    get:
+      tags: [server]
+      operationId: listEvents
+      summary: Notification events newer than an ID, oldest first
+      description: >-
+        Needs the read scope. A token limited to stacks sees only those, and no
+        host-wide events.
+      parameters:
+        - name: after
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/auth/status:
+    get:
+      tags: [signing-in]
+      operationId: authStatus
+      summary: Whether setup is needed, and who is signed in
+      security: []
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [setupNeeded, signedIn, name, totp]
+                properties:
+                  setupNeeded: { type: boolean }
+                  signedIn: { type: boolean }
+                  name: { type: string }
+                  totp:
+                    type: boolean
+                    description: Whether the signed-in user has sign-in codes on.
+  /api/v1/auth/setup/begin:
+    post:
+      tags: [signing-in]
+      operationId: setupBegin
+      summary: Start registering the first user, with the setup token from the log
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [setupToken, name]
+              properties:
+                setupToken: { type: string }
+                name: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Ceremony" }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
+  /api/v1/auth/setup/finish:
+    post:
+      tags: [signing-in]
+      operationId: setupFinish
+      summary: Register the first user's passkey, and sign in
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/Ceremony" }
+      requestBody: { $ref: "#/components/requestBodies/Credential" }
+      responses:
+        "204": { description: Signed in }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/login/begin:
+    post:
+      tags: [signing-in]
+      operationId: loginBegin
+      summary: Start signing in with a passkey
+      security: []
+      responses:
+        "200": { $ref: "#/components/responses/Ceremony" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/login/finish:
+    post:
+      tags: [signing-in]
+      operationId: loginFinish
+      summary: Sign in with the passkey's answer
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/Ceremony" }
+      requestBody: { $ref: "#/components/requestBodies/Credential" }
+      responses:
+        "204": { description: Signed in }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/logout:
+    post:
+      tags: [signing-in]
+      operationId: logout
+      summary: Sign out
+      security: []
+      responses:
+        "204": { description: Signed out }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/passkeys/begin:
+    post:
+      tags: [signing-in]
+      operationId: passkeyBegin
+      summary: Start adding a passkey
+      security:
+        - session: []
+      responses:
+        "200": { $ref: "#/components/responses/Ceremony" }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/passkeys/finish:
+    post:
+      tags: [signing-in]
+      operationId: passkeyFinish
+      summary: Add the passkey
+      security:
+        - session: []
+      parameters:
+        - { $ref: "#/components/parameters/Ceremony" }
+      requestBody: { $ref: "#/components/requestBodies/Credential" }
+      responses:
+        "204": { description: Added }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/totp/begin:
+    post:
+      tags: [signing-in]
+      operationId: totpBegin
+      summary: Start turning on sign-in codes
+      security:
+        - session: []
+      responses:
+        "200":
+          description: A new secret for an authenticator app
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ceremony, secret, url]
+                properties:
+                  ceremony: { type: string }
+                  secret: { type: string }
+                  url: { type: string, description: An otpauth URL }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/totp/finish:
+    post:
+      tags: [signing-in]
+      operationId: totpFinish
+      summary: Turn on sign-in codes, with one from the new authenticator
+      security:
+        - session: []
+      parameters:
+        - { $ref: "#/components/parameters/Ceremony" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        "204": { description: Turned on }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/totp/remove:
+    post:
+      tags: [signing-in]
+      operationId: totpRemove
+      summary: Turn off sign-in codes
+      security:
+        - session: []
+      responses:
+        "204": { description: Turned off }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/totp/login:
+    post:
+      tags: [signing-in]
+      operationId: totpLogin
+      summary: Sign in with a code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code]
+              properties:
+                name: { type: string }
+                code: { type: string }
+      responses:
+        "204": { description: Signed in }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
+components:
+  securitySchemes:
+    token:
+      type: http
+      scheme: bearer
+      description: An API token, nft_…
+    session:
+      type: apiKey
+      in: cookie
+      name: nepfleet_session
+      description: From signing in. Changes also need an allowed Origin.
+  parameters:
+    StackName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    Ceremony:
+      name: ceremony
+      in: query
+      required: true
+      schema: { type: string }
+  requestBodies:
+    Credential:
+      required: true
+      description: The browser's PublicKeyCredential, as JSON.
+      content:
+        application/json:
+          schema: { type: object }
+  responses:
+    Unauthorized: { description: No valid token or session }
+    NotFound: { description: "Unknown, or not covered by this token" }
+    SignInFailed: { description: Sign-in failed; all failures read alike }
+    OriginNotAllowed: { description: The Origin isn't an allowed one }
+    TooManyAttempts: { description: Locked out for now; see Retry-After }
+    Ceremony:
+      description: The options for the browser's passkey API
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ceremony, options]
+            properties:
+              ceremony: { type: string }
+              options: { type: object }
+  schemas:
+    Info:
+      type: object
+      required: [name, version, apiVersion]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        apiVersion: { type: string }
+    StackInfo:
+      type: object
+      required: [name, target, mode, apply, updates]
+      properties:
+        name: { type: string }
+        target: { type: string }
+        mode: { type: string }
+        apply: { type: string }
+        template: { type: string, description: source/name@version }
+        updates: { type: string }
+    HistoryEntry:
+      type: object
+      required: [commit, date, author, subject]
+      properties:
+        commit: { type: string }
+        date: { type: string, format: date-time }
+        author: { type: string }
+        subject: { type: string }
+        applied: { type: boolean, description: The revision running now }
+    Job:
+      type: object
+      required: [id, stack, kind, state, started, log, by]
+      properties:
+        id: { type: string }
+        stack: { type: string }
+        kind: { type: string, enum: [apply, rollback] }
+        state: { type: string, enum: [running, succeeded, failed] }
+        started: { type: string, format: date-time }
+        finished: { type: string, format: date-time }
+        error: { type: string }
+        log: { type: string }
+        by: { type: string }
+    Plan:
+      type: object
+      description: The `nepfleet plan --json` format, plus its id.
+      required: [id]
+      properties:
+        id: { type: string }
+        destructive:
+          type: array
+          items: { type: string }
+        migrationError:
+          type: string
+          description: Why this upgrade is refused.
+      additionalProperties: true

@@ -2,9 +2,9 @@
 
 // Package api serves the optional HTTP API used by nepfleet-ui.
 //
-// /healthz and /api/v1/info are open; everything else needs a bearer token
-// (internal/auth) with a fitting scope. Sign-in for people (passkeys, OIDC)
-// comes with the milestone "API & security".
+// /healthz, /api/v1/info and /api/v1/openapi.yaml are open; everything else needs
+// a bearer token (internal/auth) with a fitting scope, or a person's session.
+// openapi.yaml describes it all.
 package api
 
 import (
@@ -99,6 +99,7 @@ func Handler(o Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/info", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, o.Info)
 	})
+	mux.HandleFunc("GET /api/v1/openapi.yaml", serveOpenAPI)
 	l := newLimiter()
 	mux.HandleFunc("GET /api/v1/stacks", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		if o.Stacks == nil {
