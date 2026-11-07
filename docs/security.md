@@ -12,7 +12,7 @@ NepFleet controls Docker, and **Docker access is root access** to the host. A co
 
 ## Exposing the API
 
-Sign-in with passkeys is new and has no second factor or OIDC yet, so **think twice before exposing it to the internet**. Loopback, the LAN or a VPN are safer.
+Sign-in with passkeys is new and has no OIDC yet, so **think twice before exposing it to the internet**. Loopback, the LAN or a VPN are safer.
 
 Before it can be public, it needs:
 
@@ -22,7 +22,8 @@ Before it can be public, it needs:
 | CORS allowlist with exact origins; `*` is rejected at start | Done |
 | Lockout after failed authentication | Done, for tokens and sign-in |
 | Passkeys ([#33](https://github.com/Serraniel/nepfleet/issues/33)) | [Done](api.md#signing-in) |
-| TOTP as a fallback ([#33](https://github.com/Serraniel/nepfleet/issues/33)), or OIDC ([#34](https://github.com/Serraniel/nepfleet/issues/34)) | Not yet |
+| TOTP as a fallback ([#33](https://github.com/Serraniel/nepfleet/issues/33)) | [Done](api.md#signing-in), optional per user |
+| OIDC ([#34](https://github.com/Serraniel/nepfleet/issues/34)) | Not yet |
 | Every state change recorded as a commit by the authenticated person ([#37](https://github.com/Serraniel/nepfleet/issues/37)) | Partly: rollbacks and what applies write are commits, authored by the person or token. An apply with nothing to record makes none. |
 | The server refusing to start publicly without the above | Not yet: there is no "public" mode to refuse |
 

@@ -37,7 +37,11 @@ func cmdUser(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintln(stdout, "no users; with passkeys on, nepfleet serve prints a setup token")
 		}
 		for _, u := range all {
-			fmt.Fprintf(stdout, "%-24s %d passkey(s), since %s\n", u.Name, len(u.Credentials), u.Created.Format("2006-01-02"))
+			codes := ""
+			if u.TOTP != nil {
+				codes = ", sign-in codes on"
+			}
+			fmt.Fprintf(stdout, "%-24s %d passkey(s)%s, since %s\n", u.Name, len(u.Credentials), codes, u.Created.Format("2006-01-02"))
 		}
 		return nil
 	case "remove":
