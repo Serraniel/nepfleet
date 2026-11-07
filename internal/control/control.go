@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -261,7 +262,8 @@ func Listen(socket string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fi.Mode().Perm()&0o077 != 0 {
+	// (Windows has no such modes; a user's own application data is private.)
+	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("%s must be private to you (chmod 700)", dir)
 	}
 	if fi, err := os.Lstat(socket); err == nil {

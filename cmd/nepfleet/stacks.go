@@ -35,6 +35,7 @@ import (
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/flock"
 	"github.com/Serraniel/nepfleet/internal/importer"
 	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/notify"
@@ -511,15 +512,11 @@ func lockStack(stateDir, name string) (func(), error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, name+".lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the state directory, a checked stack name
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // a file descriptor fits an int
-		_ = f.Close()
+	release, err := flock.Lock(filepath.Join(dir, name+".lock"), false)
+	if errors.Is(err, flock.ErrHeld) {
 		return nil, fmt.Errorf("%s: another apply of this stack is running", name)
 	}
-	return func() { _ = f.Close() }, nil
+	return release, err
 }
 
 func runApply(ctx context.Context, c common, names []string, o applyOptions, stdout, stderr io.Writer) error {

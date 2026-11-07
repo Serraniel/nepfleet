@@ -48,8 +48,12 @@ func (f *fakeRemote) RevokeToken(_ context.Context, _ remote.Target, id string) 
 }
 
 func (f *fakeRemote) Forward(ctx context.Context, _ remote.Target, socket string) error {
-	_ = os.Remove(socket)
-	l, err := net.Listen("unix", socket)
+	network := "tcp"
+	if !strings.HasPrefix(socket, "127.0.0.1:") {
+		network = "unix"
+		_ = os.Remove(socket)
+	}
+	l, err := net.Listen(network, socket)
 	if err != nil {
 		return err
 	}

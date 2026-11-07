@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -51,8 +52,11 @@ type tunnel struct {
 	minted time.Time
 	cancel context.CancelFunc
 	done   chan struct{}
-	socket string
-	proxy  *httputil.ReverseProxy
+	// network and socket are the local end: a private Unix socket, or on
+	// Windows a loopback port.
+	network string
+	socket  string
+	proxy   *httputil.ReverseProxy
 }
 
 func (t *tunnel) set(state, err string) {
@@ -90,7 +94,17 @@ func (s *Server) startTunnel(name, address string) error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t := &tunnel{state: TunnelConnecting, cancel: cancel, done: make(chan struct{}), socket: filepath.Join(dir, name+".sock")}
+	t := &tunnel{state: TunnelConnecting, cancel: cancel, done: make(chan struct{}), network: "unix", socket: filepath.Join(dir, name+".sock")}
+	if runtime.GOOS == "windows" {
+		// Windows' ssh can't forward to a Unix socket: a loopback port, which
+		// other local users could reach, but the remote still wants the token.
+		port, err := freePort()
+		if err != nil {
+			cancel()
+			return err
+		}
+		t.network, t.socket = "tcp", port
+	}
 	t.proxy = &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme, r.Out.URL.Host = "http", "remote"
@@ -101,7 +115,7 @@ func (s *Server) startTunnel(name, address string) error {
 			r.Out.Header.Set("Authorization", "Bearer "+t.secret())
 		},
 		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", t.socket)
+			return (&net.Dialer{}).DialContext(ctx, t.network, t.socket)
 		}},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			log.Printf("control: %s: %v", name, err)
@@ -141,7 +155,9 @@ func (s *Server) runTunnel(ctx context.Context, t *tunnel, name string, target r
 				log.Printf("control: %s: revoking its token: %v (it expires within a day)", name, err)
 			}
 		}
-		_ = os.Remove(t.socket)
+		if t.network == "unix" {
+			_ = os.Remove(t.socket)
+		}
 	}()
 	backoff := s.retry()
 	for ctx.Err() == nil {
@@ -245,7 +261,7 @@ func (s *Server) renewToken(ctx context.Context, t *tunnel, name string, target 
 func healthy(ctx context.Context, t *tunnel) bool {
 	c := http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", t.socket)
+			return (&net.Dialer{}).DialContext(ctx, t.network, t.socket)
 		}}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://remote/healthz", nil)
 	if err != nil {
@@ -257,6 +273,17 @@ func healthy(ctx context.Context, t *tunnel) bool {
 	}
 	_ = res.Body.Close()
 	return res.StatusCode < 300
+}
+
+// freePort finds a loopback port for ssh to listen on.
+func freePort() (string, error) {
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = l.Close() }()
+	return l.Addr().String(), nil
 }
 
 // tokenLabel names the token after this machine, so the remote's token list

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // APIPort is where a NepFleet server listens on its own machine.
@@ -104,8 +105,10 @@ func (s SSH) ForwardArgs(t Target, socket string) []string {
 
 // Forward runs the tunnel until ctx ends or ssh exits.
 func (s SSH) Forward(ctx context.Context, t Target, socket string) error {
-	if err := os.Remove(socket); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if !strings.HasPrefix(socket, "127.0.0.1:") {
+		if err := os.Remove(socket); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	cmd := exec.CommandContext(ctx, "ssh", s.ForwardArgs(t, socket)...) //nolint:gosec // names checked in ParseTarget, after "--"
 	var stderr bytes.Buffer

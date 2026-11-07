@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func TestRemotes(t *testing.T) {
 		t.Errorf("refresh while down: %s", rec.Body)
 	}
 	fi, err := os.Stat(filepath.Join(dir, "remotes.json"))
-	if err != nil || fi.Mode().Perm() != 0o600 {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Errorf("remotes.json: %v %v", fi, err)
 	}
 	// State survives a restart.
@@ -83,7 +84,7 @@ func TestListen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi, _ := os.Stat(sock); fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(sock); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("socket mode %v", fi.Mode())
 	}
 	if _, err := Listen(sock); !errors.Is(err, ErrRunning) {
@@ -97,6 +98,9 @@ func TestListen(t *testing.T) {
 	}
 	if _, err := Listen(file); err == nil {
 		t.Error("a regular file must not be replaced")
+	}
+	if runtime.GOOS == "windows" {
+		return // no such modes there
 	}
 	open := filepath.Join(base, "open")
 	if err := os.Mkdir(open, 0o700); err != nil {

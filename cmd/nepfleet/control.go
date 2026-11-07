@@ -175,7 +175,7 @@ func ensureControl(ctx context.Context) error {
 	defer func() { _ = logFile.Close() }()
 	cmd := exec.Command(self, "control") //nolint:gosec,noctx // this binary; it must outlive this command
 	cmd.Stdout, cmd.Stderr = logFile, logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting the control daemon: %w", err)
 	}
