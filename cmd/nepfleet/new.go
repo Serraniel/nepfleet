@@ -103,7 +103,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("%s declares no web UI (spec.web), so it can only run behind Caddy", tpl.Metadata.Name)
 		}
 		if *port == 0 {
-			if *port, err = e.fleet.FreePort(e.targetHost(*target), e.targetNames(*target)...); err != nil {
+			if *port, err = e.pickPort(e.targetHost(*target), *target, name); err != nil {
 				return err
 			}
 		} else {
@@ -116,6 +116,9 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 			}
 			if err := e.portFree(*target, *port, name); err != nil {
 				return err
+			}
+			if owner, taken := e.renderedPorts(*target, name)[*port]; taken {
+				return fmt.Errorf("port %d is already published by %s on %s", *port, owner, *target)
 			}
 		}
 	}
