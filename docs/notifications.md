@@ -40,6 +40,8 @@ Sent today: `apply.succeeded`, `apply.failed` and `apply.rolled_back`. The other
 | `backup.failed` / `restore.completed` | error / info |
 | `host.update_pending` / `host.update_failed` / `host.reboot_required` | info / error / warning |
 | `host.unreachable` / `node.drained` | error / info |
+| `container.crashed` / `container.crash_loop` (3 crashes in 10 minutes) | warning / error |
+| `container.oom` / `container.unhealthy` | error / warning |
 | `security.login_failed_repeatedly` / `security.token_created` | warning / info |
 
 Discord, Slack, Teams, ntfy and Telegram receive the title and a colour or priority for the severity. The message ends with the stack and host. For applies, it also lists what changed (`changed compose.yaml, changed image nginx:1.29`, …). With `notifications.uiURL` set, for example `uiURL: https://nepfleet.example.org`, messages about a stack link to `<uiURL>/stacks/<name>`. Signed webhooks get the link as `url`.
@@ -65,5 +67,13 @@ To verify, recompute the HMAC over the raw body, compare it in constant time, an
 expected = "sha256=" + hmac.new(key, f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
 ok = hmac.compare_digest(expected, request.headers["X-NepFleet-Signature"]) and abs(time.time() - int(ts)) < 300
 ```
+
+## Container problems
+
+`nepfleet watch` follows Docker's events on a host and reports OOM kills, crashes, crash loops and failed health checks. Each message names the stack and includes the container's last log lines.
+
+- **Not crashes:** stops that were asked for, by `docker stop`, an apply or a restart (a kill event first, or exit codes 0 and 143).
+- **No floods:** each kind of problem is sent at most once per container per 30 minutes.
+- **How to run it:** as a service next to Docker, for example a systemd unit or the NepFleet container. Run it on every host whose containers you want watched.
 
 Uptime alerts stay in Uptime Kuma, which has its own notification integrations. NepFleet does not duplicate them.
