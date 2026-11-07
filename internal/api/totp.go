@@ -86,6 +86,12 @@ func (a *Accounts) totpOn(r *http.Request) bool {
 	return err == nil && u.TOTP != nil
 }
 
+// isExternal says whether the signed-in user came through an identity provider.
+func (a *Accounts) isExternal(r *http.Request) bool {
+	u, err := a.signedInUser(r)
+	return err == nil && u.External
+}
+
 type guardedRoute = func(func(http.ResponseWriter, *http.Request, string) error) http.HandlerFunc
 
 func (a *Accounts) totpRoutes(mux *http.ServeMux, guarded guardedRoute) {
@@ -95,6 +101,9 @@ func (a *Accounts) totpRoutes(mux *http.ServeMux, guarded guardedRoute) {
 		u, err := a.signedInUser(r)
 		if err != nil {
 			return err
+		}
+		if u.External {
+			return errors.New("people from an identity provider sign in there")
 		}
 		secret, err := auth.NewTOTPSecret()
 		if err != nil {
