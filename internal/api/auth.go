@@ -111,6 +111,26 @@ func clientAddr(r *http.Request, trusted []*net.IPNet) string {
 	return host
 }
 
+// requireAuth lets a request through with a bearer token, or a signed-in
+// person's session cookie. A token that's sent decides alone: no cookie is
+// looked at, so a request can't be two people.
+func requireAuth(o Options, l *limiter, scope string, next http.HandlerFunc) http.HandlerFunc {
+	withToken := requireToken(o.Tokens, l, o.TrustedProxies, scope, next)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			if t, ok := o.Accounts.sessionToken(r); ok {
+				if !sameOrigin(r, o.AllowedOrigins) {
+					http.Error(w, "origin not allowed", http.StatusForbidden)
+					return
+				}
+				next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, t)))
+				return
+			}
+		}
+		withToken(w, r)
+	}
+}
+
 // requireToken lets a request through with a valid bearer token whose scope
 // allows it. Unknown, expired and missing tokens get the same 401.
 func requireToken(store *auth.Store, l *limiter, trusted []*net.IPNet, scope string, next http.HandlerFunc) http.HandlerFunc {

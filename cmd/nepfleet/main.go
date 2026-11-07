@@ -6,8 +6,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,6 +31,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/Serraniel/nepfleet/internal/api"
+	"github.com/Serraniel/nepfleet/internal/auth"
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/fleet"
@@ -60,6 +63,7 @@ Usage:
   nepfleet remote add|list|refresh|connect|disconnect|remove  machines the local control daemon knows
   nepfleet host bootstrap <ssh://host>  prepare a machine over SSH: Docker, Compose, ingress network (shows a plan first)
   nepfleet host apply <name>            make a host's network mounts match hosts/<name>.yaml (shows a plan first)
+  nepfleet user list|remove             who may sign in with a passkey
   nepfleet tui                          terminal client: machines, stacks, plans, apply
   nepfleet control [status|token|http]  the local control daemon (started on demand; keeps running)
   nepfleet watch                        report OOM kills, crashes, crash loops and failed health checks
@@ -141,6 +145,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdSecret(args[1:], stdout, stderr)
 	case "history":
 		return cmdHistory(args[1:], stdout, stderr)
+	case "user":
+		return cmdUser(args[1:], stdout, stderr)
 	case "tui":
 		return cmdTUI(stdout)
 	case "control":
@@ -262,6 +268,8 @@ func serve(args []string, stderr io.Writer) error {
 	tlsCert := fs.String("tls-cert", "", "TLS certificate file (with --tls-key; renewals are picked up without a restart)")
 	tlsKey := fs.String("tls-key", "", "TLS private key file")
 	tlsDomain := fs.String("tls-domain", "", "get a certificate for this domain from Let's Encrypt, accepting its terms (the domain must reach this server on port 443)")
+	rpID := fs.String("passkey-domain", "", "turn on passkey sign-in for this domain, e.g. fleet.example.org")
+	rpOrigins := fs.String("passkey-origins", "", "comma separated exact origins of the web UI, for passkeys (default https://<passkey-domain>)")
 	behindProxy := fs.Bool("behind-proxy", false, "listen on plain HTTP beyond loopback: a reverse proxy in front terminates TLS")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -295,6 +303,10 @@ func serve(args []string, stderr io.Writer) error {
 		}
 	}
 	c := common{fleetDir: *fleetDir, stateDir: *stateDir, host: *host}
+	accounts, err := serveAccounts(*rpID, *rpOrigins, *stateDir, stderr)
+	if err != nil {
+		return err
+	}
 	// A stop signal does not cancel an apply: stopped halfway, a stack stays
 	// half updated. Only a second signal does.
 	applyCtx, abortApply := context.WithCancel(context.Background())
@@ -304,6 +316,7 @@ func serve(args []string, stderr io.Writer) error {
 		AllowedOrigins: allowed,
 		Tokens:         tokenStore(*stateDir),
 		TrustedProxies: trustedNets,
+		Accounts:       accounts,
 		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
 		Plan: func(_ context.Context, stack string) (any, error) {
 			if !apiMu.TryLock() {
@@ -565,6 +578,48 @@ func withStack(c common, name string, fn func(*env, *fleet.Stack) (any, error)) 
 		}
 	}
 	return nil, api.ErrNotFound
+}
+
+// serveAccounts turns on passkey sign-in if asked. With no users yet, it prints a
+// one-time setup token to the log: whoever can read the log may create the first
+// user, the same trust as whoever runs the server.
+func serveAccounts(rpID, origins, stateDir string, stderr io.Writer) (*api.Accounts, error) {
+	if rpID == "" {
+		return nil, nil
+	}
+	list := splitCSV(origins)
+	if len(list) == 0 {
+		list = []string{"https://" + rpID}
+	}
+	for _, o := range list {
+		if err := api.CheckOrigin(o); err != nil {
+			return nil, fmt.Errorf("--passkey-origins: %w", err)
+		}
+	}
+	w, err := api.NewWebAuthn(rpID, list)
+	if err != nil {
+		return nil, fmt.Errorf("passkeys: %w", err)
+	}
+	a := &api.Accounts{Users: &auth.UserStore{Dir: filepath.Join(stateDir, "api")}, Sessions: &auth.Sessions{}, WebAuthn: w}
+	if !a.Users.Any() {
+		raw := make([]byte, 24)
+		if _, err := rand.Read(raw); err != nil {
+			return nil, err
+		}
+		a.SetupToken = base64.RawURLEncoding.EncodeToString(raw)
+		fmt.Fprintf(stderr, "no users yet; create the first with this one-time setup token: %s\n", a.SetupToken)
+	}
+	return a, nil
+}
+
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // serveTLS builds the server's TLS configuration from its flags; nil means
