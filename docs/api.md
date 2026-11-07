@@ -35,7 +35,6 @@ Tokens must not cross a network in the clear, so a plain-HTTP address beyond loo
 
 With TLS on, the server allows TLS 1.2 and newer and sends HSTS.
 
-Applying and rolling back over the API come next ([#38](https://github.com/Serraniel/nepfleet/issues/38)).
 ## Applying
 
 1. **Get the plan** and show it to the person: `GET …/plan`.
