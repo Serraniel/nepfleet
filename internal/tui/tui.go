@@ -205,7 +205,7 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadPlan()
 		}
 	case "a":
-		if m.screen == screenPlan && m.plan != nil && len(m.plan.Changes) > 0 {
+		if m.screen == screenPlan && m.plan != nil && !m.plan.Empty() && m.plan.MigrationError == "" {
 			m.confirming, m.typed, m.err = true, "", ""
 		}
 	}
@@ -373,15 +373,25 @@ func (m Model) planLines() []string {
 		return []string{"Planning… (renders the stack on the remote)"}
 	}
 	p := m.plan
-	if len(p.Changes) == 0 {
+	if p.Empty() {
 		return []string{"Nothing to apply: the running stack matches the fleet repository."}
 	}
 	var out []string
 	if p.First {
 		out = append(out, "Not applied yet: the first apply creates everything below.", "")
 	}
+	if p.MigrationError != "" {
+		out = append(out, "CAN'T UPGRADE: "+Clean(p.MigrationError), "")
+	}
 	for _, d := range p.Destructive {
 		out = append(out, "DESTRUCTIVE: "+Clean(d))
+	}
+	if m := p.Migration; m != nil {
+		out = append(out, "Migration "+Clean(m.From)+" → "+Clean(m.To)+":")
+		for i, s := range m.Steps {
+			out = append(out, fmt.Sprintf("  %d. %s", i+1, Clean(s)))
+		}
+		out = append(out, "")
 	}
 	for i, s := range p.Steps {
 		mark := ""

@@ -64,6 +64,11 @@ type Options struct {
 	// DataSafety, when set, snapshots the running stack's volumes before
 	// the new version starts and restores them on rollback (compose only).
 	DataSafety *DataSafety
+	// Template and TemplateVersion go into the manifest.
+	Template        string
+	TemplateVersion string
+	// Migration runs around the new version's start; a failure rolls back.
+	Migration *Migration
 }
 
 // Result reports side effects the caller has to persist.
@@ -144,20 +149,51 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 			return res, err
 		}
 	}
-	err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
+	// A rollback that restores data needs data to restore, before any step runs.
+	if o.Migration != nil && o.Migration.RequireSnapshot && !g.holdsData() {
+		res.LockChanged = false
+		rctx := context.WithoutCancel(ctx)
+		g.discard(rctx)
+		_ = restore(p.Dir, out.Files, prev)
+		return res, errors.Join(errors.New("this migration needs a snapshot of the stack's data, but none was taken: start the stack first, and check that its volumes aren't all excluded"), g.startAgain(rctx))
+	}
+	if o.Migration != nil && g != nil {
+		// The steps before the deploy run in the old version, which the
+		// snapshot stopped. A database needs a moment to take commands again.
+		err = g.startAgain(ctx)
+		if err == nil {
+			err = waitReady(ctx, r, g.running, o.WaitTimeout)
+		}
+	}
 	if err == nil {
+		err = o.Migration.before(ctx, r, p.Stack)
+	}
+	if err == nil {
+		err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
+	}
+	if err == nil {
+		err = o.Migration.after(ctx, r, p.Stack)
+	}
+	if err == nil {
+		// The manifest first: if writing it fails, the snapshot is still there.
+		if err := writeManifest(p.Dir, out.Files, pins, o); err != nil {
+			return res, err
+		}
 		g.discard(context.WithoutCancel(ctx))
-		return res, writeManifest(p.Dir, out.Files, pins, o)
+		return res, nil
 	}
 	res.LockChanged = false // the new pins did not run successfully; never ask to commit them
 	if prev == nil {
 		// Nothing to go back to. Leave it as is for inspection.
 		return res, fmt.Errorf("first deploy of %s failed (left as is for inspection, `docker compose -p %s logs`): %w", p.Stack, p.Stack, err)
 	}
-	if g != nil {
-		// The stack was stopped for the snapshot: finish the rollback even if
-		// nepfleet is being stopped, or it would stay down.
+	if g != nil || o.Migration != nil {
+		// The stack was stopped for the snapshot, or a migration has started:
+		// finish the rollback even if nepfleet is being stopped, or the stack
+		// stays down or on the wrong version.
 		ctx = context.WithoutCancel(ctx)
+	}
+	if g != nil {
 		// Nothing may write while the data is restored, including services
 		// only the failed version has: stop the whole project first.
 		if rerr := g.stopAll(ctx); rerr != nil {
@@ -169,8 +205,11 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	}
 	// The new version may have migrated the data: put it back before the
 	// previous version starts on it, or leave the stack stopped.
-	if rerr := g.restore(ctx); rerr != nil {
-		return res, fmt.Errorf("%w; restoring the data snapshot failed, so the stack stays stopped rather than run the previous version on changed data: %w", err, rerr)
+	// With rollback: revert, the template says the previous version copes.
+	if o.Migration == nil || o.Migration.RestoreData {
+		if rerr := g.restore(ctx); rerr != nil {
+			return res, fmt.Errorf("%w; restoring the data snapshot failed, so the stack stays stopped rather than run the previous version on changed data: %w", err, rerr)
+		}
 	}
 	// The failed attempt may have moved local tags: put back what they were,
 	// then re-pin the previous digests on top.
@@ -480,7 +519,7 @@ func restore(dir string, current map[string][]byte, prev *Manifest) error {
 }
 
 func writeManifest(dir string, files map[string][]byte, pins map[string]string, o Options) error {
-	m := Manifest{Commit: o.Commit, Dirty: o.Dirty, Images: pins}
+	m := Manifest{Commit: o.Commit, Dirty: o.Dirty, Images: pins, Template: o.Template, TemplateVersion: o.TemplateVersion}
 	for path := range files {
 		m.Files = append(m.Files, path)
 	}
@@ -508,6 +547,21 @@ func Adopt(dir string, out *render.Output) error {
 		return err
 	}
 	return writeManifest(dir, out.Files, nil, Options{}) // pins come from the running containers on the first apply
+}
+
+// RecordVersion notes a template version whose files are the same as what runs:
+// no apply happens then, but migrations must start from the right version.
+func RecordVersion(dir, tpl, version string) error {
+	m, err := readManifest(dir)
+	if err != nil || m == nil || (m.Template == tpl && m.TemplateVersion == version) {
+		return err
+	}
+	m.Template, m.TemplateVersion = tpl, version
+	raw, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, metaDir, "manifest.json"), raw, 0o600)
 }
 
 // Applied returns the manifest of the last successful apply, or nil.

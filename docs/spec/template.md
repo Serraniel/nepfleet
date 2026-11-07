@@ -164,3 +164,13 @@ migrations:
 ```
 
 Steps run only inside the stack's own containers. A failed step triggers `rollback`. Your own fleet repository can define migrations for your own templates.
+
+How an upgrade runs:
+
+- **Where it starts:** each apply records the template version in the stack's manifest. A stack last applied before versions were recorded has no starting point: that apply runs no migration and records the version, and if the template has migrations, it asks you to confirm that none is needed.
+- **When one is needed:** every migration whose `from` matches on the way to the new version has to run. An upgrade is refused if a migration lies on the way that the stack's version can't reach, or if it goes to another major version (or another minor below 1.0) with no migrations leading to it. Other upgrades just apply. Going to an older version runs no steps and asks for confirmation, as the data stays as the newer version left it; a rollback works this way, with `nepfleet rollback --confirm` where nothing can ask. Upgrading again runs the migrations again, so restore a backup when going back past one.
+- **Order:** the data is snapshotted, the old version starts again and passes its health checks, the steps before `deploy: true` run in it, the new version starts and passes its health gate, and the remaining steps run in it. Without a deploy step, the new version starts last.
+- **Confirmation:** the plan lists the steps, and it counts as destructive: you confirm by typing the stack's name, or with `--confirm`.
+- **On failure:** `rollback: restore` restores the snapshot and the previous version. `rollback: revert` starts the previous version and keeps the data as it is. Volumes kept out of snapshots (`snapshot: false`, `snapshotExclude`) aren't restored, so a migration shouldn't change them.
+- **Interrupted:** if NepFleet is killed mid-migration, nothing finishes the rollback, and the next apply sees the old version and runs the migration again. Look at the stack before applying.
+- **Refused:** `backup: required` or `rollback: restore` with snapshots off or nothing to snapshot (the stack is down, or all its volumes are excluded), swarm stacks, and paths of several migrations. Those need each version's own compose file, so apply the first version named in the error, then the next.

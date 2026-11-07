@@ -149,6 +149,15 @@ func (d *DataSafety) take(ctx context.Context, stack string) (*guard, error) {
 	return g, nil
 }
 
+// holdsData says whether the snapshot has any data in it. With no containers to
+// look at, or everything excluded, it has none, and a restore would change nothing.
+func (g *guard) holdsData() bool {
+	if g == nil {
+		return false
+	}
+	return slices.ContainsFunc(g.snaps, func(s *snapshot.Snapshot) bool { return len(s.Items) > 0 })
+}
+
 // excluded reports a volume the template or stack keeps out of snapshots.
 func (d *DataSafety) excluded(ctx context.Context, stack, vol string) bool {
 	if len(d.ExcludeVolumes) == 0 {
