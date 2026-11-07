@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Serraniel/nepfleet/internal/remote"
@@ -62,6 +63,11 @@ type Server struct {
 	remotes []Remote
 	tunnels map[string]*tunnel
 	started time.Time
+
+	httpMu      sync.Mutex
+	httpSrv     *http.Server
+	httpAddr    string
+	httpOrigins atomic.Pointer[[]string]
 }
 
 // Load reads the state, or starts empty.
@@ -289,16 +295,14 @@ func Listen(socket string) (net.Listener, error) {
 	return l, nil
 }
 
-// Serve runs the API until ctx ends: on the socket, and with HTTP set also on
-// a guarded loopback port for browsers.
-func (s *Server) Serve(ctx context.Context, l net.Listener, httpSrv *http.Server, httpL net.Listener) error {
-	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second}
-	errc := make(chan error, 2)
+// Serve runs the API until ctx ends: on the socket, and on the guarded loopback
+// port for browsers if it was turned on.
+func (s *Server) Serve(ctx context.Context, l net.Listener) error {
+	srv := &http.Server{Handler: s.SocketHandler(), ReadHeaderTimeout: 5 * time.Second}
+	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()
-	if httpSrv != nil {
-		go func() { errc <- httpSrv.Serve(httpL) }()
-		defer func() { _ = httpSrv.Close() }()
-	}
+	s.startSavedHTTP()
+	defer s.stopHTTP()
 	s.startSaved()
 	defer s.stopAll()
 	select {
