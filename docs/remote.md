@@ -43,6 +43,13 @@ nepfleet control status
 - **If the daemon is killed outright** (`kill -9`), its `ssh` process stays until the connection drops, and the next start replaces the socket. The token it held expires within a day.
 - **A CLI install:** `nepfleet token create` must see the same state directory as the server: set `NEPFLEET_STATE` for non-interactive SSH, or use the container.
 
+## Terminal client
+
+`nepfleet tui` shows your machines and, for a connected one, its stacks, each stack's plan with diffs, and applying it with a live log. It starts the daemon if needed, and closing it changes nothing: a running apply goes on.
+
+- **Applying:** it asks first. A plan with destructive changes needs the stack's name typed.
+- **Remote text:** control characters are removed before anything is shown, so a remote machine can't drive your terminal.
+
 ## Browsers
 
 The web UI can't open a Unix socket, so the daemon can also listen on a loopback port:
