@@ -3,17 +3,23 @@
 package control
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/Serraniel/nepfleet/internal/api"
 )
 
 // HTTPTokenPrefix marks the daemon's own token, so secret scanners find it.
@@ -75,6 +81,10 @@ func CheckHTTPAddr(addr string) error {
 //   - browsers may only call from exact allowed origins;
 //   - every request needs the token, which a page can't read from a file.
 func Guard(next http.Handler, addr, token string, origins []string) http.Handler {
+	return guard(next, addr, token, func() []string { return origins })
+}
+
+func guard(next http.Handler, addr, token string, origins func() []string) http.Handler {
 	_, port, _ := net.SplitHostPort(addr)
 	hosts := []string{net.JoinHostPort("127.0.0.1", port), net.JoinHostPort("localhost", port), net.JoinHostPort("::1", port)}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +97,7 @@ func Guard(next http.Handler, addr, token string, origins []string) http.Handler
 		h.Set("Cache-Control", "no-store")
 		h.Set("Referrer-Policy", "no-referrer")
 		if o := r.Header.Get("Origin"); o != "" {
-			if !slices.Contains(origins, o) {
+			if !slices.Contains(origins(), o) {
 				fail(w, http.StatusForbidden, "origin not allowed")
 				return
 			}
@@ -109,4 +119,153 @@ func Guard(next http.Handler, addr, token string, origins []string) http.Handler
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// CheckHTTPOrigin accepts what a browser or the desktop app sends as Origin.
+func CheckHTTPOrigin(o string) error {
+	// The desktop app's own origin on Linux and macOS (Windows uses
+	// http://tauri.localhost).
+	if o == "tauri://localhost" {
+		return nil
+	}
+	return api.CheckOrigin(o)
+}
+
+// httpConfig is http.json: the port stays on across restarts of the daemon.
+type httpConfig struct {
+	Addr    string   `json:"addr"`
+	Origins []string `json:"origins"`
+}
+
+func (s *Server) loadHTTPConfig() (*httpConfig, error) {
+	raw, err := os.ReadFile(filepath.Join(s.Dir, "http.json")) //nolint:gosec // the daemon's own directory
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var c httpConfig
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, fmt.Errorf("http.json: %w", err)
+	}
+	return &c, nil
+}
+
+// EnableHTTP opens the guarded port, or changes it, and remembers it. Origins
+// add up: the desktop app and a browser UI can share the daemon.
+func (s *Server) EnableHTTP(addr string, origins []string) error {
+	if err := CheckHTTPAddr(addr); err != nil {
+		return err
+	}
+	for _, o := range origins {
+		if err := CheckHTTPOrigin(o); err != nil {
+			return err
+		}
+	}
+	s.httpMu.Lock()
+	defer s.httpMu.Unlock()
+	old, err := s.loadHTTPConfig()
+	if err != nil {
+		return err
+	}
+	all := slices.Clone(origins)
+	if old != nil && old.Addr == addr {
+		for _, o := range old.Origins {
+			if !slices.Contains(all, o) {
+				all = append(all, o)
+			}
+		}
+	}
+	slices.Sort(all)
+	if err := s.listenHTTP(addr, all); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(httpConfig{Addr: addr, Origins: all}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(s.Dir, "http.json"), raw, 0o600)
+}
+
+// listenHTTP opens or updates the port. Call with s.httpMu held. The same address
+// keeps its listener and only changes who may call. A new one opens first, so a
+// failure leaves the working port as it is.
+func (s *Server) listenHTTP(addr string, origins []string) error {
+	if s.httpSrv != nil && s.httpAddr == addr {
+		s.httpOrigins.Store(&origins)
+		return nil
+	}
+	token, err := LoadHTTPToken(s.Dir)
+	if err != nil {
+		return err
+	}
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "tcp", addr)
+	if err != nil {
+		return err
+	}
+	s.httpOrigins.Store(&origins)
+	if s.httpSrv != nil {
+		_ = s.httpSrv.Close()
+	}
+	// The plain handler: changing this port's rules is for the socket only, so
+	// a page holding the token can't add its own origin.
+	allowed := func() []string { return *s.httpOrigins.Load() }
+	srv := &http.Server{Handler: guard(s.Handler(), addr, token, allowed), ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
+	s.httpSrv, s.httpAddr = srv, addr
+	go func() {
+		// Serve closes l on the way out, also if srv was closed first.
+		if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("control: http: %v", err)
+		}
+	}()
+	return nil
+}
+
+// SocketHandler is Handler plus what only the owner-only socket may do.
+func (s *Server) SocketHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", s.Handler())
+	mux.HandleFunc("POST /v1/http", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Addr    string   `json:"addr"`
+			Origins []string `json:"origins"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			fail(w, http.StatusBadRequest, `send {"addr": "127.0.0.1:7481", "origins": [...]}`)
+			return
+		}
+		if err := s.EnableHTTP(req.Addr, req.Origins); err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	return mux
+}
+
+// startSavedHTTP reopens the port after a restart; a problem only warns, as the
+// socket works regardless.
+func (s *Server) startSavedHTTP() {
+	s.httpMu.Lock()
+	defer s.httpMu.Unlock()
+	c, err := s.loadHTTPConfig()
+	if err == nil && c != nil {
+		err = s.listenHTTP(c.Addr, c.Origins)
+	}
+	if err != nil {
+		log.Printf("control: http: %v", err)
+	}
+}
+
+func (s *Server) stopHTTP() {
+	s.httpMu.Lock()
+	defer s.httpMu.Unlock()
+	if s.httpSrv != nil {
+		_ = s.httpSrv.Close()
+		s.httpSrv, s.httpAddr = nil, ""
+	}
 }

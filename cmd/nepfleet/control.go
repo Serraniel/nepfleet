@@ -21,7 +21,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/control"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
@@ -55,6 +54,9 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, t)
 		return nil
 	}
+	if len(args) > 0 && args[0] == "http" {
+		return cmdControlHTTP(args[1:], stdout, stderr)
+	}
 	fs := flag.NewFlagSet("control", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	httpAddr := fs.String("http", "", "also listen on this loopback address for browsers, e.g. 127.0.0.1:7481")
@@ -63,35 +65,7 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return errors.New("usage: nepfleet control [--http ADDR --allowed-origins URLS] | control status | control token")
-	}
-	var httpSrv *http.Server
-	var httpGuard func(http.Handler) http.Handler
-	var httpL net.Listener
-	if *httpAddr != "" {
-		if err := control.CheckHTTPAddr(*httpAddr); err != nil {
-			return err
-		}
-		var allowed []string
-		for _, o := range strings.Split(*origins, ",") {
-			if o = strings.TrimSpace(o); o != "" {
-				if err := api.CheckOrigin(o); err != nil {
-					return fmt.Errorf("--allowed-origins: %w", err)
-				}
-				allowed = append(allowed, o)
-			}
-		}
-		token, err := control.LoadHTTPToken(controlDir())
-		if err != nil {
-			return err
-		}
-		lc := net.ListenConfig{}
-		if httpL, err = lc.Listen(context.Background(), "tcp", *httpAddr); err != nil {
-			return err
-		}
-		defer func() { _ = httpL.Close() }()
-		httpSrv = &http.Server{ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
-		httpGuard = func(h http.Handler) http.Handler { return control.Guard(h, *httpAddr, token, allowed) }
+		return errors.New("usage: nepfleet control [--http ADDR --allowed-origins URLS] | control http ADDR --allowed-origins URLS | control status | control token")
 	}
 	l, err := control.Listen(controlSocket())
 	if err != nil {
@@ -108,12 +82,54 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if httpSrv != nil {
-		httpSrv.Handler = httpGuard(s.Handler())
+	if *httpAddr != "" {
+		// Before listening on the socket's clients: a bad flag stops the start.
+		if err := os.MkdirAll(controlDir(), 0o700); err != nil {
+			return err
+		}
+		if err := s.EnableHTTP(*httpAddr, splitOrigins(*origins)); err != nil {
+			return err
+		}
 		fmt.Fprintf(stderr, "nepfleet control also on http://%s (token: nepfleet control token)\n", *httpAddr)
 	}
 	fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
-	return s.Serve(ctx, l, httpSrv, httpL)
+	return s.Serve(ctx, l)
+}
+
+func splitOrigins(s string) []string {
+	var out []string
+	for _, o := range strings.Split(s, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// cmdControlHTTP turns on the port for browsers in a running daemon (starting
+// it if needed), without touching its tunnels. It is remembered.
+func cmdControlHTTP(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("control http", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	origins := fs.String("allowed-origins", "", "comma separated origins of the web UI; added to those allowed already")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return errors.New("usage: nepfleet control http 127.0.0.1:7481 --allowed-origins URLS")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := ensureControl(ctx); err != nil {
+		return err
+	}
+	body := map[string]any{"addr": pos[0], "origins": splitOrigins(*origins)}
+	if err := controlCall(ctx, http.MethodPost, "/v1/http", body, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "http://%s\n", pos[0])
+	return nil
 }
 
 func controlClient() *http.Client {
