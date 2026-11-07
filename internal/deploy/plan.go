@@ -156,10 +156,11 @@ func PlanStack(name, mode, dir string, out *render.Output, pins map[string]strin
 	return p, nil
 }
 
-// masked hides secret values of an env file, in old and new content alike.
+// masked hides secret values of an env file, in old and new content alike,
+// and the current secret values wherever another file contains them.
 func masked(out *render.Output, path string, content []byte) []byte {
 	if path != render.EnvFile {
-		return content
+		return out.MaskSecrets(content)
 	}
 	var b strings.Builder
 	for _, line := range strings.SplitAfter(string(content), "\n") {
