@@ -26,6 +26,23 @@ Requests carry an [API token](security.md#api-tokens): `Authorization: Bearer nf
 - **One operation at a time:** plans fetch template sources and render, so they run one after another.
 - **Errors:** a stack that can't be read gets `500` with a generic message. The details (paths, git output) only go to the server's log.
 
+## Signing in
+
+People sign in with passkeys. Turn them on with `serve --passkey-domain fleet.example.org`; `--passkey-origins` lists the web UI's exact origins, by default `https://<domain>`.
+
+1. **First user:** with no users yet, the server prints a one-time setup token to its log. `POST /api/v1/auth/setup/begin` takes it with a name, and `…/setup/finish?ceremony=ID` registers the passkey and signs in.
+2. **Signing in:** `POST /api/v1/auth/login/begin`, then `…/login/finish?ceremony=ID`. It asks for no name, so it doesn't reveal who has an account.
+3. **More devices:** `POST /api/v1/auth/passkeys/begin` and `…/finish`, signed in. Register a second one: a lost passkey is otherwise only recovered on the server.
+4. **`GET /api/v1/auth/status`** says whether setup is needed and who is signed in. **`POST /api/v1/auth/logout`** signs out.
+
+- **Sessions:** a cookie that's `HttpOnly`, `Secure` and `SameSite=Strict`, lasting 12 hours. They're kept in memory as hashes, so a restart signs everyone out.
+- **Same site:** the UI and the API must be on the same site (`ui.example.org` and `api.example.org` are), or the browser won't send the cookie. Changes also need an allowed `Origin`.
+- **A person can do everything,** on every stack, and is named as the author of commits. Tokens stay for programs. A request with a bearer token ignores any cookie.
+- **Removing a user** ends their sessions at once.
+- **Lost a passkey:** on the server, `nepfleet user remove NAME` and restart. With no users left, a new setup token is printed.
+- **Lockout:** failed sign-ins count towards the same lockout as tokens. As with tokens, a real passkey gets through from a locked-out address; guessing the setup token doesn't.
+- **PIN or biometric:** passkeys must verify the user, as they are the only factor. A security key without a PIN is refused.
+
 ## TLS
 
 Tokens must not cross a network in the clear, so a plain-HTTP address beyond loopback is refused. Choose one:

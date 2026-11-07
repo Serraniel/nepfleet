@@ -12,7 +12,7 @@ NepFleet controls Docker, and **Docker access is root access** to the host. A co
 
 ## Exposing the API
 
-The API has no sign-in for people yet, only [API tokens](#api-tokens), so **don't expose it to the internet**. Use it from loopback, the LAN or a VPN.
+Sign-in with passkeys is new and has no second factor or OIDC yet, so **think twice before exposing it to the internet**. Loopback, the LAN or a VPN are safer.
 
 Before it can be public, it needs:
 
@@ -20,9 +20,10 @@ Before it can be public, it needs:
 |---|---|
 | TLS, terminated by NepFleet or a reverse proxy | Done: plain HTTP beyond loopback is refused ([TLS](api.md#tls)) |
 | CORS allowlist with exact origins; `*` is rejected at start | Done |
-| Lockout after failed authentication | Done for tokens; sign-in endpoints will need it too |
-| Passkeys with TOTP as a fallback, or OIDC ([#33](https://github.com/Serraniel/nepfleet/issues/33), [#34](https://github.com/Serraniel/nepfleet/issues/34)) | Not yet |
-| Every state change recorded as a commit by the authenticated person ([#37](https://github.com/Serraniel/nepfleet/issues/37)) | Partly: rollbacks and what applies write are commits, authored by the token's name, not yet a person |
+| Lockout after failed authentication | Done, for tokens and sign-in |
+| Passkeys ([#33](https://github.com/Serraniel/nepfleet/issues/33)) | [Done](api.md#signing-in) |
+| TOTP as a fallback ([#33](https://github.com/Serraniel/nepfleet/issues/33)), or OIDC ([#34](https://github.com/Serraniel/nepfleet/issues/34)) | Not yet |
+| Every state change recorded as a commit by the authenticated person ([#37](https://github.com/Serraniel/nepfleet/issues/37)) | Partly: rollbacks and what applies write are commits, authored by the person or token. An apply with nothing to record makes none. |
 | The server refusing to start publicly without the above | Not yet: there is no "public" mode to refuse |
 
 ## API tokens
@@ -50,6 +51,8 @@ Reviewed against the code on 2026-11-07. It covers what exists: one server on on
 
 | Attacker | What stops them | What remains |
 |---|---|---|
+| Someone reading the server's log before setup | The token is one-time, and only works while no user exists. | **Whoever reads the log first can create the first user:** complete setup right after starting. |
+| A phishing site | Passkeys are bound to the site's domain, so they don't work on a look-alike. | Nothing specific. |
 | Someone on the network without a token | Every endpoint but `/healthz` and `/api/v1/info` needs one. Tokens have 256 random bits. TLS beyond loopback. Lockout. | `/api/v1/info` shows the server's name and version; `--name` changes the name. |
 | A stolen `read` token | Plans mask secrets. No changes possible. Expiry, and `--stack` limits. | It reads the fleet's structure, images and non-secret values. Revoke it with `nepfleet token revoke`. |
 | A stolen `apply` token | Only what is in the fleet repository gets applied, and destructive changes need confirming. The server log records each apply. | **It can redeploy, and by timing it, disrupt stacks.** It can't add code, because the API can't edit the repository. Job logs show server paths. |
@@ -62,7 +65,7 @@ Reviewed against the code on 2026-11-07. It covers what exists: one server on on
 **Known gaps to accept or fix:**
 
 - **Token files and the key sit together:** whoever reads the state directory can test token guesses and read the fleet's plans. It is the same trust as the server's own user.
-- **An apply with nothing to record makes no commit:** the server log is what records who applied, and it can be edited by whoever runs the server. Commits name the token, and the person comes with sign-in ([#37](https://github.com/Serraniel/nepfleet/issues/37)).
+- **An apply with nothing to record makes no commit:** the server log is what records who applied, and it can be edited by whoever runs the server. ([#37](https://github.com/Serraniel/nepfleet/issues/37)).
 - **Commit authenticity:** NepFleet applies what is in the working tree, and doesn't verify commit signatures of the fleet repository.
 - **Images:** they are pinned by digest once applied, but signatures aren't verified before updating.
 

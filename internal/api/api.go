@@ -60,6 +60,8 @@ type Options struct {
 	// Tokens authenticate requests; nil refuses everything but the open
 	// endpoints.
 	Tokens *auth.Store
+	// Accounts lets people sign in with passkeys; nil means tokens only.
+	Accounts *Accounts
 	// TrustedProxies are reverse proxies whose X-Forwarded-For names the
 	// client (for the lockout after failed logins).
 	TrustedProxies []*net.IPNet
@@ -98,7 +100,7 @@ func Handler(o Options) http.Handler {
 		writeJSON(w, o.Info)
 	})
 	l := newLimiter()
-	mux.HandleFunc("GET /api/v1/stacks", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/v1/stacks", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		if o.Stacks == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
@@ -117,7 +119,7 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, out)
 	}))
-	mux.HandleFunc("GET /api/v1/stacks/{name}/plan", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, forStack(auth.ScopeRead, func(w http.ResponseWriter, r *http.Request, name string) {
+	mux.HandleFunc("GET /api/v1/stacks/{name}/plan", requireAuth(o, l, auth.ScopeRead, forStack(auth.ScopeRead, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.Plan == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
@@ -128,7 +130,7 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, p)
 	})))
-	mux.HandleFunc("GET /api/v1/templates", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/v1/templates", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		if o.Templates == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
@@ -139,7 +141,7 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, c)
 	}))
-	mux.HandleFunc("GET /api/v1/events", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/v1/events", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		if o.Events == nil {
 			http.Error(w, "no events", http.StatusServiceUnavailable)
 			return
@@ -165,7 +167,7 @@ func Handler(o Options) http.Handler {
 		writeJSON(w, ev)
 	}))
 	js := newJobs()
-	mux.HandleFunc("POST /api/v1/stacks/{name}/apply", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
+	mux.HandleFunc("POST /api/v1/stacks/{name}/apply", requireAuth(o, l, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.StartApply == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
@@ -195,7 +197,7 @@ func Handler(o Options) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, job)
 	})))
-	mux.HandleFunc("POST /api/v1/stacks/{name}/rollback", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
+	mux.HandleFunc("POST /api/v1/stacks/{name}/rollback", requireAuth(o, l, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.StartRollback == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
@@ -225,7 +227,7 @@ func Handler(o Options) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, job)
 	})))
-	mux.HandleFunc("GET /api/v1/jobs/{id}", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
 		t, _ := TokenFrom(r.Context())
 		if !ok || !t.Allows(auth.ScopeRead, job.Stack) {
@@ -234,7 +236,7 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, job)
 	}))
-	mux.HandleFunc("GET /api/v1/stacks/{name}/history", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, forStack(auth.ScopeRead, func(w http.ResponseWriter, r *http.Request, name string) {
+	mux.HandleFunc("GET /api/v1/stacks/{name}/history", requireAuth(o, l, auth.ScopeRead, forStack(auth.ScopeRead, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.History == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
@@ -254,6 +256,9 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, h)
 	})))
+	if o.Accounts != nil {
+		o.Accounts.routes(mux, l, o, o.sessionOrigins())
+	}
 	return secure(cors(o.AllowedOrigins, mux))
 }
 
@@ -305,6 +310,15 @@ func CheckOrigin(o string) error {
 		return fmt.Errorf("%q is not an exact origin such as https://ui.example.org", o)
 	}
 	return nil
+}
+
+// sessionOrigins may use a session: the allowed origins and the passkey origins.
+func (o Options) sessionOrigins() []string {
+	out := slices.Clone(o.AllowedOrigins)
+	if o.Accounts != nil && o.Accounts.WebAuthn != nil {
+		out = append(out, o.Accounts.WebAuthn.Config.RPOrigins...)
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
