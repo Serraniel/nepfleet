@@ -146,6 +146,9 @@ func Render(in Input) (*Output, error) {
 	if compose, err = WithBlockedHosts(compose, fleet.BlockedHosts(in.Fleet, in.Stack)); err != nil {
 		return nil, fmt.Errorf("compose file: %w", err)
 	}
+	if compose, err = enforceEgress(compose, in, env); err != nil {
+		return nil, fmt.Errorf("compose file: %w", err)
+	}
 	if l := fleet.EffectiveLogging(in.Fleet, in.Stack); l != nil {
 		if compose, err = WithLogging(compose, l); err != nil {
 			return nil, fmt.Errorf("compose file: %w", err)
