@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,7 +21,7 @@ import (
 
 // cmdRemote: nepfleet remote probe <address>.
 func cmdRemote(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: nepfleet remote probe ssh://[user@]host[:port] [--json] [--ssh-config FILE] | nepfleet remote add|list|refresh|connect|disconnect|remove"
+	const usage = "usage: nepfleet remote probe ssh://[user@]host[:port] [--json] [--security] [--ssh-config FILE] | nepfleet remote add|list|refresh|connect|disconnect|remove"
 	if len(args) > 0 && (args[0] == "add" || args[0] == "list" || args[0] == "refresh" || args[0] == "remove" || args[0] == "connect" || args[0] == "disconnect") {
 		return cmdRemoteManage(args[0], args[1:], stdout, stderr)
 	}
@@ -30,6 +32,7 @@ func cmdRemote(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "print the result as JSON")
 	config := fs.String("ssh-config", "", "ssh config file instead of ~/.ssh/config")
+	security := fs.Bool("security", false, "also check its security: SSH, firewall, exposed ports, updates, Docker")
 	pos, err := parseInterspersed(fs, args[1:])
 	if err != nil {
 		return err
@@ -45,19 +48,34 @@ func cmdRemote(args []string, stdout, stderr io.Writer) error {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	r, err := remote.Probe(ctx, remote.SSH{ConfigFile: *config}.Run, t)
+	ssh := remote.SSH{ConfigFile: *config}
+	r, err := remote.Probe(ctx, ssh.Run, t)
 	if err != nil {
 		return err
+	}
+	var findings []remote.Finding
+	if *security {
+		findings, err = remote.CheckSecurity(ctx, func(ctx context.Context, script string) ([]byte, error) {
+			return ssh.Run(ctx, t, script)
+		})
+		if err != nil {
+			return err
+		}
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(struct {
 			*remote.Report
-			Next string `json:"next"`
-		}{r, r.Next()})
+			Next     string           `json:"next"`
+			Security []remote.Finding `json:"security,omitempty"`
+		}{r, r.Next(), findings})
 	}
 	printReport(stdout, r)
+	if *security {
+		fmt.Fprintln(stdout, "\nSecurity:")
+		remote.PrintFindings(stdout, findings)
+	}
 	return nil
 }
 
@@ -102,4 +120,20 @@ func noneIfEmpty(s string) string {
 		return "none"
 	}
 	return s
+}
+
+// localSecurity is nepfleet doctor --security: the same check on this host.
+func localSecurity(stdout io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	findings, err := remote.CheckSecurity(ctx, func(ctx context.Context, script string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "sh", "-s")
+		cmd.Stdin = strings.NewReader(script)
+		return cmd.Output()
+	})
+	if err != nil {
+		return err
+	}
+	remote.PrintFindings(stdout, findings)
+	return nil
 }

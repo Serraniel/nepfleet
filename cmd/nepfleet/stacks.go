@@ -1455,8 +1455,12 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	c.register(fs)
+	security := fs.Bool("security", false, "check this host's security instead: SSH, firewall, exposed ports, updates, Docker")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *security {
+		return localSecurity(stdout)
 	}
 	e, err := c.open()
 	if err != nil {
