@@ -252,3 +252,49 @@ func TestStorageValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestHostsAndPorts(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(skeleton["fleet.yaml"]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"hosts", "stacks/a", "stacks/b"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	must := func(path, content string) {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	must("hosts/nas.yaml", "apiVersion: nepfleet/v1alpha1\nkind: Host\nmetadata: {name: nas}\nspec: {address: nas.local, ports: {from: 8060, to: 8062}, updates: {enabled: true, schedule: \"Sun 03:00\", reboot: when-required}}\n")
+	stack := func(name, extra string) string {
+		return "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: " + name + "}\nspec:\n  target: nas\n" + extra
+	}
+	must("stacks/a/stack.yaml", stack("a", "  access: {mode: port, port: 8060}\n"))
+	must("stacks/b/stack.yaml", stack("b", ""))
+	must("stacks/a/compose.yaml", "services: {}\n")
+	must("stacks/b/compose.yaml", "services: {}\n")
+	f, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := f.LoadHost("nas")
+	if err != nil || h.Spec.Address != "nas.local" || h.PortRange().From != 8060 {
+		t.Fatalf("host: %+v %v", h, err)
+	}
+	if p, err := f.FreePort("nas"); err != nil || p != 8061 {
+		t.Errorf("free port = %d, %v", p, err)
+	}
+	if h, err := f.LoadHost("other"); err != nil || h.Spec.Address != "other" || h.PortRange() != DefaultPorts {
+		t.Errorf("a host without a file: %+v %v", h, err)
+	}
+	if _, err := f.LoadHost("../x"); err == nil {
+		t.Error("a host name with a path must be refused")
+	}
+	must("stacks/b/stack.yaml", stack("b", "  access: {mode: port, port: 80}\n"))
+	if _, err := f.LoadStack("b"); err == nil {
+		t.Error("a port below 1024 must be refused")
+	}
+}

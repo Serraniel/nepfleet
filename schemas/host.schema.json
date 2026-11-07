@@ -1,0 +1,113 @@
+{
+  "$id": "https://raw.githubusercontent.com/Serraniel/nepfleet/main/schemas/host.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Host is hosts/<name>.yaml: what NepFleet knows about one machine.",
+  "properties": {
+    "apiVersion": {
+      "const": "nepfleet/v1alpha1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Host",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "spec": {
+      "additionalProperties": false,
+      "description": "HostSpec describes a host.",
+      "properties": {
+        "address": {
+          "description": "Address is how devices on the LAN reach the host (a name such as nas.local, or an IP), used in the URLs of stacks published on a port.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "ports": {
+          "additionalProperties": false,
+          "description": "Ports is the range NepFleet picks LAN ports from for stacks with access mode port.",
+          "properties": {
+            "from": {
+              "type": "integer"
+            },
+            "to": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "updates": {
+          "additionalProperties": false,
+          "description": "Updates schedules OS updates of the host (see docs/host-updates.md).",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "reboot": {
+              "enum": [
+                "",
+                "never",
+                "when-required",
+                "always"
+              ],
+              "type": "string"
+            },
+            "schedule": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "security": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata"
+  ],
+  "title": "NepFleet hosts/<name>.yaml",
+  "type": "object"
+}

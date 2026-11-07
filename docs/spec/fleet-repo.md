@@ -20,7 +20,7 @@ tunnels/
 
 ## JSON Schemas
 
-`schemas/` in the nepfleet repository holds JSON Schemas for [`fleet.yaml`](../../schemas/fleet.schema.json), [`stack.yaml`](../../schemas/stack.schema.json) and [`template.yaml`](../../schemas/template.schema.json). They are generated from the Go types that parse these files, so they cannot drift (`go run ./tools/schema`; CI fails when they are stale), and each release attaches them. `nepfleet init`, `new` and `import` write a `# yaml-language-server: $schema=…` line, so editors with the YAML language server (VS Code, Neovim, Helix, Zed) complete and check fields as you type. `hosts/*.yaml` gets a schema once its format is implemented.
+`schemas/` in the nepfleet repository holds JSON Schemas for [`fleet.yaml`](../../schemas/fleet.schema.json), [`stack.yaml`](../../schemas/stack.schema.json) and [`template.yaml`](../../schemas/template.schema.json). They are generated from the Go types that parse these files, so they cannot drift (`go run ./tools/schema`; CI fails when they are stale), and each release attaches them. `nepfleet init`, `new` and `import` write a `# yaml-language-server: $schema=…` line, so editors with the YAML language server (VS Code, Neovim, Helix, Zed) complete and check fields as you type. `hosts/*.yaml` has [its own](../../schemas/host.schema.json).
 
 ## Logging
 
@@ -35,6 +35,38 @@ spec:
 ```
 
 Stack settings are merged over the fleet's field by field; json-file without options still gets the rotation defaults. Services that inherit `logging` through a merge key (`<<: *defaults`) keep it, services using `extends` are left alone (their base may set it), and services pulled in with a top-level `include:` are not changed. Imported stacks are adopted as they run, without these settings: their next apply recreates every service once.
+
+## Hosts and access modes
+
+`hosts/<name>.yaml` describes a host. Without a file, a host's address is its name, and it uses ports 8000–8999:
+
+```yaml
+apiVersion: nepfleet/v1alpha1
+kind: Host
+metadata:
+  name: nas
+spec:
+  address: nas.local            # how devices on the LAN reach it (a name or an IPv4 address)
+  ports: {from: 8000, to: 8999} # LAN ports NepFleet hands out to stacks
+```
+
+A stack's web UI is reached through Caddy on its domain (the default), or on a port of the host on the LAN:
+
+```yaml
+spec:
+  access: {mode: port, port: 8060}   # mode: domain (default) | port
+```
+
+- **Port mode:**
+  - The template's web service is published on that port, and its Caddy labels are dropped, so it has no route through the ingress.
+  - Templates that ask for a `DOMAIN` get the host's address there.
+  - `${NEPFLEET_URL}` is `http://<address>:<port>`.
+- **Domain mode:** `${NEPFLEET_URL}` is `https://<DOMAIN>`.
+- **Creating a stack:** `nepfleet new <template> --access port` picks the lowest port in the host's range that no stack on it uses, or takes `--port N`. It doesn't ask for a domain.
+- **Conflicts:** two stacks on one host with the same port make `plan` and `apply` fail.
+- **Which templates:** only templates that declare their web UI (`spec.web`) can use port mode, and not when that service uses the host's network.
+- **No ingress at all:** in port mode, the Caddy labels of every service of the stack are dropped.
+- **Swarm:** port mode is for compose stacks for now.
 
 ## Network storage
 
