@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Serraniel/nepfleet/internal/auth"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -63,6 +64,11 @@ type Options struct {
 	// Plan is what applying a stack would change (deploy.Plan, secrets
 	// masked).
 	Plan func(ctx context.Context, stack string) (any, error)
+	// StartApply checks that the stack's plan still has the ID the client
+	// reviewed (and that destructive changes are confirmed) and returns the
+	// apply to run in the background. Errors: ErrNotFound, ErrBusy,
+	// ErrPlanChanged, ErrNeedsConfirm.
+	StartApply func(ctx context.Context, stack, planID string, confirmDestructive bool, by string) (func(log io.Writer) error, error)
 	// History lists the last n commits of a stack, newest first.
 	History func(ctx context.Context, stack string, n int) ([]HistoryEntry, error)
 	// Stacks lists the fleet's stacks.
@@ -112,6 +118,46 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, p)
 	})))
+	js := newJobs()
+	mux.HandleFunc("POST /api/v1/stacks/{name}/apply", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
+		if o.StartApply == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		var req struct {
+			Plan               string `json:"plan"`
+			ConfirmDestructive bool   `json:"confirmDestructive"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil || req.Plan == "" {
+			http.Error(w, `send {"plan": "<id of the reviewed plan>"}`, http.StatusBadRequest)
+			return
+		}
+		t, _ := TokenFrom(r.Context())
+		run, err := o.StartApply(r.Context(), name, req.Plan, req.ConfirmDestructive, t.Name)
+		switch {
+		case errors.Is(err, ErrBusy), errors.Is(err, ErrPlanChanged), errors.Is(err, ErrNeedsConfirm):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case writeErr(w, err):
+			return
+		}
+		log.Printf("api: %s applies %s (token %s)", t.Name, name, t.ID)
+		job := js.start("apply", name, t.Name, func(l *jobLog) error { return run(l) })
+		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, job)
+	})))
+	mux.HandleFunc("GET /api/v1/jobs/{id}", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+		job, ok := js.get(r.PathValue("id"))
+		t, _ := TokenFrom(r.Context())
+		if !ok || !t.Allows(auth.ScopeRead, job.Stack) {
+			http.Error(w, "no such job", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, job)
+	}))
 	mux.HandleFunc("GET /api/v1/stacks/{name}/history", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, forStack(auth.ScopeRead, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.History == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
@@ -161,6 +207,9 @@ func writeErr(w http.ResponseWriter, err error) bool {
 		return false
 	case errors.Is(err, ErrNotFound):
 		http.Error(w, ErrNotFound.Error(), http.StatusNotFound)
+	case errors.Is(err, ErrBusy):
+		w.Header().Set("Retry-After", "10")
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 	default:
 		log.Printf("api: %v", err)
 		http.Error(w, "the stack cannot be read; see the server log", http.StatusInternalServerError)

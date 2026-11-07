@@ -6,7 +6,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,6 +29,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/Serraniel/nepfleet/internal/api"
+	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
@@ -277,6 +280,10 @@ func serve(args []string, stderr io.Writer) error {
 		}
 	}
 	c := common{fleetDir: *fleetDir, stateDir: *stateDir, host: *host}
+	// A stop signal does not cancel an apply: stopped halfway, a stack stays
+	// half updated. Only a second signal does.
+	applyCtx, abortApply := context.WithCancel(context.Background())
+	defer abortApply()
 	srv := api.Server(*addr, api.Options{
 		Info:           api.Info{Name: *name, Version: version, APIVersion: "v1"},
 		AllowedOrigins: allowed,
@@ -284,15 +291,20 @@ func serve(args []string, stderr io.Writer) error {
 		TrustedProxies: trustedNets,
 		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
 		Plan: func(_ context.Context, stack string) (any, error) {
+			if !apiMu.TryLock() {
+				return nil, api.ErrBusy
+			}
+			defer apiMu.Unlock()
 			return withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
 				p, err := e.prepare(s)
 				if err != nil {
 					return nil, err
 				}
-				pl := *p.plan
-				pl.Dir = "" // the server's paths are none of the client's business
-				return &pl, nil
+				return apiPlanOf(p.plan)
 			})
+		},
+		StartApply: func(_ context.Context, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
+			return startApply(applyCtx, c, stack, planID, confirm, by)
 		},
 		History: func(_ context.Context, stack string, n int) ([]api.HistoryEntry, error) {
 			h, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) { return e.history(s, n) })
@@ -316,16 +328,49 @@ func serve(args []string, stderr io.Writer) error {
 	}()
 	fmt.Fprintf(stderr, "nepfleet API listening on %s\n", *addr)
 
+	var serveErr error
 	select {
-	case err := <-errc:
-		return err
+	case serveErr = <-errc:
 	case <-ctx.Done():
+		// A second signal aborts a running apply, also one during the shutdown.
+		again := make(chan os.Signal, 1)
+		signal.Notify(again, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(again)
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdown); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
+			// A client holding its connection open must not cut an apply short.
+			fmt.Fprintf(stderr, "closing connections: %v\n", err)
+			_ = srv.Close()
 		}
+		return waitForApply(again, abortApply, stderr)
+	}
+	// The listener failed: nothing new comes in, but an apply still finishes.
+	if err := waitForApply(make(chan os.Signal), abortApply, stderr); err != nil {
+		return errors.Join(serveErr, err)
+	}
+	return serveErr
+}
+
+// waitForApply lets a running apply finish; its health gate and rollback bound
+// it. A signal on again aborts it.
+func waitForApply(again <-chan os.Signal, abort func(), stderr io.Writer) error {
+	if apiMu.TryLock() {
 		return nil
+	}
+	fmt.Fprintln(stderr, "waiting for the running apply to finish (stop again to abort it)")
+	done := make(chan struct{})
+	go func() { apiMu.Lock(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-again:
+		abort()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+		}
+		return errors.New("stopped during an apply; check the stack with nepfleet plan")
 	}
 }
 
@@ -338,14 +383,92 @@ func hostname() string {
 }
 
 // apiMu runs one fleet operation of the API at a time: plans fetch template
-// sources and render into shared directories.
+// sources and render into shared directories, applies change the host.
+// Requests that find it taken are refused at once (busy), not queued.
 var apiMu sync.Mutex
 
+// apiPlan is a plan as the API returns it: with an ID the client sends back
+// to apply exactly what it reviewed.
+type apiPlan struct {
+	*deploy.Plan
+	ID string `json:"id"`
+}
+
+// secretMark is a masked secret's keyed mark in a plan diff.
+var secretMark = regexp.MustCompile(`•••••• \([0-9a-f]+\)`)
+
+// apiPlanOf hides the server's paths and adds the plan's ID: a hash of
+// everything the client was shown (secret marks are keyed per process, so
+// a restart changes the ID and asks for a fresh review).
+func apiPlanOf(p *deploy.Plan) (*apiPlan, error) {
+	pl := *p
+	pl.Dir = "" // the server's paths are none of the client's business
+	raw, err := json.Marshal(&pl)
+	if err != nil {
+		return nil, err
+	}
+	// Secrets NepFleet generates are new on every plan, and so are their
+	// marks: the ID covers which secrets change, and ignores every mark. A
+	// secret that was already changing and changes again keeps the ID.
+	sum := sha256.Sum256(secretMark.ReplaceAll(raw, []byte("••••••")))
+	return &apiPlan{Plan: &pl, ID: hex.EncodeToString(sum[:16])}, nil
+}
+
+// checkReviewed refuses a plan other than the one the client reviewed, and
+// destructive changes it did not confirm.
+func checkReviewed(p *deploy.Plan, planID string, confirm bool) error {
+	ap, err := apiPlanOf(p)
+	if err != nil {
+		return err
+	}
+	switch {
+	case ap.ID != planID:
+		return api.ErrPlanChanged
+	case len(p.Destructive) > 0 && !confirm:
+		return api.ErrNeedsConfirm
+	}
+	return nil
+}
+
+// startApply answers at once whether the plan is still the reviewed one, and
+// returns the apply to run as a job. The job checks again, on the very plan
+// it applies: the repository can change in between (a pull, the CLI). The API
+// lock is held until the job ends; ctx ends only when serve is told to abort.
+func startApply(ctx context.Context, c common, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
+	if !apiMu.TryLock() {
+		return nil, api.ErrBusy
+	}
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			apiMu.Unlock() // also on a panic, which net/http would swallow
+		}
+	}()
+	if _, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
+		p, err := e.prepare(s)
+		if err != nil {
+			return nil, err
+		}
+		return nil, checkReviewed(p.plan, planID, confirm)
+	}); err != nil {
+		return nil, err
+	}
+	handedOver = true
+	return func(log io.Writer) error {
+		defer apiMu.Unlock()
+		fmt.Fprintf(log, "apply %s, requested by %s over the API\n", stack, by)
+		o := applyOptions{yes: true, wait: 3 * time.Minute, check: func(p *deploy.Plan) error { return checkReviewed(p, planID, confirm) }}
+		if confirm {
+			o.confirm = []string{stack} // checked above: only what the client saw
+		}
+		return runApply(ctx, c, []string{stack}, o, log, log)
+	}, nil
+}
+
 // withStack opens the fleet fresh (edits and pulls show without a restart)
-// and runs fn on one of its stacks; an unknown stack is api.ErrNotFound.
+// and runs fn on one of its stacks; an unknown stack is api.ErrNotFound. It
+// takes no lock: history only reads git and may run during an apply.
 func withStack(c common, name string, fn func(*env, *fleet.Stack) (any, error)) (any, error) {
-	apiMu.Lock()
-	defer apiMu.Unlock()
 	e, err := c.open()
 	if err != nil {
 		return nil, err
