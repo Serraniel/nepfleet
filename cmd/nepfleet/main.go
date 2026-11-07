@@ -324,6 +324,9 @@ func serve(args []string, stderr io.Writer) error {
 		Events: func(after int64, limit int, allow func(string) bool) (any, error) {
 			return eventStore(*stateDir).After(after, limit, func(e events.Event) bool { return allow(e.Stack) })
 		},
+		StartRollback: func(_ context.Context, stack, commit string, confirm bool, by string) (func(io.Writer) error, error) {
+			return startRollback(applyCtx, c, stack, commit, confirm, by)
+		},
 		StartApply: func(_ context.Context, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
 			return startApply(applyCtx, c, stack, planID, confirm, by)
 		},
@@ -403,6 +406,9 @@ func hostname() string {
 	return h
 }
 
+// applyWait is the health gate of an apply over the API.
+const applyWait = 3 * time.Minute
+
 // apiMu runs one fleet operation of the API at a time: plans fetch template
 // sources and render into shared directories, applies change the host.
 // Requests that find it taken are refused at once (busy), not queued.
@@ -478,11 +484,13 @@ func startApply(ctx context.Context, c common, stack, planID string, confirm boo
 	return func(log io.Writer) error {
 		defer apiMu.Unlock()
 		fmt.Fprintf(log, "apply %s, requested by %s over the API\n", stack, by)
-		o := applyOptions{yes: true, wait: 3 * time.Minute, check: func(p *deploy.Plan) error { return checkReviewed(p, planID, confirm) }}
+		o := applyOptions{yes: true, wait: applyWait, check: func(p *deploy.Plan) error { return checkReviewed(p, planID, confirm) }}
 		if confirm {
 			o.confirm = []string{stack} // checked above: only what the client saw
 		}
-		return runApply(ctx, c, []string{stack}, o, log, log)
+		err := runApply(ctx, c, []string{stack}, o, log, log)
+		commitAPIApply(c, stack, by, log)
+		return err
 	}, nil
 }
 
