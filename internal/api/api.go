@@ -2,12 +2,15 @@
 
 // Package api serves the optional HTTP API used by nepfleet-ui.
 //
-// Only unauthenticated, read-only endpoints exist so far. Everything that can
-// change state lands behind authentication (milestone "API & security").
+// /healthz and /api/v1/info are open; everything else needs a bearer token
+// (internal/auth) with a fitting scope. Sign-in for people (passkeys, OIDC)
+// comes with the milestone "API & security".
 package api
 
 import (
 	"encoding/json"
+	"github.com/Serraniel/nepfleet/internal/auth"
+	"net"
 	"net/http"
 	"slices"
 	"time"
@@ -20,9 +23,27 @@ type Info struct {
 	APIVersion string `json:"apiVersion"`
 }
 
+// StackInfo is a stack as GET /api/v1/stacks lists it.
+type StackInfo struct {
+	Name     string `json:"name"`
+	Target   string `json:"target"`
+	Mode     string `json:"mode"`
+	Apply    string `json:"apply"`
+	Template string `json:"template,omitempty"` // source/name@version
+	Updates  string `json:"updates"`
+}
+
 // Options configure the API server.
 type Options struct {
 	Info Info
+	// Tokens authenticate requests; nil refuses everything but the open
+	// endpoints.
+	Tokens *auth.Store
+	// TrustedProxies are reverse proxies whose X-Forwarded-For names the
+	// client (for the lockout after failed logins).
+	TrustedProxies []*net.IPNet
+	// Stacks lists the fleet's stacks.
+	Stacks func() ([]StackInfo, error)
 	// AllowedOrigins are the frontends allowed to call this backend from a
 	// browser. Empty means same-origin only. "*" is never accepted.
 	AllowedOrigins []string
@@ -35,10 +56,34 @@ func Handler(o Options) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/v1/info", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(o.Info)
+		writeJSON(w, o.Info)
 	})
+	l := newLimiter()
+	mux.HandleFunc("GET /api/v1/stacks", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+		if o.Stacks == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		all, err := o.Stacks()
+		if err != nil {
+			http.Error(w, "the fleet cannot be read", http.StatusInternalServerError)
+			return
+		}
+		t, _ := TokenFrom(r.Context())
+		out := []StackInfo{}
+		for _, s := range all {
+			if t.Allows(auth.ScopeRead, s.Name) {
+				out = append(out, s)
+			}
+		}
+		writeJSON(w, out)
+	}))
 	return secure(cors(o.AllowedOrigins, mux))
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // Server wraps Handler with conservative timeouts.
