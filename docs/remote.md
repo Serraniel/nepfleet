@@ -27,6 +27,25 @@ It lists the worst first: password or root login over SSH, whether a firewall ru
 - **Honest about limits:** what this user can't read shows as `?`, never as fine. It looks at the first matching SSH setting in the config files, not at what `sshd` would resolve, and "listening" doesn't say whether your router or provider lets traffic through.
 - **Fixing:** it only reports; applying changes comes with `nepfleet host bootstrap` (#15).
 
+## Preparing a machine
+
+```sh
+nepfleet host bootstrap ssh://me@server --fleet ~/fleet
+```
+
+It probes the machine and shows a plan, with every step that runs as root marked, then asks. `--yes` skips the question. What it can do:
+
+- Install Docker and the Compose plugin from the distribution's own packages (Arch, Debian, Ubuntu, Raspberry Pi OS, Fedora). On other systems it says so, and you install them yourself.
+- Start Docker, now and at boot.
+- Add your user to the `docker` group, which is effectively root on that host.
+- Create the fleet's ingress network, and add the machine to `hosts/`.
+
+- **Root:** it needs root or passwordless `sudo`. NepFleet never types a password.
+- **Failures:** it stops at the first failed step. Steps can be run again safely.
+- **Arch:** no `pacman -Sy`, as partial upgrades break Arch. If the package database is too old, update the system first.
+
+The SSH, firewall and update fixes from the security check come later.
+
 ## The control daemon
 
 `nepfleet control` is a small service on your own machine that remembers your remotes and will own the connections to them. Clients talk to it, so closing one changes nothing. `nepfleet remote` starts it when it isn't running, and it keeps running afterwards.
