@@ -22,6 +22,23 @@ These are required, and the server refuses to start without them once the API is
 
 Every state change is a git commit that records the authenticated user, which gives an audit log you cannot silently edit.
 
+## API tokens
+
+Programs authenticate with API tokens: scripts, CI, a Homepage widget, the UI while it is being developed. People sign in with passkeys or OIDC.
+
+```sh
+nepfleet token create --name ci --scope read --stack web,db --expires 30d   # prints the token once
+nepfleet token list
+nepfleet token revoke <id>
+```
+
+- **Scopes:** `read` (stacks, plans, history), `apply` (also apply and roll back), `admin` (also tokens and settings). Each includes the ones before it, and `--stack` limits a token to some stacks.
+- **Expiry:** every token has one.
+- **Storage:** tokens look like `nft_…`, so secret scanners can find leaked ones. Only an HMAC of each token is stored, in `<state>/api/tokens.json`, with a key kept next to it (`token.key`). Both files are owner-only. The file alone doesn't let anyone test guesses.
+- **Requests:** `Authorization: Bearer nft_…`. Missing, unknown and expired tokens get the same `401`.
+- **Lockout:** after 10 failures in a minute, the client address gets `429` for a minute.
+- **Open endpoints:** only `/healthz` and `/api/v1/info`.
+
 ## Reporting
 
 See [SECURITY.md](../SECURITY.md).

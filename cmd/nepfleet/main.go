@@ -60,6 +60,7 @@ Usage:
   nepfleet template index <root>        print index.json, the catalogue of the templates under root
   nepfleet template match <stack>       which catalogue template covers a plain stack, and how they differ
   nepfleet serve [flags]                run the optional HTTP API
+  nepfleet token create|list|revoke     API tokens for scripts and CI (scoped, expiring, stored hashed)
   nepfleet version                      print the version
 
 Stack commands take --fleet <dir> (default .), --state <dir> and --host <name>.
@@ -128,6 +129,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdHistory(args[1:], stdout, stderr)
 	case "watch":
 		return cmdWatch(args[1:], stdout, stderr)
+	case "token":
+		return cmdToken(args[1:], stdout, stderr)
 	case "notify":
 		return cmdNotify(args[1:], stdout, stderr)
 	case "restore":
@@ -228,6 +231,8 @@ func serve(args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("listen", "127.0.0.1:7480", "address to listen on")
+	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
+	stateDir := fs.String("state", envOr("NEPFLEET_STATE", defaultState()), "state directory (API tokens live in <state>/api)")
 	name := fs.String("name", hostname(), "name shown to frontends")
 	origins := fs.String("allowed-origins", "", "comma separated frontend origins allowed via CORS")
 	if err := fs.Parse(args); err != nil {
@@ -248,6 +253,8 @@ func serve(args []string, stderr io.Writer) error {
 	srv := api.Server(*addr, api.Options{
 		Info:           api.Info{Name: *name, Version: version, APIVersion: "v1"},
 		AllowedOrigins: allowed,
+		Tokens:         tokenStore(*stateDir),
+		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -275,4 +282,26 @@ func hostname() string {
 		return "nepfleet"
 	}
 	return h
+}
+
+// stackInfos reads the fleet's stacks for the API, fresh on every request,
+// so edits and pulls show without a restart.
+func stackInfos(dir string) ([]api.StackInfo, error) {
+	f, err := fleet.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	all, err := f.Stacks()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.StackInfo, 0, len(all))
+	for _, s := range all {
+		si := api.StackInfo{Name: s.Metadata.Name, Target: s.Spec.Target, Mode: s.Spec.Mode, Apply: s.Spec.Apply, Updates: s.Spec.Updates}
+		if t := s.Spec.Template; t != nil {
+			si.Template = t.Source + "/" + t.Name + "@" + t.Version
+		}
+		out = append(out, si)
+	}
+	return out, nil
 }
