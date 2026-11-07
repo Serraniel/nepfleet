@@ -392,3 +392,27 @@ func TestCheckOrigin(t *testing.T) {
 		}
 	}
 }
+
+func TestTemplates(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	tok, _, err := store.Create("ui", auth.ScopeRead, []string{"web"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(Options{Tokens: store, Templates: func(context.Context) (any, error) {
+		return []map[string]string{{"source": "official"}}, nil
+	}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "official") {
+		t.Errorf("templates: %d %s", rec.Code, rec.Body)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/templates", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("without a token: %d", rec.Code)
+	}
+}
