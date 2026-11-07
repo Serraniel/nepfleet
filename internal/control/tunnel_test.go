@@ -235,7 +235,7 @@ func TestTunnels(t *testing.T) {
 
 func TestTokenLabel(t *testing.T) {
 	for host, want := range map[string]string{
-		"HyperNep":              "control-hypernep",
+		"MyHost":                "control-myhost",
 		"my.host_name":          "control-my-host-name",
 		"":                      "control",
 		"$(x)":                  "control---x",

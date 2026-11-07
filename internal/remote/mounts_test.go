@@ -11,9 +11,9 @@ import (
 
 func TestUnitName(t *testing.T) {
 	for path, want := range map[string]string{
-		"/mnt/share":       `mnt-share.mount`,
-		"/mnt/Titan-Media": `mnt-Titan\x2dMedia.mount`,
-		"/srv/a.b":         `srv-a.b.mount`,
+		"/mnt/share":    `mnt-share.mount`,
+		"/mnt/My-Media": `mnt-My\x2dMedia.mount`,
+		"/srv/a.b":      `srv-a.b.mount`,
 	} {
 		if got := UnitName(path, "mount"); got != want {
 			t.Errorf("%s: %s", path, got)

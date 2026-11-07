@@ -13,8 +13,8 @@ import (
 
 func TestNamedPaths(t *testing.T) {
 	f := &fleet.Fleet{}
-	f.Spec.Paths = map[string]string{"media": "/mnt/TitanMedia"}
-	if p, err := f.ResolvePath("@media"); err != nil || p != "/mnt/TitanMedia" {
+	f.Spec.Paths = map[string]string{"media": "/mnt/media"}
+	if p, err := f.ResolvePath("@media"); err != nil || p != "/mnt/media" {
 		t.Errorf("resolve: %q %v", p, err)
 	}
 	if p, _ := f.ResolvePath("/srv/x"); p != "/srv/x" {
@@ -44,7 +44,7 @@ func TestRenderResolvesNamedPaths(t *testing.T) {
 		{Name: "MEDIA", Type: "path"}, {Name: "HANDLE", Type: "string"}, {Name: "CACHE", Type: "path", Default: "@cache"},
 	}}}
 	f := &fleet.Fleet{}
-	f.Spec.Paths = map[string]string{"media": "/mnt/TitanMedia", "cache": "/srv/cache"}
+	f.Spec.Paths = map[string]string{"media": "/mnt/media", "cache": "/srv/cache"}
 	s := &fleet.Stack{}
 	s.Metadata.Name = "jf"
 	s.Spec.Values = fleet.Literals(map[string]string{"MEDIA": "@media", "HANDLE": "@me@social.example"})
@@ -53,7 +53,7 @@ func TestRenderResolvesNamedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := EnvValues(out.Files[EnvFile])
-	if env["MEDIA"] != "/mnt/TitanMedia" || env["CACHE"] != "/srv/cache" || env["HANDLE"] != "@me@social.example" {
+	if env["MEDIA"] != "/mnt/media" || env["CACHE"] != "/srv/cache" || env["HANDLE"] != "@me@social.example" {
 		t.Errorf("env = %v", env)
 	}
 	s.Spec.Values["MEDIA"] = fleet.Lit("@nope")

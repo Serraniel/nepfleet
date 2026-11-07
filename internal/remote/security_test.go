@@ -80,7 +80,7 @@ func TestSecurityFindings(t *testing.T) {
 
 func TestPublishedPorts(t *testing.T) {
 	out := []byte("listen_known=1\nlisten=0.0.0.0:5432\nlisten=0.0.0.0:443\nlisten=0.0.0.0:8080\nlisten=0.0.0.0:9000\nlisten=0.0.0.0:22\n" +
-		"published=mcdb|0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp\n" +
+		"published=shop|0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp\n" +
 		"published=web|0.0.0.0:443->443/tcp\n" +
 		"published=other|0.0.0.0:8080-8081->8080-8081/tcp, 127.0.0.1:7000->7000/tcp\n" +
 		"published=|0.0.0.0:9000->9000/tcp\n" +
@@ -92,7 +92,7 @@ func TestPublishedPorts(t *testing.T) {
 	}
 	got := text(parseSecurityFor(out, []string{"web"}))
 	for _, want := range []string{
-		"port 5432 (PostgreSQL) listens beyond this machine, published by Compose project mcdb: publish it as 127.0.0.1:5432",
+		"port 5432 (PostgreSQL) listens beyond this machine, published by Compose project shop: publish it as 127.0.0.1:5432",
 		"port 8080 is published by Compose project other, which this fleet doesn't manage",
 		"port 9000 is published by a container outside any Compose project",
 		"check you expect these: 22, 443",

@@ -137,8 +137,8 @@ Name host folders that several stacks use once, in `fleet.yaml`:
 ```yaml
 spec:
   paths:
-    media: /mnt/TitanMedia                      # Jellyfin, Navidrome and Tdarr read it
-    labels: /mnt/TitanData/docker/homebox/labels  # Homebox writes labels, Home Assistant prints them
+    media: /mnt/media                      # Jellyfin, Navidrome and Tdarr read it
+    labels: /mnt/data/docker/homebox/labels  # Homebox writes labels, Home Assistant prints them
 ```
 
 Path inputs take `@media` instead of the path (`nepfleet new` lists the names), so stacks provably share the folder and moving a share is one change. `doctor` checks that every folder in use exists on the host.
