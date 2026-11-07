@@ -27,7 +27,7 @@ func (p Published) clashes(o Published) bool {
 // maxPortRange bounds what one ports: entry can expand to.
 const maxPortRange = 4096
 
-var shortPortRe = regexp.MustCompile(`^(?:(\[[^\]]+\]|[0-9.]+):)?(?:(\d+)(?:-(\d+))?:)?\d+(?:-\d+)?(?:/(tcp|udp))?$`)
+var shortPortRe = regexp.MustCompile(`^(?:(\[[^\]]+\]|\d+\.\d+\.\d+\.\d+):)?(?:(\d+)(?:-(\d+))?:)?\d+(?:-\d+)?(?:/(tcp|udp))?$`)
 
 func wildcard(ip string) string {
 	ip = strings.Trim(ip, "[]")
