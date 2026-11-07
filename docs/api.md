@@ -8,10 +8,13 @@ nepfleet serve --fleet ~/fleet --state /var/lib/nepfleet --allowed-origins https
 
 Requests carry an [API token](security.md#api-tokens): `Authorization: Bearer nft_…`.
 
+The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `GET /api/v1/openapi.yaml`. A test keeps that document's routes and fields the same as the code's.
+
 | Endpoint | Scope | Answer |
 |---|---|---|
 | `GET /healthz` | none | `204` |
 | `GET /api/v1/info` | none | name, version, API version |
+| `GET /api/v1/openapi.yaml` | none | the OpenAPI document |
 | `GET /api/v1/stacks` | read | the stacks the token covers |
 | `GET /api/v1/templates` | read | per template source of the fleet: its commit and its catalogue (the `index.json` format); templates that don't validate are listed as `invalid` and not offered |
 | `GET /api/v1/stacks/{name}/plan` | read | what `apply` would change (the `nepfleet plan --json` format) and its `id`; secrets are masked |
