@@ -56,7 +56,8 @@ func FuzzRender(f *testing.F) {
 			return
 		}
 		env := EnvValues(out.Files[EnvFile])
-		if env["DOMAIN"] != domain || env["PASS"] != pass || env["PORT"] != port {
+		// An empty optional value takes its default.
+		if env["DOMAIN"] != domain || env["PASS"] != pass || (port != "" && env["PORT"] != port) {
 			t.Fatalf("values changed on the way to the env file: %v", env)
 		}
 		// Only a whole @name resolves; "./x@media" is an ordinary path.
