@@ -14,6 +14,19 @@ It reports the system and architecture, your user's rights, Docker and Compose, 
 - **Host keys:** an unknown or changed host key is refused, never accepted. Connect once with `ssh` and check the fingerprint.
 - **Remote output is untrusted:** only known fields are read, and control characters are removed before anything is shown.
 
+## Checking a host's security
+
+```sh
+nepfleet remote probe ssh://me@nas --security
+nepfleet doctor --security       # on this host
+```
+
+It lists the worst first: password or root login over SSH, whether a firewall runs and that Docker's published ports bypass it, what listens beyond the machine (databases and the Docker API are flagged), automatic updates, pending reboots, privileged containers, `docker` group members, and whether anything bans repeated failed logins.
+
+- **Read-only:** a fixed script with no `sudo`, so it changes nothing.
+- **Honest about limits:** what this user can't read shows as `?`, never as fine. It looks at the first matching SSH setting in the config files, not at what `sshd` would resolve, and "listening" doesn't say whether your router or provider lets traffic through.
+- **Fixing:** it only reports; applying changes comes with `nepfleet host bootstrap` (#15).
+
 ## The control daemon
 
 `nepfleet control` is a small service on your own machine that remembers your remotes and will own the connections to them. Clients talk to it, so closing one changes nothing. `nepfleet remote` starts it when it isn't running, and it keeps running afterwards.
