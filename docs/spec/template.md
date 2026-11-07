@@ -169,14 +169,16 @@ migrations:
     steps:
       - name: dump
         service: db
-        run: [sh, -c, "pg_dumpall -U postgres > /backup/dump.sql"]
+        run: [sh, -c, "pg_dump -U postgres -d app > /var/lib/postgresql/data/dump.sql"]
       - name: switch images
         deploy: true            # apply the new compose file
         wait: healthy
       - name: restore
         service: db
-        run: [sh, -c, "psql -U postgres < /backup/dump.sql"]
+        run: [sh, -c, "psql -U postgres -d app -v ON_ERROR_STOP=1 -f /var/lib/postgresql/data/dump.sql"]
 ```
+
+A new Postgres can't start on an older major version's files, so this needs `PGDATA` to name a folder per version in the volume (`PGDATA: /var/lib/postgresql/data/17`): the new version starts empty beside the old one's data, and the dump is in a place both see. `internal/deploy/migrate_pg_test.go` runs exactly this on real Postgres 16 and 17, including a failed restore going back. `ON_ERROR_STOP` matters: without it, `psql` reports success after a failed statement, so nothing would roll back.
 
 Steps run only inside the stack's own containers. A failed step triggers `rollback`. Your own fleet repository can define migrations for your own templates.
 
