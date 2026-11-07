@@ -52,6 +52,7 @@ Usage:
   nepfleet secret set --global <KEY>    store a fleet-wide secret (fleet.secret.yaml)
   nepfleet secret check                 fail if any *.secret.yaml is not encrypted
   nepfleet notify test <channel>        send a test message to a notification channel
+  nepfleet remote probe <ssh://host>    look at a machine over SSH without changing it: OS, Docker, swarm, fleet
   nepfleet watch                        report OOM kills, crashes, crash loops and failed health checks
   nepfleet key backup --out FILE        copy the age key, encrypted with a passphrase (or --recipient)
   nepfleet mirror                       push origin's branches and tags to fleet.yaml's spec.mirrors (no force, no deletes)
@@ -131,6 +132,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdSecret(args[1:], stdout, stderr)
 	case "history":
 		return cmdHistory(args[1:], stdout, stderr)
+	case "remote":
+		return cmdRemote(args[1:], stdout, stderr)
 	case "watch":
 		return cmdWatch(args[1:], stdout, stderr)
 	case "token":
