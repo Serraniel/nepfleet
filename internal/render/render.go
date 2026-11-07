@@ -59,6 +59,8 @@ type Output struct {
 	Generated map[string]string
 	// Secret names, for masking in plans and logs.
 	Secret map[string]bool
+	// secretValues are the values of Secret, for MaskSecrets.
+	secretValues []string
 }
 
 // EnvFile and ComposeFile are the names used in the working directory.
@@ -122,6 +124,11 @@ func Render(in Input) (*Output, error) {
 	if _, ok := out.Files[ComposeFile]; ok {
 		return nil, errors.New("a template file may not be called " + ComposeFile)
 	}
+	if in.Stack.Dir != "" {
+		if err := stackFiles(in.Stack.Dir, env, out); err != nil {
+			return nil, err
+		}
+	}
 	if in.Template != nil && len(in.Template.Spec.Hardware) > 0 {
 		if compose, err = WithHardware(compose, in.Template.Spec.Hardware, env, in.Stack.Spec.Mode, in.RenderGID); err != nil {
 			return nil, fmt.Errorf("compose file: %w", err)
@@ -150,6 +157,7 @@ func Render(in Input) (*Output, error) {
 		return nil, err
 	}
 	out.Files[EnvFile] = envFile
+	out.collectSecretValues(env)
 	return out, nil
 }
 
@@ -429,7 +437,7 @@ func substitute(raw []byte, env map[string]string) []byte {
 // Masked returns the env file with secret values replaced, for display.
 func (o *Output) Masked(name string) []byte {
 	if name != EnvFile {
-		return o.Files[name]
+		return o.MaskSecrets(o.Files[name])
 	}
 	var b strings.Builder
 	for _, line := range strings.SplitAfter(string(o.Files[EnvFile]), "\n") {
