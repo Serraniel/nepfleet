@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/remote"
+)
+
+var hostNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+
+// cmdHost: nepfleet host bootstrap <address> — prepares a machine over SSH.
+func cmdHost(args []string, stdout, stderr io.Writer) error {
+	const usage = "usage: nepfleet host bootstrap ssh://[user@]host[:port] [--name NAME] [--yes] [--fleet DIR]"
+	if len(args) == 0 || args[0] != "bootstrap" {
+		return errors.New(usage)
+	}
+	fs := flag.NewFlagSet("host bootstrap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	yes := fs.Bool("yes", false, "run the plan without asking")
+	name := fs.String("name", "", "the host's name in the fleet (default: from its address)")
+	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository to register the host in, and take the ingress network from")
+	config := fs.String("ssh-config", "", "ssh config file instead of ~/.ssh/config")
+	pos, err := parseInterspersed(fs, args[1:])
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return errors.New(usage)
+	}
+	t, err := remote.ParseTarget(pos[0])
+	if err != nil {
+		return err
+	}
+	if *name == "" {
+		*name = strings.ToLower(strings.NewReplacer(".", "-").Replace(t.Host))
+	}
+	if !hostNameRe.MatchString(*name) {
+		return fmt.Errorf("%q cannot be a host's name; choose one with --name", *name)
+	}
+	// Without a fleet here, it still prepares the machine, with the default network.
+	ingress := "nepfleet_ingress"
+	f, ferr := fleet.Load(*fleetDir)
+	if ferr == nil && f.Spec.IngressNetwork != "" {
+		ingress = f.Spec.IngressNetwork
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	ssh := remote.SSH{ConfigFile: *config}
+	r, err := remote.Probe(ctx, ssh.Run, t)
+	if err != nil {
+		return err
+	}
+	printReport(stdout, r)
+	steps, err := remote.BootstrapPlan(r, ingress)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "\nPlan for %s:\n", t)
+	for i, s := range steps {
+		root := ""
+		if s.Root {
+			root = " (as root)"
+		}
+		fmt.Fprintf(stdout, "  %d. %s%s\n", i+1, s.Text, root)
+	}
+	if !*yes && !ask(stdout, "Run this plan? [y/N] ", "y") {
+		return errors.New("nothing changed; run again with --yes to go ahead")
+	}
+	run := func(ctx context.Context, script string) ([]byte, error) { return ssh.Run(ctx, t, script) }
+	if err := remote.RunBootstrap(ctx, run, r, steps, stdout); err != nil {
+		return err
+	}
+	// What it says now counts, not what was planned.
+	after, err := remote.Probe(ctx, ssh.Run, t)
+	if err != nil {
+		return fmt.Errorf("checking the result: %w", err)
+	}
+	if !after.Docker || after.Compose == "" {
+		return errors.New("the steps ran, but Docker or the Compose plugin still isn't there")
+	}
+	if !after.DockerRunning {
+		fmt.Fprintf(stdout, "⚠ this user can't reach Docker yet: a new group only counts from the next login\n")
+	}
+	if ferr != nil {
+		fmt.Fprintf(stdout, "%s is ready. No fleet repository here, so it isn't registered: run this from one, or use --fleet\n", t)
+		return nil
+	}
+	path := filepath.Join(f.Dir, "hosts", *name+".yaml")
+	if _, err := os.Stat(path); err == nil {
+		fmt.Fprintf(stdout, "%s is ready; %s exists and stays as it is\n", t, relTo(f.Dir, path))
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(remote.HostFile(fleet.Modeline("host.schema.json"), *name, t.Host)), 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s is ready, and registered in %s; commit it\n", t, relTo(f.Dir, path))
+	return nil
+}
