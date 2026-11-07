@@ -213,6 +213,7 @@ func (s *Server) connectOnce(ctx context.Context, t *tunnel, name string, target
 			if healthy(ctx, t) {
 				up = true
 				t.set(TunnelUp, "")
+				s.pollFeed(ctx, t, name)
 			} else if state, _ := t.status(); state == TunnelUp {
 				// ssh runs, but nothing answers behind it.
 				t.set(TunnelDown, "NepFleet does not answer on the remote")
