@@ -281,6 +281,9 @@ func serve(args []string, stderr io.Writer) error {
 	if err := api.CheckListen(*addr, tlsConfig != nil, *behindProxy); err != nil {
 		return err
 	}
+	if *behindProxy && *proxies == "" {
+		fmt.Fprintln(stderr, "warning: --behind-proxy without --trusted-proxies: every client counts as the proxy, so one client's failed attempts lock out all token users")
+	}
 
 	var trustedNets []*net.IPNet
 	for _, c := range strings.Split(*proxies, ",") {

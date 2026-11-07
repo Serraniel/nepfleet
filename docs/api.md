@@ -38,8 +38,10 @@ People sign in with passkeys. Turn them on with `serve --passkey-domain fleet.ex
 - **Sessions:** a cookie that's `HttpOnly`, `Secure` and `SameSite=Strict`, lasting 12 hours. They're kept in memory as hashes, so a restart signs everyone out.
 - **Same site:** the UI and the API must be on the same site (`ui.example.org` and `api.example.org` are), or the browser won't send the cookie. Changes also need an allowed `Origin`.
 - **A person can do everything,** on every stack, and is named as the author of commits. Tokens stay for programs. A request with a bearer token ignores any cookie.
+- **Removing a user** ends their sessions at once.
 - **Lost a passkey:** on the server, `nepfleet user remove NAME` and restart. With no users left, a new setup token is printed.
-- **Lockout:** failed sign-ins count towards the same lockout as tokens.
+- **Lockout:** failed sign-ins count towards the same lockout as tokens. As with tokens, a real passkey gets through from a locked-out address; guessing the setup token doesn't.
+- **PIN or biometric:** passkeys must verify the user, as they are the only factor. A security key without a PIN is refused.
 
 ## TLS
 

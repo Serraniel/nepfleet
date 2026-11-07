@@ -47,7 +47,7 @@ func cmdUser(args []string, stdout, stderr io.Writer) error {
 		if err := store.Remove(pos[0]); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s removed; restart nepfleet serve to end their sessions\n", pos[0])
+		fmt.Fprintf(stdout, "%s removed, and their sessions ended; if no users are left, restart nepfleet serve for a new setup token\n", pos[0])
 		return nil
 	}
 	return errors.New(usage)

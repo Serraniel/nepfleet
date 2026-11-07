@@ -281,3 +281,135 @@ func TestSessionsExpire(t *testing.T) {
 		t.Error("expired session must fail")
 	}
 }
+
+// A passkey ceremony held from before must not finish setup after a user is gone.
+func TestHeldCeremonyCannotReopenSetup(t *testing.T) {
+	l := newLoginHarness(t)
+	session := l.setup()
+	held := l.do(http.MethodPost, "/api/v1/auth/passkeys/begin", "", session, testOrigin)
+	var out struct {
+		Ceremony string          `json:"ceremony"`
+		Options  json.RawMessage `json:"options"`
+	}
+	if err := json.Unmarshal(held.Body.Bytes(), &out); err != nil {
+		t.Fatal(held.Body, err)
+	}
+	opts, err := virtualwebauthn.ParseAttestationOptions(string(out.Options))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := virtualwebauthn.CreateAttestationResponse(l.rp, l.key, virtualwebauthn.NewCredential(virtualwebauthn.KeyTypeEC2), *opts)
+	if err := l.a.Users.Remove("Ada"); err != nil {
+		t.Fatal(err)
+	}
+	if rec := l.do(http.MethodPost, "/api/v1/auth/setup/finish?ceremony="+out.Ceremony, resp, "", testOrigin); rec.Code != http.StatusUnauthorized {
+		t.Errorf("a passkey ceremony finished setup: %d", rec.Code)
+	}
+	if users, _ := l.a.Users.List(); len(users) != 0 {
+		t.Errorf("a removed user came back: %+v", users)
+	}
+	// And their session ended with the removal.
+	if rec := l.do(http.MethodGet, "/api/v1/stacks", "", session, ""); rec.Code != http.StatusUnauthorized {
+		t.Errorf("a removed user's session: %d", rec.Code)
+	}
+}
+
+// A setup ceremony from before the first user can't make a second one.
+func TestHeldSetupCeremony(t *testing.T) {
+	l := newLoginHarness(t)
+	id, options := l.begin("/api/v1/auth/setup/begin", `{"setupToken":"`+setupToken+`","name":"Eve"}`)
+	l.setup()
+	opts, err := virtualwebauthn.ParseAttestationOptions(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := virtualwebauthn.CreateAttestationResponse(l.rp, l.key, virtualwebauthn.NewCredential(virtualwebauthn.KeyTypeEC2), *opts)
+	if rec := l.do(http.MethodPost, "/api/v1/auth/setup/finish?ceremony="+id, resp, "", testOrigin); rec.Code != http.StatusUnauthorized {
+		t.Errorf("a stale setup ceremony: %d", rec.Code)
+	}
+	if users, _ := l.a.Users.List(); len(users) != 1 {
+		t.Errorf("users: %+v", users)
+	}
+}
+
+func TestUserVerificationRequired(t *testing.T) {
+	l := newLoginHarness(t)
+	_, options := l.begin("/api/v1/auth/setup/begin", `{"setupToken":"`+setupToken+`","name":"Ada"}`)
+	if !strings.Contains(options, `"userVerification":"required"`) {
+		t.Errorf("registration: %s", options)
+	}
+	l.setup()
+	_, options = l.begin("/api/v1/auth/login/begin", ``)
+	if !strings.Contains(options, `"userVerification":"required"`) {
+		t.Errorf("login: %s", options)
+	}
+}
+
+// from sends from one fixed address.
+func (l *loginHarness) from(addr, method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Host = "api.example.test"
+	req.RemoteAddr = addr + ":1"
+	req.Header.Set("Origin", testOrigin)
+	rec := httptest.NewRecorder()
+	l.h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestSignInSurvivesFloodAndNoise(t *testing.T) {
+	l := newLoginHarness(t)
+	l.setup()
+	const attacker, victim = "198.51.100.7", "203.0.113.9"
+	// Far more than the table holds, from one address and from many.
+	for i := range maxCeremonies + 50 {
+		if rec := l.from(attacker, http.MethodPost, "/api/v1/auth/login/begin", ""); rec.Code != http.StatusOK {
+			t.Fatalf("begin %d: %d", i, rec.Code)
+		}
+	}
+	l.a.mu.Lock()
+	n := len(l.a.ceremonies)
+	l.a.mu.Unlock()
+	if n > maxCeremoniesPerAddr {
+		t.Errorf("one address holds %d ceremonies", n)
+	}
+	// The victim signs in, even after noise from the same address.
+	for range 12 {
+		l.from(victim, http.MethodGet, "/api/v1/stacks", "")
+	}
+	rec := l.from(victim, http.MethodPost, "/api/v1/auth/login/begin", "")
+	var out struct {
+		Ceremony string          `json:"ceremony"`
+		Options  json.RawMessage `json:"options"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(rec.Code, rec.Body, err)
+	}
+	opts, err := virtualwebauthn.ParseAssertionOptions(string(out.Options))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := virtualwebauthn.CreateAssertionResponse(l.rp, l.key, l.cred, *opts)
+	if rec := l.from(victim, http.MethodPost, "/api/v1/auth/login/finish?ceremony="+out.Ceremony, resp); rec.Code != http.StatusNoContent {
+		t.Errorf("a real passkey from a noisy address: %d %s", rec.Code, rec.Body)
+	}
+	// Guessing the setup token stays locked out.
+	for range 12 {
+		l.from(attacker, http.MethodPost, "/api/v1/auth/setup/begin", `{"setupToken":"guess","name":"x"}`)
+	}
+	if rec := l.from(attacker, http.MethodPost, "/api/v1/auth/setup/begin", `{"setupToken":"guess","name":"x"}`); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("guessing the setup token: %d", rec.Code)
+	}
+}
+
+func TestAddrKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"203.0.113.9":          "203.0.113.9",
+		"2001:db8:1:2:aaaa::1": "2001:db8:1:2::",
+		"2001:db8:1:2:bbbb::9": "2001:db8:1:2::",
+		"not an address":       "not an address",
+	} {
+		if got := addrKey(in); got != want {
+			t.Errorf("%s: %s", in, got)
+		}
+	}
+}
