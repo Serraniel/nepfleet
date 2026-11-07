@@ -89,3 +89,36 @@ func TestProbeScriptRuns(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+func TestForwardArgs(t *testing.T) {
+	args := SSH{}.ForwardArgs(Target{User: "me", Host: "nas", Port: 2222}, "/run/x.sock")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-N", "BatchMode=yes", "StrictHostKeyChecking=yes", "ExitOnForwardFailure=yes", "StreamLocalBindMask=0177", "-L /run/x.sock:127.0.0.1:7480"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in %s", want, joined)
+		}
+	}
+	if i := slices.Index(args, "--"); i != len(args)-2 || args[i+1] != "nas" {
+		t.Errorf("the host must follow --, and nothing after it: %v", args)
+	}
+}
+
+func TestMintedToken(t *testing.T) {
+	tok, err := parseMinted([]byte("token 1a2b3c4d (control-x, apply) valid until 2026-11-08. It is shown only now:\nnft_abcdefghijklmnopqrstuvwxyz012345\n"))
+	if err != nil || tok.ID != "1a2b3c4d" || tok.Secret != "nft_abcdefghijklmnopqrstuvwxyz012345" {
+		t.Errorf("%+v %v", tok, err)
+	}
+	if _, err := parseMinted([]byte("sh: nepfleet: not found\n")); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("a failure must say why: %v", err)
+	}
+	if _, err := parseMinted([]byte("something odd\nnft_abcdefghijklmnopqrstuvwxyz012345\n")); err == nil || strings.Contains(err.Error(), "nft_") {
+		t.Errorf("an error must not show a secret: %v", err)
+	}
+	s := SSH{}
+	if _, err := s.MintToken(context.Background(), Target{Host: "x"}, "a; rm", "24h"); err == nil {
+		t.Error("a label must be checked before it reaches a shell")
+	}
+	if err := s.RevokeToken(context.Background(), Target{Host: "x"}, "1; rm"); err == nil {
+		t.Error("an ID must be checked before it reaches a shell")
+	}
+}

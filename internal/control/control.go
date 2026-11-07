@@ -34,6 +34,12 @@ type Remote struct {
 	Next string `json:"next,omitempty"`
 	// Error is why the last probe failed; Report stays from the one before.
 	Error string `json:"error,omitempty"`
+	// Connect: keep a tunnel up, also after a restart of the daemon.
+	Connect bool `json:"connect,omitempty"`
+	// Tunnel and TunnelError are the tunnel's state now; not meaningful in the
+	// saved file.
+	Tunnel      string `json:"tunnel,omitempty"`
+	TunnelError string `json:"tunnelError,omitempty"`
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
@@ -46,9 +52,14 @@ type Server struct {
 	Dir     string // owner-only state directory
 	Version string
 	Probe   ProbeFunc
+	// Connector, if set, lets the daemon keep tunnels to remotes.
+	Connector Connector
+	// RetryAfter and PollEvery tune the tunnels; tests shorten them.
+	RetryAfter, PollEvery time.Duration
 
 	mu      sync.Mutex
 	remotes []Remote
+	tunnels map[string]*tunnel
 	started time.Time
 }
 
@@ -100,11 +111,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/remotes", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		writeJSON(w, http.StatusOK, append([]Remote{}, s.remotes...))
+		out := make([]Remote, 0, len(s.remotes))
+		for _, rem := range s.remotes {
+			out = append(out, s.viewLocked(rem))
+		}
+		writeJSON(w, http.StatusOK, out)
 	})
 	mux.HandleFunc("POST /v1/remotes", s.add)
 	mux.HandleFunc("POST /v1/remotes/{name}/refresh", s.refresh)
+	mux.HandleFunc("POST /v1/remotes/{name}/connect", s.connect)
+	mux.HandleFunc("POST /v1/remotes/{name}/disconnect", s.disconnect)
+	mux.HandleFunc("/v1/remotes/{name}/api/{rest...}", s.apiProxy)
 	mux.HandleFunc("DELETE /v1/remotes/{name}", func(w http.ResponseWriter, r *http.Request) {
+		s.stopTunnel(r.PathValue("name"))
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		i := s.index(r.PathValue("name"))
@@ -214,7 +233,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.remotes[i])
+	writeJSON(w, http.StatusOK, s.viewLocked(s.remotes[i]))
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -273,6 +292,8 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()
+	s.startSaved()
+	defer s.stopAll()
 	select {
 	case err := <-errc:
 		return err

@@ -53,7 +53,7 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer func() { _ = l.Close() }()
-	s := &control.Server{Dir: controlDir(), Version: version, Probe: func(ctx context.Context, t remote.Target) (*remote.Report, error) {
+	s := &control.Server{Dir: controlDir(), Version: version, Connector: remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}, Probe: func(ctx context.Context, t remote.Target) (*remote.Report, error) {
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		return remote.Probe(ctx, remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}.Run, t)
@@ -146,7 +146,10 @@ func printRemotes(stdout io.Writer, all []control.Remote) {
 		return
 	}
 	for _, r := range all {
-		fmt.Fprintf(stdout, "%-20s %s\n", r.Name, r.Address)
+		fmt.Fprintf(stdout, "%-20s %-30s tunnel %s\n", r.Name, r.Address, r.Tunnel)
+		if r.TunnelError != "" {
+			fmt.Fprintf(stdout, "  ⚠ %s\n", r.TunnelError)
+		}
 		if r.Error != "" {
 			fmt.Fprintf(stdout, "  ⚠ last check failed: %s\n", r.Error)
 		}
@@ -200,6 +203,14 @@ func cmdRemoteManage(sub string, args []string, stdout, stderr io.Writer) error 
 		return fmt.Errorf("usage: nepfleet remote %s <name>", sub)
 	}
 	path := "/v1/remotes/" + url.PathEscape(pos[0])
+	if sub == "connect" || sub == "disconnect" {
+		var r control.Remote
+		if err := controlCall(ctx, http.MethodPost, path+"/"+sub, nil, &r); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "%s: tunnel %s\n", r.Name, r.Tunnel)
+		return nil
+	}
 	if sub == "remove" {
 		if err := controlCall(ctx, http.MethodDelete, path, nil, nil); err != nil {
 			return err
