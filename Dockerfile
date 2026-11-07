@@ -22,4 +22,5 @@ USER 65532:65532
 WORKDIR /fleet
 EXPOSE 7480
 ENTRYPOINT ["nepfleet"]
-CMD ["serve", "--listen", ":7480"]
+# Behind Caddy, which terminates TLS. Without it, pass --tls-cert and --tls-key.
+CMD ["serve", "--listen", ":7480", "--behind-proxy"]
