@@ -369,7 +369,7 @@ func pinLocal(ctx context.Context, r Runner, img, digest string) error {
 	byDigest := ref.Name() + "@" + digest
 	want, err := r.Run(ctx, "", "image", "inspect", "--format", "{{.Id}}", byDigest)
 	if err != nil {
-		if _, err := r.Run(ctx, "", "pull", "--quiet", byDigest); err != nil {
+		if err := pullImage(ctx, r, byDigest); err != nil {
 			return err
 		}
 		if want, err = r.Run(ctx, "", "image", "inspect", "--format", "{{.Id}}", byDigest); err != nil {
