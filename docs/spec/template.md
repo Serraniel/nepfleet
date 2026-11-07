@@ -19,6 +19,21 @@ For autocompletion and validation in your editor, start `template.yaml` with:
 
 The schema checks the structure. `template validate` also checks the compose file, the image policies and the integration labels, which a schema cannot express.
 
+To start from a compose file you already have:
+
+```sh
+nepfleet template generate compose.yaml --name myapp --out templates/
+```
+
+It writes `myapp/template.yaml` and `myapp/compose.yaml`, then lists what it guessed and what needs you. Treat the result as a draft: nothing has run it.
+
+- **Variables** become inputs, typed by their name and default.
+- **Secrets** are never carried over. Values under names like `*_PASSWORD` become generated secrets, and names like `*_TOKEN` or `API_KEY` become secret inputs. Names that don't look secret stay as they are, so read through the rest.
+- **The web UI** is a guess at the likeliest service and port. That port moves to Caddy labels and `spec.web`; other published ports stay and are listed.
+- **Volumes** are marked for backup, and names are changed to fit the template's rules.
+- **Refused:** services that build their own image, and lowercase variables.
+- **Listed for you:** missing tags (`template validate` refuses those), the Docker socket, host paths and privileged services.
+
 `nepfleet template index <root>` prints `index.json`, the catalogue of every template under `root`: metadata, version, images and tracks, integration flags, inputs, volumes and the available migrations. Frontends use it to list and filter templates and to build the install wizard without reading every `template.yaml`. It refuses to index an invalid template.
 
 ```yaml

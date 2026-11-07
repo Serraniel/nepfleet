@@ -127,8 +127,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return indexTemplates(args[2], stdout, stderr)
 		case len(args) >= 3 && args[1] == "match":
 			return cmdTemplateMatch(args[2:], stdout, stderr)
+		case len(args) >= 3 && args[1] == "generate":
+			return cmdTemplateGenerate(args[2:], stdout, stderr)
 		}
-		return errors.New("usage: nepfleet template validate <path>... | nepfleet template index <root> | nepfleet template match <stack> [--diff]")
+		return errors.New("usage: nepfleet template validate <path>... | nepfleet template index <root> | nepfleet template match <stack> [--diff] | nepfleet template generate <compose.yaml> --name NAME [--out DIR]")
 	case "serve":
 		return serve(args[1:], stderr)
 	case "doctor":
