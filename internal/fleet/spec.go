@@ -55,6 +55,8 @@ type Spec struct {
 	Updates    struct {
 		Images string `yaml:"images" schema:"enum=off|notify|auto;default=notify"`
 		Host   string `yaml:"host" schema:"enum=off|notify|auto;default=off"`
+		// Window is when stacks with updates: auto may update; empty means any time.
+		Window *QuietHours `yaml:"window"`
 	} `yaml:"updates"`
 	// IngressNetwork is the external network Caddy and the stacks share.
 	IngressNetwork string `yaml:"ingressNetwork" schema:"default=nepfleet_ingress"`
@@ -115,23 +117,27 @@ func checkNotifyPolicy(dedup string, q *QuietHours) error {
 			return fmt.Errorf("fleet.yaml: notifications.dedupWindow: %q is not a duration like 1h", dedup)
 		}
 	}
+	return checkTimeWindow("notifications.quietHours", q)
+}
+
+func checkTimeWindow(field string, q *QuietHours) error {
 	if q == nil {
 		return nil
 	}
 	from, err := time.Parse("15:04", q.From)
 	if err != nil {
-		return fmt.Errorf("fleet.yaml: notifications.quietHours.from: %q is not a time like 22:00", q.From)
+		return fmt.Errorf("fleet.yaml: %s.from: %q is not a time like 22:00", field, q.From)
 	}
 	to, err := time.Parse("15:04", q.To)
 	if err != nil {
-		return fmt.Errorf("fleet.yaml: notifications.quietHours.to: %q is not a time like 07:00", q.To)
+		return fmt.Errorf("fleet.yaml: %s.to: %q is not a time like 07:00", field, q.To)
 	}
 	if from.Equal(to) {
-		return errors.New("fleet.yaml: notifications.quietHours: from and to are the same")
+		return fmt.Errorf("fleet.yaml: %s: from and to are the same", field)
 	}
 	if q.Timezone != "" {
 		if _, err := time.LoadLocation(q.Timezone); err != nil {
-			return fmt.Errorf("fleet.yaml: notifications.quietHours.timezone: %q is unknown", q.Timezone)
+			return fmt.Errorf("fleet.yaml: %s.timezone: %q is unknown", field, q.Timezone)
 		}
 	}
 	return nil
@@ -390,6 +396,9 @@ func Load(dir string) (*Fleet, error) {
 		return nil, fmt.Errorf("fleet.yaml: notifications.uiURL: %q is not an http(s) URL", u)
 	}
 	if err := checkNotifyPolicy(f.Spec.Notifications.DedupWindow, f.Spec.Notifications.QuietHours); err != nil {
+		return nil, err
+	}
+	if err := checkTimeWindow("updates.window", f.Spec.Updates.Window); err != nil {
 		return nil, err
 	}
 	for i, r := range f.Spec.Notifications.Routes {
