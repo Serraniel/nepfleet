@@ -1487,11 +1487,13 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	security := fs.Bool("security", false, "check this host's security instead: SSH, firewall, exposed ports, updates, Docker")
+	asJSON := fs.Bool("json", false, "with --security: print the findings as JSON")
+	notifyNew := fs.Bool("notify", false, "with --security: send new problems to the fleet's notification channels")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *security {
-		return localSecurity(stdout)
+		return localSecurity(c, *asJSON, *notifyNew, stdout)
 	}
 	e, err := c.open()
 	if err != nil {

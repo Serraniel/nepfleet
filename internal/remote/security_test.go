@@ -78,6 +78,54 @@ func TestSecurityFindings(t *testing.T) {
 	}
 }
 
+func TestPublishedPorts(t *testing.T) {
+	out := []byte("listen_known=1\nlisten=0.0.0.0:5432\nlisten=0.0.0.0:443\nlisten=0.0.0.0:8080\nlisten=0.0.0.0:9000\nlisten=0.0.0.0:22\n" +
+		"published=mcdb|0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp\n" +
+		"published=web|0.0.0.0:443->443/tcp\n" +
+		"published=other|0.0.0.0:8080-8081->8080-8081/tcp, 127.0.0.1:7000->7000/tcp\n" +
+		"published=|0.0.0.0:9000->9000/tcp\n" +
+		"published=quiet|\ndone=1\n")
+	text := func(fs []Finding) string {
+		var b bytes.Buffer
+		PrintFindings(&b, fs)
+		return b.String()
+	}
+	got := text(parseSecurityFor(out, []string{"web"}))
+	for _, want := range []string{
+		"port 5432 (PostgreSQL) listens beyond this machine, published by Compose project mcdb: publish it as 127.0.0.1:5432",
+		"port 8080 is published by Compose project other, which this fleet doesn't manage",
+		"port 9000 is published by a container outside any Compose project",
+		"check you expect these: 22, 443",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	// With no fleet to compare with, nothing is called unmanaged.
+	if got := text(parseSecurity(out)); strings.Contains(got, "doesn't manage") {
+		t.Errorf("no fleet:\n%s", got)
+	}
+	// Odd text from another machine.
+	for _, line := range []string{"x|0.0.0.0:99999999999999999999->1/tcp", "x|0.0.0.0:9-1->1/tcp", "x|0.0.0.0:1-999999->1/tcp", "nonsense"} {
+		if owners := publishedPorts([]string{line}); len(owners) > 1 {
+			t.Errorf("%q: %d ports", line, len(owners))
+		}
+	}
+}
+
+func TestNewProblems(t *testing.T) {
+	fs := []Finding{{Level: LevelBad, Message: "a"}, {Level: LevelBad, Message: "b"}, {Level: LevelWarn, Message: "c"}}
+	fresh, now := NewProblems(fs, []string{"a", "gone"})
+	if len(fresh) != 1 || fresh[0].Message != "b" || len(now) != 2 {
+		t.Errorf("%+v %v", fresh, now)
+	}
+	// Fixed, then back: reported again.
+	_, now = NewProblems(nil, now)
+	if fresh, _ := NewProblems(fs, now); len(fresh) != 2 {
+		t.Errorf("%+v", fresh)
+	}
+}
+
 func TestSecurityScriptRuns(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("needs a POSIX shell")

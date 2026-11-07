@@ -12,10 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/notify"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
 
@@ -123,17 +125,74 @@ func noneIfEmpty(s string) string {
 }
 
 // localSecurity is nepfleet doctor --security: the same check on this host.
-func localSecurity(stdout io.Writer) error {
+func localSecurity(c common, asJSON, notifyNew bool, stdout io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	findings, err := remote.CheckSecurity(ctx, func(ctx context.Context, script string) ([]byte, error) {
+	// A fleet is optional here: a host can be checked before it joins one.
+	e, openErr := c.open()
+	var managed []string
+	if openErr == nil {
+		stacks, err := e.fleet.Stacks()
+		if err != nil {
+			return err
+		}
+		managed = []string{}
+		for _, s := range stacks {
+			if s.Spec.Target == c.host || s.Spec.Target == "local" {
+				managed = append(managed, s.Metadata.Name)
+			}
+		}
+	}
+	if notifyNew && openErr != nil {
+		return fmt.Errorf("--notify needs a fleet: %w", openErr)
+	}
+	findings, err := remote.CheckSecurityFor(ctx, func(ctx context.Context, script string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, "sh", "-s")
 		cmd.Stdin = strings.NewReader(script)
 		return cmd.Output()
-	})
+	}, managed)
 	if err != nil {
 		return err
 	}
+	if notifyNew {
+		if err := e.notifySecurity(findings, stdout); err != nil {
+			return err
+		}
+	}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(findings)
+	}
 	remote.PrintFindings(stdout, findings)
 	return nil
+}
+
+// notifySecurity reports problems that are new since the last check, once each.
+func (e *env) notifySecurity(findings []remote.Finding, stdout io.Writer) error {
+	path := filepath.Join(e.stateDir, "security", "problems.json")
+	var seen []string
+	if raw, err := os.ReadFile(path); err == nil { //nolint:gosec // the installation's own state directory
+		if err := json.Unmarshal(raw, &seen); err != nil {
+			seen = nil // damaged: report everything again rather than nothing
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fresh, now := remote.NewProblems(findings, seen)
+	n, err := e.notifier()
+	if err != nil {
+		return err
+	}
+	for _, f := range fresh {
+		e.emit(n, stdout, notify.Event{Name: "host.security_problem", Severity: notify.Warning, Title: "security problem on " + e.host, Message: f.Message})
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(now)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
 }
