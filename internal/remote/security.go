@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +37,12 @@ var riskyPorts = map[int]string{
 // CheckSecurity looks at a host's security through a shell, over SSH or
 // locally. It only reads: see securityScript.
 func CheckSecurity(ctx context.Context, run func(context.Context, string) ([]byte, error)) ([]Finding, error) {
+	return CheckSecurityFor(ctx, run, nil)
+}
+
+// CheckSecurityFor also compares what Docker publishes with the stacks a fleet
+// manages on this host; nil means there's no fleet to compare with.
+func CheckSecurityFor(ctx context.Context, run func(context.Context, string) ([]byte, error), managed []string) ([]Finding, error) {
 	out, err := run(ctx, securityScript)
 	if err != nil {
 		return nil, err
@@ -43,12 +50,73 @@ func CheckSecurity(ctx context.Context, run func(context.Context, string) ([]byt
 	if !strings.Contains(string(out), "done=1") {
 		return nil, fmt.Errorf("no answer from the security check; does the machine have a POSIX shell?")
 	}
-	return parseSecurity(out), nil
+	return parseSecurityFor(out, managed), nil
 }
 
-// parseSecurity turns the script's key=value lines into findings. This text
+// NewProblems are the problems not in what was seen last time, and all problems
+// now, to keep for next time: something fixed that returns gets reported again.
+func NewProblems(fs []Finding, seen []string) (fresh []Finding, now []string) {
+	for _, f := range fs {
+		if f.Level != LevelBad {
+			continue
+		}
+		now = append(now, f.Message)
+		if !slices.Contains(seen, f.Message) {
+			fresh = append(fresh, f)
+		}
+	}
+	return fresh, now
+}
+
+var publishedRe = regexp.MustCompile(`([0-9a-fA-F.:\[\]]+):(\d+)(?:-(\d+))?->`)
+
+// maxPublishedRange bounds what a line from another machine can make us list.
+const maxPublishedRange = 4096
+
+// publishedPorts reads "project|0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp" lines
+// into who publishes each port beyond the machine. No project: a plain container.
+func publishedPorts(lines []string) map[int]string {
+	owners := map[int]string{}
+	for _, line := range lines {
+		project, ports, ok := strings.Cut(line, "|")
+		if !ok {
+			continue
+		}
+		for _, m := range publishedRe.FindAllStringSubmatch(ports, -1) {
+			if ip := net.ParseIP(strings.Trim(m[1], "[]")); ip != nil && ip.IsLoopback() {
+				continue
+			}
+			from, err := strconv.Atoi(m[2])
+			if err != nil {
+				continue
+			}
+			to := from
+			if m[3] != "" {
+				if to, err = strconv.Atoi(m[3]); err != nil || to < from || to-from > maxPublishedRange {
+					to = from
+				}
+			}
+			for p := from; p <= to; p++ {
+				owners[p] = project
+			}
+		}
+	}
+	return owners
+}
+
+func publisher(project string) string {
+	if project == "" {
+		return "a container outside any Compose project"
+	}
+	return "Compose project " + project
+}
+
+// parseSecurity is parseSecurityFor with no fleet to compare with.
+func parseSecurity(out []byte) []Finding { return parseSecurityFor(out, nil) }
+
+// parseSecurityFor turns the script's key=value lines into findings. This text
 // comes from another machine: only known keys count, and everything is cleaned.
-func parseSecurity(out []byte) []Finding {
+func parseSecurityFor(out []byte, managed []string) []Finding {
 	vals := map[string][]string{}
 	for _, line := range strings.Split(string(out), "\n") {
 		if k, v, ok := strings.Cut(line, "="); ok {
@@ -125,10 +193,20 @@ func parseSecurity(out []byte) []Finding {
 	if first("listen_known") != "1" {
 		add("ports", LevelUnknown, "can't list listening ports (ss is missing)")
 	} else {
+		owners := publishedPorts(vals["published"])
 		var plain []string
 		for _, p := range open {
+			project, published := owners[p]
 			if what, risky := riskyPorts[p]; risky {
-				add("ports", LevelBad, fmt.Sprintf("port %d (%s) listens beyond this machine", p, what))
+				msg := fmt.Sprintf("port %d (%s) listens beyond this machine", p, what)
+				if published {
+					msg += fmt.Sprintf(", published by %s: publish it as 127.0.0.1:%d if only this machine needs it", publisher(project), p)
+				}
+				add("ports", LevelBad, msg)
+				continue
+			}
+			if published && managed != nil && !slices.Contains(managed, project) {
+				add("ports-unmanaged", LevelWarn, fmt.Sprintf("port %d is published by %s, which this fleet doesn't manage", p, publisher(project)))
 				continue
 			}
 			plain = append(plain, strconv.Itoa(p))
@@ -239,6 +317,9 @@ if has docker && docker version >/dev/null 2>&1; then
   kv docker 1
   docker ps --format '{{.Names}}' 2>/dev/null | head -n 200 | while read -r c; do
     [ "$(docker inspect --format '{{.HostConfig.Privileged}}' "$c" 2>/dev/null)" = true ] && kv privileged "$c"
+  done
+  docker ps --format '{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null | head -n 500 | while IFS= read -r l; do
+    kv published "$l"
   done
   has getent && kv docker_group "$(getent group docker | cut -d: -f4)"
   for c in fail2ban crowdsec; do
