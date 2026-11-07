@@ -43,6 +43,18 @@ type StackInfo struct {
 	URL string `json:"url,omitempty"`
 	// Links are other places to look at it, such as its logs.
 	Links []StackLink `json:"links,omitempty"`
+	// Uses are the values it takes from other stacks: names only, never values.
+	Uses []StackRef `json:"uses,omitempty"`
+}
+
+// StackRef is one value a stack takes from another, as {from, value|secret}.
+type StackRef struct {
+	// Key is the name of the value in this stack.
+	Key  string `json:"key"`
+	From string `json:"from"`
+	// Value or Secret names what's taken.
+	Value  string `json:"value,omitempty"`
+	Secret string `json:"secret,omitempty"`
 }
 
 // StackLink is a place to look at a stack.
@@ -125,6 +137,10 @@ func Handler(o Options) http.Handler {
 		out := []StackInfo{}
 		for _, s := range all {
 			if t.Allows(auth.ScopeRead, s.Name) {
+				// A stack this token doesn't cover stays unnamed here too.
+				s.Uses = slices.DeleteFunc(slices.Clone(s.Uses), func(u StackRef) bool {
+					return !t.Allows(auth.ScopeRead, u.From)
+				})
 				out = append(out, s)
 			}
 		}
