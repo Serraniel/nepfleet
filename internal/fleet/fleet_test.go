@@ -298,3 +298,34 @@ func TestHostsAndPorts(t *testing.T) {
 		t.Error("a port below 1024 must be refused")
 	}
 }
+
+func TestHostMountRules(t *testing.T) {
+	good := HostMount{Name: "box", Type: "cifs", Source: "//u1.example/backup", Target: "/mnt/share", User: "u1", PasswordSecret: "BOX"}
+	if err := good.validate(); err != nil {
+		t.Errorf("good: %v", err)
+	}
+	if err := (HostMount{Name: "n", Type: "nfs", Source: "nas.local:/media", Target: "/mnt/media", Options: []string{"ro", "rsize=1048576"}}).validate(); err != nil {
+		t.Errorf("nfs: %v", err)
+	}
+	for name, change := range map[string]func(*HostMount){
+		"type":            func(m *HostMount) { m.Type = "ext4" },
+		"name":            func(m *HostMount) { m.Name = "a/b" },
+		"source shell":    func(m *HostMount) { m.Source = "//h/s; reboot" },
+		"source newline":  func(m *HostMount) { m.Source = "//h/s\nExecStart=/bin/x" },
+		"target relative": func(m *HostMount) { m.Target = "mnt/x" },
+		"target root":     func(m *HostMount) { m.Target = "/" },
+		"target system":   func(m *HostMount) { m.Target = "/etc/nepfleet" },
+		"target var":      func(m *HostMount) { m.Target = "/var/lib/docker" },
+		"target dots":     func(m *HostMount) { m.Target = "/mnt/../etc" },
+		"target quote":    func(m *HostMount) { m.Target = "/mnt/a'b" },
+		"option":          func(m *HostMount) { m.Options = []string{"x,exec=/bin/sh"} },
+		"no password":     func(m *HostMount) { m.PasswordSecret = "" },
+		"user":            func(m *HostMount) { m.User = "a b" },
+	} {
+		m := good
+		change(&m)
+		if err := m.validate(); err == nil {
+			t.Errorf("%s must be refused", name)
+		}
+	}
+}

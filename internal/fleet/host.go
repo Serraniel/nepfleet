@@ -30,8 +30,74 @@ type HostSpec struct {
 	// Ports is the range NepFleet picks LAN ports from for stacks with
 	// access mode port.
 	Ports *PortRange `yaml:"ports"`
+	// Mounts are network shares the host mounts (nepfleet host apply).
+	Mounts []HostMount `yaml:"mounts"`
 	// Updates schedules OS updates of the host (see docs/host-updates.md).
 	Updates *HostUpdates `yaml:"updates"`
+}
+
+// HostMount is a network share on a host.
+type HostMount struct {
+	Name string `yaml:"name" schema:"required;pattern=^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$"`
+	Type string `yaml:"type" schema:"required;enum=nfs|cifs|sshfs"`
+	// Source: host:/path (NFS), //host/share (SMB/CIFS), user@host:path (SSHFS).
+	Source string `yaml:"source" schema:"required"`
+	// Target is where it appears on the host.
+	Target string `yaml:"target" schema:"required"`
+	// User and PasswordSecret (a name in fleet.secret.yaml) log in to SMB.
+	User           string   `yaml:"user"`
+	PasswordSecret string   `yaml:"passwordSecret"`
+	Options        []string `yaml:"options"`
+}
+
+var (
+	mountNameRe    = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+	mountTargetRe  = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
+	mountOptionRe  = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_=.:-]*$`)
+	mountUserRe    = regexp.MustCompile(`^[A-Za-z0-9._@-]+$`)
+	mountSourceRes = map[string]*regexp.Regexp{
+		"nfs":   regexp.MustCompile(`^[A-Za-z0-9.-]+:/[A-Za-z0-9._/-]*$`),
+		"cifs":  regexp.MustCompile(`^//[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$`),
+		"sshfs": regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]*$`),
+	}
+)
+
+// ValidMountName and ValidMountTarget check values before they reach a shell.
+func ValidMountName(s string) bool { return mountNameRe.MatchString(s) }
+
+// ValidMountTarget refuses paths a share must never cover.
+func ValidMountTarget(s string) bool {
+	if !mountTargetRe.MatchString(s) || strings.Contains(s, "/.") {
+		return false
+	}
+	for _, sys := range []string{"/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root", "/run", "/sbin", "/sys", "/usr", "/var"} {
+		if s == sys || strings.HasPrefix(s, sys+"/") {
+			return false
+		}
+	}
+	return true
+}
+
+func (m HostMount) validate() error {
+	re, ok := mountSourceRes[m.Type]
+	switch {
+	case !ValidMountName(m.Name):
+		return fmt.Errorf("mount %q: not a valid name", m.Name)
+	case !ok:
+		return fmt.Errorf("mount %s: type is nfs, cifs or sshfs", m.Name)
+	case !re.MatchString(m.Source):
+		return fmt.Errorf("mount %s: %q is not a %s source", m.Name, m.Source, m.Type)
+	case !ValidMountTarget(m.Target):
+		return fmt.Errorf("mount %s: %q can't be a target: an absolute path, not in a system folder", m.Name, m.Target)
+	case m.Type == "cifs" && (!mountUserRe.MatchString(m.User) || m.PasswordSecret == ""):
+		return fmt.Errorf("mount %s: SMB needs user and passwordSecret", m.Name)
+	}
+	for _, o := range m.Options {
+		if !mountOptionRe.MatchString(o) {
+			return fmt.Errorf("mount %s: option %q isn't allowed", m.Name, o)
+		}
+	}
+	return nil
 }
 
 // HostUpdates configures unattended OS updates.
@@ -84,6 +150,16 @@ func (f *Fleet) LoadHost(name string) (*Host, error) {
 	}
 	if !hostAddrRe.MatchString(h.Spec.Address) {
 		return nil, fmt.Errorf("%s: spec.address %q is not a host name or IPv4 address", path, h.Spec.Address)
+	}
+	seen := map[string]bool{}
+	for _, m := range h.Spec.Mounts {
+		if err := m.validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if seen[m.Name] || seen[m.Target] {
+			return nil, fmt.Errorf("%s: mount %s or its target is listed twice", path, m.Name)
+		}
+		seen[m.Name], seen[m.Target] = true, true
 	}
 	if u := h.Spec.Updates; u != nil && u.Reboot != "" && u.Reboot != "never" && u.Reboot != "when-required" && u.Reboot != "always" {
 		return nil, fmt.Errorf("%s: spec.updates.reboot is never, when-required or always", path)

@@ -18,13 +18,17 @@ import (
 
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/remote"
+	"github.com/Serraniel/nepfleet/internal/secrets"
 )
 
 var hostNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
 
 // cmdHost: nepfleet host bootstrap <address> — prepares a machine over SSH.
 func cmdHost(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: nepfleet host bootstrap ssh://[user@]host[:port] [--name NAME] [--yes] [--fleet DIR]"
+	const usage = "usage: nepfleet host bootstrap ssh://[user@]host[:port] [--name NAME] [--yes] [--fleet DIR] | nepfleet host apply NAME [ssh://address] [--yes] [--fleet DIR]"
+	if len(args) > 0 && args[0] == "apply" {
+		return cmdHostApply(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "bootstrap" {
 		return errors.New(usage)
 	}
@@ -114,5 +118,93 @@ func cmdHost(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "%s is ready, and registered in %s; commit it\n", t, relTo(f.Dir, path))
+	return nil
+}
+
+// cmdHostApply: nepfleet host apply <name> — makes a host's mounts match its
+// file in hosts/, over SSH, showing the plan first.
+func cmdHostApply(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("host apply", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	yes := fs.Bool("yes", false, "run the plan without asking")
+	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
+	config := fs.String("ssh-config", "", "ssh config file instead of ~/.ssh/config")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) < 1 || len(pos) > 2 {
+		return errors.New("usage: nepfleet host apply NAME [ssh://address] [--yes] [--fleet DIR]")
+	}
+	f, err := fleet.Load(*fleetDir)
+	if err != nil {
+		return err
+	}
+	h, err := f.LoadHost(pos[0])
+	if err != nil {
+		return err
+	}
+	address := h.Spec.Address
+	if len(pos) == 2 {
+		address = pos[1]
+	}
+	t, err := remote.ParseTarget(address)
+	if err != nil {
+		return err
+	}
+	creds := map[string]string{}
+	var sec map[string]string
+	for _, m := range h.Spec.Mounts {
+		if m.PasswordSecret == "" {
+			continue
+		}
+		if sec == nil {
+			store := secrets.SOPS{Recipients: f.Spec.Secrets.Age}
+			if sec, err = store.Load(filepath.Join(f.Dir, fleet.FleetSecretsFile)); err != nil {
+				return err
+			}
+		}
+		pw, ok := sec[m.PasswordSecret]
+		if !ok {
+			return fmt.Errorf("mount %s: %s is not in %s (nepfleet secret set --global %s)", m.Name, m.PasswordSecret, fleet.FleetSecretsFile, m.PasswordSecret)
+		}
+		creds[m.Name] = pw
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	ssh := remote.SSH{ConfigFile: *config}
+	r, err := remote.Probe(ctx, ssh.Run, t)
+	if err != nil {
+		return err
+	}
+	run := func(ctx context.Context, script string) ([]byte, error) { return ssh.Run(ctx, t, script) }
+	listed, err := run(ctx, remote.MountsPresent)
+	if err != nil {
+		return err
+	}
+	steps, err := remote.MountSteps(r.OSID, h.Spec.Mounts, creds, strings.Split(strings.TrimSpace(string(listed)), "\n"))
+	if err != nil {
+		return err
+	}
+	if !r.Root && !r.Sudo && len(steps) > 0 {
+		return errors.New("this needs root: log in as root, or as a user with sudo that needs no password, as NepFleet can't type one")
+	}
+	if len(steps) == 0 {
+		fmt.Fprintf(stdout, "%s has no mounts to set up\n", h.Metadata.Name)
+		return nil
+	}
+	fmt.Fprintf(stdout, "Plan for %s:\n", t)
+	for i, s := range steps {
+		fmt.Fprintf(stdout, "  %d. %s (as root)\n", i+1, s.Text)
+	}
+	if !*yes && !ask(stdout, "Run this plan? [y/N] ", "y") {
+		return errors.New("nothing changed; run again with --yes to go ahead")
+	}
+	if err := remote.RunBootstrap(ctx, run, r, steps, stdout); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s's mounts match hosts/%s.yaml; each mounts on first use\n", h.Metadata.Name, h.Metadata.Name)
 	return nil
 }
