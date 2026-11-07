@@ -6,6 +6,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ type limiter struct {
 	window time.Duration
 	max    int
 	fails  map[string][]time.Time
+	swept  time.Time
 	now    func() time.Time
 }
 
@@ -65,35 +67,44 @@ const maxTracked = 10000
 func (l *limiter) fail(addr string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.fails) >= maxTracked {
+	if len(l.fails) >= maxTracked && l.now().Sub(l.swept) >= time.Second {
+		l.swept = l.now()
 		for a := range l.fails {
 			l.recent(a) // drops addresses whose failures are older than the window
 		}
-		if len(l.fails) >= maxTracked {
+	}
+	if len(l.fails) >= maxTracked {
+		if _, known := l.fails[addr]; !known {
 			return // still full: stop tracking new addresses rather than grow
 		}
 	}
 	l.fails[addr] = append(l.recent(addr), l.now())
 }
 
-// clientAddr is the address failures are counted for. Behind a trusted
-// reverse proxy (Caddy) it is the client the proxy names last in
-// X-Forwarded-For; otherwise the connection's address, as headers from
-// anyone else can be forged.
+// clientAddr is the address failures are counted for: the connection's
+// address, or behind trusted reverse proxies (Caddy, a CDN) the nearest
+// address in X-Forwarded-For that is not one of them. Read from the right,
+// across all header lines: entries further left come from the client and
+// can be forged.
 func clientAddr(r *http.Request, trusted []*net.IPNet) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	ip := net.ParseIP(host)
-	for _, n := range trusted {
-		if ip != nil && n.Contains(ip) {
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				parts := strings.Split(xff, ",")
-				if c := strings.TrimSpace(parts[len(parts)-1]); net.ParseIP(c) != nil {
-					return c
-				}
-			}
+	isTrusted := func(ip net.IP) bool {
+		return ip != nil && slices.ContainsFunc(trusted, func(n *net.IPNet) bool { return n.Contains(ip) })
+	}
+	if !isTrusted(net.ParseIP(host)) {
+		return host
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		ip := net.ParseIP(strings.TrimSpace(hops[i]))
+		if ip == nil {
+			break // garbage: stop at the last trusted address
+		}
+		host = ip.String()
+		if !isTrusted(ip) {
 			break
 		}
 	}
@@ -105,26 +116,33 @@ func clientAddr(r *http.Request, trusted []*net.IPNet) string {
 func requireToken(store *auth.Store, l *limiter, trusted []*net.IPNet, scope string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		addr := clientAddr(r, trusted)
-		if l.blocked(addr) {
-			w.Header().Set("Retry-After", strconv.Itoa(int(l.window.Seconds())))
-			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
-			return
+		// A valid token always gets in: the lockout slows down guessing
+		// without letting others on a shared address lock its owner out.
+		authz := r.Header.Get("Authorization")
+		scheme, secret, ok := strings.Cut(authz, " ")
+		ok = ok && strings.EqualFold(scheme, "Bearer") && store != nil
+		var t auth.Token
+		var err error
+		if ok {
+			t, err = store.Check(strings.TrimSpace(secret))
 		}
-		secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || store == nil {
+		if !ok || err != nil {
+			if l.blocked(addr) {
+				w.Header().Set("Retry-After", strconv.Itoa(int(l.window.Seconds())))
+				http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+				return
+			}
 			l.fail(addr)
-			w.Header().Set("WWW-Authenticate", `Bearer realm="nepfleet"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		t, err := store.Check(strings.TrimSpace(secret))
-		if err != nil {
-			l.fail(addr)
-			w.Header().Set("WWW-Authenticate", `Bearer realm="nepfleet", error="invalid_token"`)
+			if ok {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="nepfleet", error="invalid_token"`)
+			} else {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="nepfleet"`)
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if !t.Allows(scope, "") {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="nepfleet", error="insufficient_scope"`)
 			http.Error(w, "the token's scope does not allow this", http.StatusForbidden)
 			return
 		}

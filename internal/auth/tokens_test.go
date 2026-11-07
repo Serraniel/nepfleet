@@ -62,3 +62,26 @@ func TestTokens(t *testing.T) {
 		t.Error("a token without expiry must fail")
 	}
 }
+
+func TestTokenKeyAndAdmin(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	if _, _, err := s.Create("x", ScopeAdmin, []string{"web"}, time.Hour); err == nil {
+		t.Error("an admin token limited to stacks must be refused")
+	}
+	secret, _, err := s.Create("x", ScopeRead, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Dir, "token.key"), []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Create("y", ScopeRead, nil, time.Hour); err == nil {
+		t.Error("a damaged key must not be replaced")
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.Dir, "token.key")); string(b) != "short" {
+		t.Error("the damaged key was overwritten")
+	}
+	if _, err := s.Check(secret); err == nil {
+		t.Error("check with a damaged key must fail")
+	}
+}

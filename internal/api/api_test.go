@@ -76,8 +76,11 @@ func TestStacksNeedToken(t *testing.T) {
 	for range 10 {
 		get("nft_wrong", "10.0.0.9")
 	}
-	if rec := get(all, "10.0.0.9"); rec.Code != http.StatusTooManyRequests {
+	if rec := get("nft_wrong", "10.0.0.9"); rec.Code != http.StatusTooManyRequests {
 		t.Errorf("after 10 failures: %d", rec.Code)
+	}
+	if rec := get(all, "10.0.0.9"); rec.Code != http.StatusOK {
+		t.Errorf("a valid token gets in from a locked-out address: %d", rec.Code)
 	}
 	if rec := get(all, "10.0.0.1"); rec.Code != http.StatusOK {
 		t.Errorf("another address: %d", rec.Code)
@@ -94,6 +97,18 @@ func TestClientAddr(t *testing.T) {
 	}
 	if got := clientAddr(req, nil); got != "172.18.0.5" {
 		t.Errorf("without trusted proxies the header is ignored: %s", got)
+	}
+	// A client-sent header line before the proxy's own line counts for nothing.
+	req.Header.Del("X-Forwarded-For")
+	req.Header.Add("X-Forwarded-For", "6.6.6.6")
+	req.Header.Add("X-Forwarded-For", "198.51.100.7")
+	if got := clientAddr(req, []*net.IPNet{proxy}); got != "198.51.100.7" {
+		t.Errorf("several header lines: %s", got)
+	}
+	// A chain of trusted proxies (CDN → Caddy) is walked to the client.
+	req.Header.Set("X-Forwarded-For", "6.6.6.6, 198.51.100.7, 172.20.0.9")
+	if got := clientAddr(req, []*net.IPNet{proxy}); got != "198.51.100.7" {
+		t.Errorf("proxy chain: %s", got)
 	}
 	req.RemoteAddr = "203.0.113.50:1"
 	if got := clientAddr(req, []*net.IPNet{proxy}); got != "203.0.113.50" {

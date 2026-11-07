@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -85,8 +86,17 @@ func (s *Store) Create(name, scope string, stacks []string, ttl time.Duration) (
 	if ttl <= 0 {
 		return "", t, errors.New("a token needs an expiry")
 	}
+	if scope == ScopeAdmin && len(stacks) > 0 {
+		// Admin covers fleet-wide actions (tokens, settings) a stack limit cannot bound.
+		return "", t, errors.New("an admin token cannot be limited to stacks; use scope apply")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return "", t, err
+	}
+	defer unlock()
 	key, err := s.key(true)
 	if err != nil {
 		return "", t, err
@@ -121,6 +131,11 @@ func (s *Store) List() ([]Token, error) {
 func (s *Store) Revoke(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	all, err := s.load()
 	if err != nil {
 		return err
@@ -171,10 +186,13 @@ func mac(key []byte, secret string) string {
 func (s *Store) key(create bool) ([]byte, error) {
 	path := filepath.Join(s.Dir, "token.key")
 	k, err := os.ReadFile(path) //nolint:gosec // the installation's own state directory
-	if err == nil && len(k) == 32 {
+	switch {
+	case err == nil && len(k) == 32:
 		return k, nil
-	}
-	if !create || (err != nil && !errors.Is(err, os.ErrNotExist)) {
+	case err == nil:
+		// Never replace a damaged key: every token would silently stop working.
+		return nil, fmt.Errorf("token key %s is damaged (%d bytes, want 32); restore it from a backup, or delete it and tokens.json and create new tokens", path, len(k))
+	case !create || !errors.Is(err, os.ErrNotExist):
 		return nil, fmt.Errorf("token key: %w", err)
 	}
 	k = make([]byte, 32)
@@ -184,7 +202,31 @@ func (s *Store) key(create bool) ([]byte, error) {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return nil, err
 	}
-	return k, writeFile(path, k)
+	// Linked into place, never renamed over: of two first runs at once,
+	// one key wins and the other run uses it.
+	if err := writeNew(path, k); errors.Is(err, os.ErrExist) {
+		return s.key(false)
+	} else if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
+// lock holds an exclusive lock on the store across processes (CLI runs of
+// create and revoke), so no update is lost. It returns the unlock.
+func (s *Store) lock() (func(), error) {
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(s.Dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the installation's own state directory
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil { //nolint:gosec // a file descriptor fits an int
+		_ = f.Close()
+		return nil, err
+	}
+	return func() { _ = f.Close() }, nil
 }
 
 func (s *Store) load() ([]Token, error) {
@@ -211,6 +253,27 @@ func (s *Store) save(all []Token) error {
 		return err
 	}
 	return writeFile(filepath.Join(s.Dir, "tokens.json"), raw)
+}
+
+// writeNew creates a file that must not exist yet, complete or not at all.
+func writeNew(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Link(tmp.Name(), path)
 }
 
 // writeFile replaces a file atomically, owner-only.
