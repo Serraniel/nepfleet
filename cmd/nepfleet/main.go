@@ -325,35 +325,49 @@ func serve(args []string, stderr io.Writer) error {
 	}()
 	fmt.Fprintf(stderr, "nepfleet API listening on %s\n", *addr)
 
+	var serveErr error
 	select {
-	case err := <-errc:
-		return err
+	case serveErr = <-errc:
 	case <-ctx.Done():
+		// A second signal aborts a running apply, also one during the shutdown.
+		again := make(chan os.Signal, 1)
+		signal.Notify(again, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(again)
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdown); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
+			// A client holding its connection open must not cut an apply short.
+			fmt.Fprintf(stderr, "closing connections: %v\n", err)
+			_ = srv.Close()
 		}
-		// Let a running apply finish; its health gate and rollback bound it.
-		if !apiMu.TryLock() {
-			fmt.Fprintln(stderr, "waiting for the running apply to finish (stop again to abort it)")
-			done := make(chan struct{})
-			go func() { apiMu.Lock(); close(done) }()
-			again := make(chan os.Signal, 1)
-			signal.Notify(again, os.Interrupt, syscall.SIGTERM)
-			defer signal.Stop(again)
-			select {
-			case <-done:
-			case <-again:
-				abortApply()
-				select {
-				case <-done:
-				case <-time.After(30 * time.Second):
-				}
-				return errors.New("stopped during an apply; check the stack with nepfleet plan")
-			}
-		}
+		return waitForApply(again, abortApply, stderr)
+	}
+	// The listener failed: nothing new comes in, but an apply still finishes.
+	if err := waitForApply(make(chan os.Signal), abortApply, stderr); err != nil {
+		return errors.Join(serveErr, err)
+	}
+	return serveErr
+}
+
+// waitForApply lets a running apply finish; its health gate and rollback bound
+// it. A signal on again aborts it.
+func waitForApply(again <-chan os.Signal, abort func(), stderr io.Writer) error {
+	if apiMu.TryLock() {
 		return nil
+	}
+	fmt.Fprintln(stderr, "waiting for the running apply to finish (stop again to abort it)")
+	done := make(chan struct{})
+	go func() { apiMu.Lock(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-again:
+		abort()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+		}
+		return errors.New("stopped during an apply; check the stack with nepfleet plan")
 	}
 }
 

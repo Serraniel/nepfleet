@@ -48,7 +48,7 @@ Applying and rolling back over the API come next ([#38](https://github.com/Serra
 - **Plan IDs:** they change when the server restarts, so plan again after a restart.
 - **Reviewed means applied:** the job checks the ID again on the plan it applies. If the repository changed after the `202`, the job fails with "the plan changed" and nothing is applied.
 - **One apply per stack on a host:** the CLI and the API share a lock in `<state>/locks`, so a second apply of a stack is refused.
-- **Stopping the server:** it waits for a running apply, and a second signal aborts it. Give a service manager enough time, for example `TimeoutStopSec=10min` with systemd.
+- **Stopping the server:** it waits for a running apply, and a second signal aborts it. Give it enough time, or the service manager kills it first and the stack stays half updated: `stop_grace_period: 10m` with Compose (the shipped `compose.yaml` sets it), `TimeoutStopSec=10min` with systemd.
 - **Jobs:** the last 50 are kept in memory.
 - **Server log:** every apply records the token's name and ID there.
 

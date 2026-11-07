@@ -89,6 +89,9 @@ type prepared struct {
 	// means lock.yaml does not record it yet (first apply, --update-lock).
 	pin      *lock.TemplatePin
 	pinMoved bool
+	// lock is lock.yaml as this plan read it: apply pins exactly these
+	// digests, also if a pull changes the file meanwhile.
+	lock *lock.Lock
 }
 
 type env struct {
@@ -245,7 +248,7 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			p.TemplateFrom = l.Template.Source + "@" + l.Template.Commit[:min(12, len(l.Template.Commit))]
 		}
 	}
-	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved}
+	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved, lock: l}
 	e.finishPlan(pr)
 	return pr, nil
 }
@@ -584,7 +587,7 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		}
 		pins := updated
 		if pins == nil && !*noLock {
-			pins, _ = lock.Load(s.Dir)
+			pins = p.lock
 		}
 		if err := archGate(ctx, stdout, name, p, pins); err != nil {
 			errs = append(errs, err)
@@ -621,9 +624,8 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		if !*noLock {
 			if updated != nil {
 				opts.Lock = updated
-			} else if opts.Lock, err = lock.Load(s.Dir); err != nil {
-				errs = append(errs, err)
-				continue
+			} else {
+				opts.Lock = p.lock
 			}
 			opts.Resolver = e.resolverOnce()
 		}

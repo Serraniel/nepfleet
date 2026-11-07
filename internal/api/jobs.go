@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -93,6 +95,7 @@ func (j *jobs) start(kind, stack, by string, fn func(log *jobLog) error) Job {
 			defer func() {
 				if r := recover(); r != nil {
 					err = fmt.Errorf("the job crashed: %v", r)
+					log.Printf("api: job %s crashed: %v\n%s", e.job.ID, r, debug.Stack())
 				}
 			}()
 			return fn(e.log)
