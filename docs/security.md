@@ -36,7 +36,7 @@ nepfleet token revoke <id>
 - **Expiry:** every token has one.
 - **Storage:** tokens look like `nft_…`, so secret scanners can find leaked ones. Only an HMAC of each token is stored, in `<state>/api/tokens.json`, with a key kept next to it (`token.key`). Both files are owner-only. The file alone doesn't let anyone test guesses.
 - **Requests:** `Authorization: Bearer nft_…`. Missing, unknown and expired tokens get the same `401`.
-- **Lockout:** after 10 failures in a minute, the client address gets `429` for a minute.
+- **Lockout:** after 10 failures in a minute, the client address gets `429` for a minute. Behind a reverse proxy, start `serve --trusted-proxies <CIDR>`, so the client named in `X-Forwarded-For` counts rather than the proxy. Otherwise one attacker would lock everyone out.
 - **Open endpoints:** only `/healthz` and `/api/v1/info`.
 
 ## Reporting

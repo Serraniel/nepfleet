@@ -235,6 +235,7 @@ func serve(args []string, stderr io.Writer) error {
 	stateDir := fs.String("state", envOr("NEPFLEET_STATE", defaultState()), "state directory (API tokens live in <state>/api)")
 	name := fs.String("name", hostname(), "name shown to frontends")
 	origins := fs.String("allowed-origins", "", "comma separated frontend origins allowed via CORS")
+	proxies := fs.String("trusted-proxies", "", "comma separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. 172.16.0.0/12")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -244,6 +245,17 @@ func serve(args []string, stderr io.Writer) error {
 		}
 	}
 
+	var trustedNets []*net.IPNet
+	for _, c := range strings.Split(*proxies, ",") {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			return fmt.Errorf("--trusted-proxies: %q is not a CIDR", c)
+		}
+		trustedNets = append(trustedNets, n)
+	}
 	var allowed []string
 	for _, o := range strings.Split(*origins, ",") {
 		if o = strings.TrimSpace(o); o != "" {
@@ -254,6 +266,7 @@ func serve(args []string, stderr io.Writer) error {
 		Info:           api.Info{Name: *name, Version: version, APIVersion: "v1"},
 		AllowedOrigins: allowed,
 		Tokens:         tokenStore(*stateDir),
+		TrustedProxies: trustedNets,
 		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
 	})
 

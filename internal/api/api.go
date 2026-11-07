@@ -10,6 +10,7 @@ package api
 import (
 	"encoding/json"
 	"github.com/Serraniel/nepfleet/internal/auth"
+	"net"
 	"net/http"
 	"slices"
 	"time"
@@ -38,6 +39,9 @@ type Options struct {
 	// Tokens authenticate requests; nil refuses everything but the open
 	// endpoints.
 	Tokens *auth.Store
+	// TrustedProxies are reverse proxies whose X-Forwarded-For names the
+	// client (for the lockout after failed logins).
+	TrustedProxies []*net.IPNet
 	// Stacks lists the fleet's stacks.
 	Stacks func() ([]StackInfo, error)
 	// AllowedOrigins are the frontends allowed to call this backend from a
@@ -55,7 +59,7 @@ func Handler(o Options) http.Handler {
 		writeJSON(w, o.Info)
 	})
 	l := newLimiter()
-	mux.HandleFunc("GET /api/v1/stacks", requireToken(o.Tokens, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/v1/stacks", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		if o.Stacks == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return

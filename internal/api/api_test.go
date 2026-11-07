@@ -4,6 +4,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -79,5 +81,32 @@ func TestStacksNeedToken(t *testing.T) {
 	}
 	if rec := get(all, "10.0.0.1"); rec.Code != http.StatusOK {
 		t.Errorf("another address: %d", rec.Code)
+	}
+}
+
+func TestClientAddr(t *testing.T) {
+	_, proxy, _ := net.ParseCIDR("172.16.0.0/12")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "172.18.0.5:443"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.7")
+	if got := clientAddr(req, []*net.IPNet{proxy}); got != "198.51.100.7" {
+		t.Errorf("behind a trusted proxy: %s", got)
+	}
+	if got := clientAddr(req, nil); got != "172.18.0.5" {
+		t.Errorf("without trusted proxies the header is ignored: %s", got)
+	}
+	req.RemoteAddr = "203.0.113.50:1"
+	if got := clientAddr(req, []*net.IPNet{proxy}); got != "203.0.113.50" {
+		t.Errorf("an untrusted sender's header is ignored: %s", got)
+	}
+}
+
+func TestLimiterBounded(t *testing.T) {
+	l := newLimiter()
+	for i := range maxTracked + 50 {
+		l.fail(fmt.Sprintf("10.%d.%d.%d", i>>16&255, i>>8&255, i&255))
+	}
+	if len(l.fails) > maxTracked {
+		t.Errorf("tracked %d addresses", len(l.fails))
 	}
 }
