@@ -55,6 +55,12 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Not during an apply of the same stack, from the CLI or the API.
+	release, err := lockStack(e.stateDir, s.Metadata.Name)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if s.Spec.Mode == "swarm" {
 		return errors.New("restore supports compose stacks; for a swarm stack, scale it to 0 and restore its volumes on the node that holds them")
 	}

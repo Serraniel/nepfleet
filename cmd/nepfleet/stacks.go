@@ -514,7 +514,7 @@ func lockStack(stateDir, name string) (func(), error) {
 	}
 	release, err := flock.Lock(filepath.Join(dir, name+".lock"), false)
 	if errors.Is(err, flock.ErrHeld) {
-		return nil, fmt.Errorf("%s: another apply of this stack is running", name)
+		return nil, fmt.Errorf("%s: another apply or restore of this stack is running", name)
 	}
 	return release, err
 }
