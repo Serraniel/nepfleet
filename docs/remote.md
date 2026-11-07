@@ -22,6 +22,8 @@ It reports the system and architecture, your user's rights, Docker and Compose, 
 nepfleet remote add ssh://me@nas.local --name nas   # probes it first; an unreachable machine isn't added
 nepfleet remote list
 nepfleet remote refresh nas
+nepfleet remote connect nas      # keep a tunnel to its API; survives restarts of the daemon
+nepfleet remote disconnect nas
 nepfleet remote remove nas
 nepfleet control status
 ```
@@ -29,3 +31,13 @@ nepfleet control status
 - **Access:** a Unix socket that only you can open, in a private directory (`~/.local/state/nepfleet/control`). It refuses a directory that others can enter.
 - **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
 - **To start it at login:** run `nepfleet control` from a systemd user unit.
+
+## Connecting
+
+`nepfleet remote connect` keeps an SSH tunnel to the server's API on the remote's loopback, reconnecting after failures. No port opens on either side: the local end is a private socket.
+
+- **Access comes from SSH:** over SSH, the daemon runs `nepfleet token create` on the remote (in its container if there is one) for an `apply`-scope token named `control-<this machine>`.
+- **Tokens stay in memory:** they live for 24 hours, are renewed every 12, and are revoked on disconnect, so nothing on your disk grants access. If the remote can't be reached to revoke one, it expires.
+- **Clients hold no tokens:** requests to `/v1/remotes/<name>/api/...` on the daemon's socket go to the remote's `/api/...` with the token added.
+- **What the remote needs:** a running NepFleet server on port 7480, and SSH allowing TCP forwarding (`AllowTcpForwarding`).
+- **A CLI install:** `nepfleet token create` must see the same state directory as the server: set `NEPFLEET_STATE` for non-interactive SSH, or use the container.

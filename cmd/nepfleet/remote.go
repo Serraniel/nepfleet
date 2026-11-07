@@ -19,8 +19,8 @@ import (
 
 // cmdRemote: nepfleet remote probe <address>.
 func cmdRemote(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: nepfleet remote probe ssh://[user@]host[:port] [--json] [--ssh-config FILE] | nepfleet remote add|list|refresh|remove"
-	if len(args) > 0 && (args[0] == "add" || args[0] == "list" || args[0] == "refresh" || args[0] == "remove") {
+	const usage = "usage: nepfleet remote probe ssh://[user@]host[:port] [--json] [--ssh-config FILE] | nepfleet remote add|list|refresh|connect|disconnect|remove"
+	if len(args) > 0 && (args[0] == "add" || args[0] == "list" || args[0] == "refresh" || args[0] == "remove" || args[0] == "connect" || args[0] == "disconnect") {
 		return cmdRemoteManage(args[0], args[1:], stdout, stderr)
 	}
 	if len(args) == 0 || args[0] != "probe" {
