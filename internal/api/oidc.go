@@ -237,7 +237,7 @@ func (a *Accounts) oidcRoutes(mux *http.ServeMux, guarded guardedRoute, origins 
 		if err != nil {
 			return err
 		}
-		log.Printf("api: %q signed in through the identity provider", u.Name)
+		log.Printf("api: %q signed in through the identity provider", u.Name) //nolint:gosec // a checked name, and %q escapes it
 		if err := a.signIn(w, u); err != nil {
 			return err
 		}
