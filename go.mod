@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	charm.land/bubbletea/v2 v2.1.1
-	github.com/Serraniel/neptide v0.0.0-20261106171331-568cddde89a5
+	github.com/Serraniel/neptide v0.0.0-20261107090926-4ab2540500fa
 	github.com/nicholas-fedor/shoutrrr v0.23.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.58.0

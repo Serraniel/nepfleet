@@ -63,6 +63,18 @@ func (e *env) kumaFirstRun(ctx context.Context, stdout io.Writer, p *prepared) {
 		warn(err)
 		return
 	}
+	// A page for maintenance windows to show on, so users see them without any
+	// setup. Only on a first apply: later, the page is the user's.
+	if k, err := kuma.Login(ctx, base, user, pass, nil); err != nil {
+		fmt.Fprintf(stdout, "%s: ⚠ no status page: %v\n", name, err)
+	} else {
+		if err := k.EnsureStatusPage(ctx, "Maintenance", kuma.DefaultStatusPage); err != nil {
+			fmt.Fprintf(stdout, "%s: ⚠ no status page: %v\n", name, err)
+		} else {
+			fmt.Fprintf(stdout, "%s: status page at /status/%s shows maintenance windows\n", name, kuma.DefaultStatusPage)
+		}
+		k.Close()
+	}
 	fmt.Fprintf(stdout, "%s: to have NepFleet put monitors into maintenance during applies, add to fleet.yaml:\n"+
 		"  uptimeKuma: [{name: %s, url: \"https://%s\", username: %s, passwordSecret: KUMA_PASSWORD}]\n"+
 		"  and store the password there too: nepfleet secret set --global KUMA_PASSWORD\n", name, name, env["DOMAIN"], user)
