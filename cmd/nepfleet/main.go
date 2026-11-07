@@ -310,6 +310,13 @@ func serve(args []string, stderr io.Writer) error {
 				return apiPlanOf(p.plan)
 			})
 		},
+		Templates: func(context.Context) (any, error) {
+			if !apiMu.TryLock() {
+				return nil, api.ErrBusy
+			}
+			defer apiMu.Unlock()
+			return sourceCatalogues(c)
+		},
 		StartApply: func(_ context.Context, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
 			return startApply(applyCtx, c, stack, planID, confirm, by)
 		},
@@ -470,6 +477,55 @@ func startApply(ctx context.Context, c common, stack, planID string, confirm boo
 		}
 		return runApply(ctx, c, []string{stack}, o, log, log)
 	}, nil
+}
+
+// sourceCatalogue is one template source's catalogue, for the API.
+type sourceCatalogue struct {
+	Source    string           `json:"source"`
+	Commit    string           `json:"commit,omitempty"`
+	Templates []template.Entry `json:"templates"`
+	// Invalid lists templates that do not validate (not offered).
+	Invalid []string `json:"invalid,omitempty"`
+}
+
+// sourceCatalogues indexes every template source of the fleet, fetching
+// them like plan does.
+func sourceCatalogues(c common) ([]sourceCatalogue, error) {
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	out := []sourceCatalogue{}
+	for _, src := range e.fleet.Spec.TemplateSources {
+		res, err := e.resolver.Resolve(src.Name)
+		if err != nil {
+			return nil, err
+		}
+		dirs, err := findTemplates([]string{res.Dir})
+		if err != nil {
+			return nil, err
+		}
+		sc := sourceCatalogue{Source: src.Name, Commit: res.Commit}
+		var ts []*template.Template
+		for _, dir := range dirs {
+			t, err := template.Load(dir)
+			if err == nil {
+				err = t.Validate()
+			}
+			if err != nil {
+				sc.Invalid = append(sc.Invalid, relTo(res.Dir, dir))
+				continue
+			}
+			ts = append(ts, t)
+		}
+		cat, err := template.Index(res.Dir, ts)
+		if err != nil {
+			return nil, err
+		}
+		sc.Templates = cat.Templates
+		out = append(out, sc)
+	}
+	return out, nil
 }
 
 // withStack opens the fleet fresh (edits and pulls show without a restart)

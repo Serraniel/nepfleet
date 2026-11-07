@@ -13,6 +13,7 @@ Requests carry an [API token](security.md#api-tokens): `Authorization: Bearer nf
 | `GET /healthz` | none | `204` |
 | `GET /api/v1/info` | none | name, version, API version |
 | `GET /api/v1/stacks` | read | the stacks the token covers |
+| `GET /api/v1/templates` | read | per template source of the fleet: its commit and its catalogue (the `index.json` format); templates that don't validate are listed as `invalid` and not offered |
 | `GET /api/v1/stacks/{name}/plan` | read | what `apply` would change (the `nepfleet plan --json` format) and its `id`; secrets are masked |
 | `POST /api/v1/stacks/{name}/apply` | apply | starts applying the reviewed plan: `{"plan": "<id>", "confirmDestructive": false}` → `202` with a job |
 | `GET /api/v1/jobs/{id}` | read | a job's state (`running`, `succeeded`, `failed`), error and log |
