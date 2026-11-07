@@ -64,6 +64,9 @@ type Server struct {
 	tunnels map[string]*tunnel
 	started time.Time
 
+	feedOnce  sync.Once
+	feedState *feed
+
 	httpMu      sync.Mutex
 	httpSrv     *http.Server
 	httpAddr    string
@@ -124,6 +127,8 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, out)
 	})
+	mux.HandleFunc("GET /v1/events", s.eventsList)
+	mux.HandleFunc("POST /v1/events/seen", s.eventsSeen)
 	mux.HandleFunc("POST /v1/remotes", s.add)
 	mux.HandleFunc("POST /v1/remotes/{name}/refresh", s.refresh)
 	mux.HandleFunc("POST /v1/remotes/{name}/connect", s.connect)
@@ -134,6 +139,9 @@ func (s *Server) Handler() http.Handler {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		i := s.index(r.PathValue("name"))
+		if i >= 0 {
+			s.forgetFeed(r.PathValue("name"))
+		}
 		if i < 0 {
 			fail(w, http.StatusNotFound, "no such remote")
 			return

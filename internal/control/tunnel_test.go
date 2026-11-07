@@ -12,11 +12,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
 
@@ -28,6 +31,7 @@ type fakeRemote struct {
 	mintErr  error
 	forwards int
 	cut      chan struct{} // closing it drops the connection once
+	events   []events.Event
 }
 
 func (f *fakeRemote) MintToken(context.Context, remote.Target, string, string) (remote.Token, error) {
@@ -58,6 +62,19 @@ func (f *fakeRemote) Forward(ctx context.Context, _ remote.Target, socket string
 		return err
 	}
 	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			out := []events.Event{}
+			for _, e := range f.events {
+				if e.ID > after {
+					out = append(out, e)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
+			return
+		}
 		_, _ = fmt.Fprintf(w, "%s %s auth=%s", r.Method, r.URL.Path, r.Header.Get("Authorization"))
 	})}
 	go func() { _ = srv.Serve(l) }()
@@ -227,5 +244,97 @@ func TestTokenLabel(t *testing.T) {
 		if got := tokenLabel(host); got != want {
 			t.Errorf("%q: %q, want %q", host, got, want)
 		}
+	}
+}
+
+func TestFeed(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	f := &fakeRemote{cut: make(chan struct{}), events: []events.Event{{ID: 1, Name: "old", Title: "history"}, {ID: 2, Name: "old", Title: "history"}}}
+	mk := func() *Server {
+		s := &Server{Dir: dir, Connector: f, RetryAfter: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
+			Probe: func(_ context.Context, tg remote.Target) (*remote.Report, error) {
+				return &remote.Report{Kernel: "Linux", Target: tg.String()}, nil
+			}}
+		if err := s.Load(); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	s := mk()
+	t.Cleanup(s.stopAll)
+	type list struct {
+		Events []events.Event `json:"events"`
+		Unread int            `json:"unread"`
+		Seen   int64          `json:"seen"`
+	}
+	get := func(s *Server) list {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/events", nil))
+		var l list
+		if err := json.Unmarshal(rec.Body.Bytes(), &l); err != nil {
+			t.Fatal(rec.Body, err)
+		}
+		return l
+	}
+	post := func(s *Server, method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec
+	}
+	if rec := post(s, http.MethodPost, "/v1/remotes", `{"address":"ssh://nas"}`); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+	post(s, http.MethodPost, "/v1/remotes/nas/connect", "")
+	feedFile := filepath.Join(dir, "events", "state.json")
+	waitFor(t, "the first poll", func() bool { _, err := os.Stat(feedFile); return err == nil })
+	if l := get(s); len(l.Events) != 0 || l.Unread != 0 {
+		t.Errorf("history is not news: %+v", l)
+	}
+	add := func(e events.Event) {
+		f.mu.Lock()
+		f.events = append(f.events, e)
+		f.mu.Unlock()
+	}
+	add(events.Event{ID: 3, Name: "apply.failed", Severity: "error", Stack: "web", Title: "failed", Message: strings.Repeat("é", maxEventMessage)})
+	waitFor(t, "an event", func() bool { return len(get(s).Events) == 1 })
+	l := get(s)
+	if e := l.Events[0]; e.Fleet != "nas" || e.Name != "apply.failed" || l.Unread != 1 || e.ID != 1 {
+		t.Errorf("merged: %+v", l)
+	}
+	if m := l.Events[0].Message; len(m) > maxEventMessage+4 || !utf8.ValidString(m) {
+		t.Errorf("message: %d bytes, valid %v", len(m), utf8.ValidString(m))
+	}
+	// Seen goes forward only.
+	if rec := post(s, http.MethodPost, "/v1/events/seen", `{"id":1}`); rec.Code != http.StatusNoContent {
+		t.Fatal(rec.Body)
+	}
+	post(s, http.MethodPost, "/v1/events/seen", `{"id":0}`)
+	if l := get(s); l.Unread != 0 || l.Seen != 1 {
+		t.Errorf("seen: %+v", l)
+	}
+	if rec := post(s, http.MethodPost, "/v1/events/seen", `nonsense`); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad body: %d", rec.Code)
+	}
+
+	// What happens while the daemon is down arrives after its restart, once.
+	s.stopAll()
+	add(events.Event{ID: 4, Name: "container.oom", Title: "oom"})
+	s2 := mk()
+	s2.startSaved()
+	t.Cleanup(s2.stopAll)
+	waitFor(t, "catching up", func() bool { return len(get(s2).Events) == 2 })
+	time.Sleep(100 * time.Millisecond)
+	if l := get(s2); len(l.Events) != 2 || l.Unread != 1 || l.Events[1].Name != "container.oom" {
+		t.Errorf("after a restart: %+v", l)
+	}
+	// A remote can't replay old IDs into the feed.
+	add(events.Event{ID: 2, Name: "replay", Title: "x"})
+	time.Sleep(100 * time.Millisecond)
+	if l := get(s2); len(l.Events) != 2 {
+		t.Errorf("a replay was stored: %+v", l)
 	}
 }
