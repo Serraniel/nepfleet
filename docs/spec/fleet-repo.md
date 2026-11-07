@@ -165,6 +165,25 @@ spec:
 
 A plain compose stack is a valid stack. You can paste any `compose.yaml` and NepFleet versions it just the same.
 
+### Automatic updates
+
+`nepfleet updates apply` is for a timer. Each run, per stack:
+
+- **`updates: auto`:** a tag rebuilt upstream, such as a security rebuild of `:1`, is applied with the usual health gate and rollback, and the new digest is committed to `lock.yaml`. The commit's author is `automatic updates`.
+- **`updates: notify`:** sends `update.available`, once per change.
+- **`updates: off`:** nothing.
+
+```yaml
+# fleet.yaml
+spec:
+  updates:
+    window: { from: "03:00", to: "05:00", timezone: Europe/Berlin }   # when auto may act; default any time
+```
+
+- **A newer tag isn't automatic,** even within its track: it comes with a template update, so `auto` only notifies about it.
+- **It waits rather than guesses:** destructive changes and migrations are refused and reported, and a stack with uncommitted changes is left alone until they're committed. Outside the window it waits for the next run, unless you pass `--now`.
+- **Pushing is yours:** it commits locally, so a remote fleet repository needs its own push.
+
 ### Values from other stacks
 
 A value can come from another stack instead of being written twice:

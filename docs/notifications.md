@@ -28,7 +28,7 @@ Channel URLs usually contain tokens. Store them in `fleet.secret.yaml`, which is
 - **`nepfleet notify test <channel>`** sends a test message.
 - **Errors never show a channel's URL,** and a failing channel never blocks an apply.
 
-Sent today: `apply.succeeded`, `apply.failed` and `apply.rolled_back`. The other events follow with their features.
+Sent today: `apply.succeeded`, `apply.failed`, `apply.rolled_back`, `update.available` and `update.applied`, plus what `nepfleet watch` and `doctor --security --notify` report. The other events follow with their features.
 
 ## Events
 

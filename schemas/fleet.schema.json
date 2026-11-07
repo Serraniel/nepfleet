@@ -499,6 +499,36 @@
                 "auto"
               ],
               "type": "string"
+            },
+            "window": {
+              "additionalProperties": false,
+              "description": "Window is when stacks with updates: auto may update; empty means any time.",
+              "properties": {
+                "from": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "timezone": {
+                  "description": "Timezone is an IANA name; empty means the host's.",
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "to": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
             }
           },
           "type": [
