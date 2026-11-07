@@ -583,6 +583,11 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			continue
 		}
 		if p.plan.Empty() {
+			if p.tpl != nil {
+				if err := deploy.RecordVersion(p.plan.Dir, p.tpl.Metadata.Name, p.tpl.Spec.Version); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+				}
+			}
 			// Same files from another commit (or a stack from before pins):
 			// only the pin moves.
 			if p.pinMoved && !*noLock {
@@ -1136,6 +1141,7 @@ func cmdRollback(args []string, stdout, stderr io.Writer) error {
 	noCommit := fs.Bool("no-commit", false, "restore the files but do not commit")
 	noApply := fs.Bool("no-apply", false, "do not apply after restoring")
 	yes := fs.Bool("yes", false, "apply without asking")
+	confirm := fs.Bool("confirm", false, "also accept destructive changes, such as going back to an older template version")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1193,6 +1199,9 @@ func cmdRollback(args []string, stdout, stderr io.Writer) error {
 	applyArgs := []string{"--fleet", c.fleetDir, "--state", c.stateDir, "--host", c.host, s.Metadata.Name}
 	if *yes {
 		applyArgs = append([]string{"--yes"}, applyArgs...)
+	}
+	if *confirm {
+		applyArgs = append([]string{"--confirm", s.Metadata.Name}, applyArgs...)
 	}
 	return cmdApply(applyArgs, stdout, stderr)
 }

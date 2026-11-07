@@ -57,6 +57,7 @@ func TestPlanMigration(t *testing.T) {
 
 	// A rollback has to get through, asking first.
 	pr = migratePrepared(t, "2.0.0", "1.0.0", m)
+	pr.plan.Changes = []deploy.Change{{}}
 	(&env{}).planMigration(pr)
 	if pr.plan.MigrationError != "" || pr.plan.Migration != nil || len(pr.plan.Destructive) != 1 {
 		t.Errorf("going back: %+v", pr.plan)
@@ -85,10 +86,25 @@ func TestPlanMigration(t *testing.T) {
 		t.Error("a required snapshot can't be turned off")
 	}
 
-	// Nothing says where it starts, or it's a first apply.
-	pr = migratePrepared(t, "", "2.0.0", m)
+	// Same files going back: nothing to confirm, only the version to record.
+	pr = migratePrepared(t, "2.0.0", "1.0.0", m)
 	(&env{}).planMigration(pr)
-	if pr.plan.Migration != nil || pr.plan.MigrationError != "" {
+	if len(pr.plan.Destructive) != 0 || !pr.plan.Empty() {
+		t.Errorf("version only: %+v", pr.plan)
+	}
+
+	// Nothing says where it starts: someone has to say so, if files change.
+	pr = migratePrepared(t, "0.0.0-unset", "2.0.0", m)
+	raw, err := json.Marshal(deploy.Manifest{Files: []string{"compose.yaml"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pr.plan.Dir, ".nepfleet", "manifest.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pr.plan.Changes = []deploy.Change{{}}
+	(&env{}).planMigration(pr)
+	if pr.plan.Migration != nil || pr.plan.MigrationError != "" || len(pr.plan.Destructive) != 1 {
 		t.Errorf("unknown start: %+v", pr.plan)
 	}
 }

@@ -45,6 +45,13 @@ func TestUpgradePath(t *testing.T) {
 			t.Errorf("%s → %s: %v", tc.from, tc.to, tos)
 		}
 	}
+	// A migration ahead that this version's range misses isn't skipped.
+	if _, err := UpgradePath([]Migration{mig(">=1.2.0 <1.3.0", "1.3.0")}, "1.0.0", "1.4.0"); err == nil {
+		t.Error("a migration on the way was skipped")
+	}
+	if got, err := UpgradePath([]Migration{mig(">=1.2.0 <1.3.0", "1.3.0")}, "1.2.5", "1.4.0"); err != nil || len(got) != 1 {
+		t.Errorf("%v %v", got, err)
+	}
 	// Below 1.0 a minor can break.
 	if _, err := UpgradePath(nil, "0.1.0", "0.2.0"); err == nil {
 		t.Error("0.1 → 0.2 without a migration")
@@ -94,6 +101,7 @@ func TestCheckMigration(t *testing.T) {
 	}
 	for name, m := range map[string]Migration{
 		"bad range":   {From: "soon", Steps: []Step{run}},
+		"bad second":  {From: ">=1.0.0 <2.0", Steps: []Step{run}},
 		"two deploys": {From: "=1.0.0", Steps: []Step{dep, dep}},
 		"no service":  {From: "=1.0.0", Steps: []Step{{Run: []string{"x"}}}},
 		"empty step":  {From: "=1.0.0", Steps: []Step{{Name: "x"}}},

@@ -68,6 +68,44 @@ func TestRunStepStaysInTheStack(t *testing.T) {
 	}
 }
 
+type readyRunner struct{ statuses []string }
+
+func (r *readyRunner) Run(context.Context, string, ...string) ([]byte, error) {
+	s := r.statuses[0]
+	if len(r.statuses) > 1 {
+		r.statuses = r.statuses[1:]
+	}
+	return []byte(s + "\n"), nil
+}
+
+func TestWaitReady(t *testing.T) {
+	ctx := context.Background()
+	if err := waitReady(ctx, &readyRunner{statuses: []string{"starting", "healthy"}}, []string{"a"}, 10*time.Second); err != nil {
+		t.Error(err)
+	}
+	if err := waitReady(ctx, &readyRunner{statuses: []string{"none"}}, []string{"a"}, time.Second); err != nil {
+		t.Error("no health check counts as ready:", err)
+	}
+	if err := waitReady(ctx, &readyRunner{statuses: []string{"unhealthy"}}, []string{"a"}, time.Millisecond); err == nil {
+		t.Error("an unhealthy container must time out")
+	}
+}
+
+func TestRequireSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		backup, rollback string
+		want             bool
+	}{{"required", "revert", true}, {"none", "restore", true}, {"recommended", "revert", false}} {
+		if got := NewMigration(template.Migration{Backup: tc.backup, Rollback: tc.rollback}, nil).RequireSnapshot; got != tc.want {
+			t.Errorf("%+v: %v", tc, got)
+		}
+	}
+	var none *guard
+	if none.holdsData() || (&guard{}).holdsData() || (&guard{snaps: []*snapshot.Snapshot{{}}}).holdsData() {
+		t.Error("an empty snapshot holds no data")
+	}
+}
+
 const migrateCompose = `services:
   db:
     image: alpine:3.22

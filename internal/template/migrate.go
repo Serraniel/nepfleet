@@ -91,6 +91,8 @@ func inRange(v semver, r string) (bool, error) {
 	if len(fields) == 0 {
 		return false, fmt.Errorf("empty version range")
 	}
+	// Every comparator is read, so a bad one shows when the template is checked.
+	all := true
 	for _, f := range fields {
 		m := comparatorRe.FindStringSubmatch(f)
 		if m == nil {
@@ -114,11 +116,9 @@ func inRange(v semver, r string) (bool, error) {
 		default:
 			ok = c == 0
 		}
-		if !ok {
-			return false, nil
-		}
+		all = all && ok
 	}
-	return true, nil
+	return all, nil
 }
 
 // UpgradePath is the migrations that take a stack from one template version to
@@ -169,6 +169,17 @@ func UpgradePath(ms []Migration, from, to string) ([]Migration, error) {
 			}
 		}
 		if len(edges) == 0 {
+			// A migration still ahead that this version can't take would be
+			// skipped, and the new version would start on data it expects migrated.
+			for _, m := range ms {
+				mTo, err := parseSemver(m.To)
+				if err != nil {
+					return nil, false, err
+				}
+				if v.compare(mTo) < 0 && mTo.compare(target) <= 0 {
+					return nil, false, nil
+				}
+			}
 			return nil, !v.breaking(target), nil
 		}
 		// The furthest jump first: the fewest steps.

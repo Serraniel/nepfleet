@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/Serraniel/nepfleet/internal/template"
 )
@@ -27,13 +28,16 @@ type Migration struct {
 	Before, After []template.Step
 	// RestoreData puts the snapshot back on failure (rollback: restore).
 	RestoreData bool
-	Log         io.Writer
+	// RequireSnapshot refuses to start without data in the snapshot.
+	RequireSnapshot bool
+	Log             io.Writer
 }
 
 // NewMigration splits a template's steps at its deploy step; without one, the
 // new version starts last.
 func NewMigration(m template.Migration, log io.Writer) *Migration {
-	mg := &Migration{Before: m.Steps, RestoreData: m.Rollback == "restore", Log: log}
+	restores := m.Rollback == "restore"
+	mg := &Migration{Before: m.Steps, RestoreData: restores, RequireSnapshot: restores || m.Backup == "required", Log: log}
 	for i, s := range m.Steps {
 		if s.Deploy {
 			mg.Before, mg.After = m.Steps[:i], m.Steps[i+1:]
@@ -73,11 +77,43 @@ func (m *Migration) run(ctx context.Context, r Runner, stack string, steps []tem
 	return nil
 }
 
+// waitReady waits for containers with a health check to be healthy. Those without
+// one count as ready: nothing says otherwise.
+func waitReady(ctx context.Context, r Runner, ids []string, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 3 * time.Minute
+	}
+	deadline := time.Now().Add(timeout)
+	const format = "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
+	for _, id := range ids {
+		for {
+			out, err := r.Run(ctx, "", "inspect", "--format", format, id)
+			if err != nil {
+				return err
+			}
+			status := strings.TrimSpace(string(out))
+			if status == "none" || status == "healthy" {
+				break
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("container %s is %s after restarting for the migration", id, status)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
+		}
+	}
+	return nil
+}
+
 // runStep runs a command in a container of the stack, and only there. It finds
 // the container by its labels, not through compose: before the deploy, the files
 // on disk already describe the new version.
 func runStep(ctx context.Context, r Runner, stack string, s template.Step) error {
 	out, err := r.Run(ctx, "", "ps", "-q", "--filter", "status=running",
+		"--filter", "label=com.docker.compose.oneoff=False",
 		"--filter", "label=com.docker.compose.project="+stack,
 		"--filter", "label=com.docker.compose.service="+s.Service)
 	if err != nil {

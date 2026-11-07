@@ -19,9 +19,16 @@ func (e *env) planMigration(pr *prepared) {
 		return
 	}
 	man, err := deploy.Applied(p.Dir)
-	if err != nil || man == nil || man.Template != pr.tpl.Metadata.Name || man.TemplateVersion == "" {
-		// Applied before versions were recorded, or another template: nothing
-		// says where it starts. This apply records it.
+	if err != nil || man == nil || (man.Template != "" && man.Template != pr.tpl.Metadata.Name) {
+		return // nothing to migrate from
+	}
+	if man.TemplateVersion == "" {
+		// Applied before versions were recorded: this apply records it, but
+		// nothing says if the stack is past the template's migrations. Someone
+		// has to say so, as they won't run.
+		if len(p.Changes) > 0 && len(pr.tpl.Spec.Migrations) > 0 {
+			p.Destructive = append(p.Destructive, fmt.Sprintf("this stack's template version isn't recorded, so no migration runs: continue only if it already runs a version that needs none on the way to %s", pr.tpl.Spec.Version))
+		}
 		return
 	}
 	path, err := template.UpgradePath(pr.tpl.Spec.Migrations, man.TemplateVersion, pr.tpl.Spec.Version)
@@ -29,7 +36,10 @@ func (e *env) planMigration(pr *prepared) {
 	case errors.Is(err, template.ErrDowngrade):
 		// A rollback comes this way, and has to work. It runs no steps, so the
 		// data stays as the newer version left it: that takes a confirmation.
-		p.Destructive = append(p.Destructive, fmt.Sprintf("goes back from template version %s to %s; the data isn't migrated back, so restore a backup if the newer version changed it", man.TemplateVersion, pr.tpl.Spec.Version))
+		// With the same files nothing changes but the recorded version.
+		if len(p.Changes) > 0 {
+			p.Destructive = append(p.Destructive, fmt.Sprintf("goes back from template version %s to %s; the data isn't migrated back, so restore a backup if the newer version changed it, as upgrading again runs its migrations again", man.TemplateVersion, pr.tpl.Spec.Version))
+		}
 		return
 	case err != nil:
 		p.MigrationError = err.Error()
