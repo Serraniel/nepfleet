@@ -8,11 +8,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"github.com/Serraniel/nepfleet/internal/auth"
+	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"slices"
+	"strconv"
 	"time"
 )
 
@@ -33,6 +38,19 @@ type StackInfo struct {
 	Updates  string `json:"updates"`
 }
 
+// HistoryEntry is one commit that touched a stack.
+type HistoryEntry struct {
+	Commit  string `json:"commit"`
+	Date    string `json:"date"` // RFC 3339
+	Author  string `json:"author"`
+	Subject string `json:"subject"`
+	// Applied marks the revision running now.
+	Applied bool `json:"applied,omitempty"`
+}
+
+// ErrNotFound is what Plan and History return for an unknown stack.
+var ErrNotFound = errors.New("no such stack")
+
 // Options configure the API server.
 type Options struct {
 	Info Info
@@ -42,6 +60,11 @@ type Options struct {
 	// TrustedProxies are reverse proxies whose X-Forwarded-For names the
 	// client (for the lockout after failed logins).
 	TrustedProxies []*net.IPNet
+	// Plan is what applying a stack would change (deploy.Plan, secrets
+	// masked).
+	Plan func(ctx context.Context, stack string) (any, error)
+	// History lists the last n commits of a stack, newest first.
+	History func(ctx context.Context, stack string, n int) ([]HistoryEntry, error)
 	// Stacks lists the fleet's stacks.
 	Stacks func() ([]StackInfo, error)
 	// AllowedOrigins are the frontends allowed to call this backend from a
@@ -78,7 +101,71 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, out)
 	}))
+	mux.HandleFunc("GET /api/v1/stacks/{name}/plan", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, forStack(auth.ScopeRead, func(w http.ResponseWriter, r *http.Request, name string) {
+		if o.Plan == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		p, err := o.Plan(r.Context(), name)
+		if writeErr(w, err) {
+			return
+		}
+		writeJSON(w, p)
+	})))
+	mux.HandleFunc("GET /api/v1/stacks/{name}/history", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, forStack(auth.ScopeRead, func(w http.ResponseWriter, r *http.Request, name string) {
+		if o.History == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		n := 20
+		if v := r.URL.Query().Get("n"); v != "" {
+			if i, err := strconv.Atoi(v); err == nil && i > 0 && i <= 200 {
+				n = i
+			}
+		}
+		h, err := o.History(r.Context(), name, n)
+		if writeErr(w, err) {
+			return
+		}
+		if h == nil {
+			h = []HistoryEntry{}
+		}
+		writeJSON(w, h)
+	})))
 	return secure(cors(o.AllowedOrigins, mux))
+}
+
+// stackName mirrors fleet's rule for stack names.
+var stackName = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+
+// forStack passes on requests about one stack the token covers. Others get
+// 404, the same as an unknown stack, so a limited token learns nothing
+// about the rest of the fleet.
+func forStack(scope string, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		t, _ := TokenFrom(r.Context())
+		if !stackName.MatchString(name) || !t.Allows(scope, name) {
+			http.Error(w, ErrNotFound.Error(), http.StatusNotFound)
+			return
+		}
+		next(w, r, name)
+	}
+}
+
+// writeErr answers an error without internals (paths, git output), which
+// go to the server's log. It reports whether there was one.
+func writeErr(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, ErrNotFound):
+		http.Error(w, ErrNotFound.Error(), http.StatusNotFound)
+	default:
+		log.Printf("api: %v", err)
+		http.Error(w, "the stack cannot be read; see the server log", http.StatusInternalServerError)
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
