@@ -4,6 +4,7 @@ package fleet
 
 import (
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
 )
@@ -35,7 +36,37 @@ type Egress struct {
 	BlockTelemetry *bool `yaml:"blockTelemetry"`
 	// Block lists more host names to resolve to 0.0.0.0.
 	Block []string `yaml:"block"`
+	// Mode is off (the default) or enforce: containers reach only private
+	// networks and what is allowed. A stack's mode replaces the fleet's.
+	Mode string `yaml:"mode"`
+	// Allow lists host names or addresses (or CIDR ranges) containers may
+	// reach in mode enforce. Both lists count.
+	Allow []string `yaml:"allow"`
 }
+
+// Egress modes.
+const (
+	EgressOff     = "off"
+	EgressEnforce = "enforce"
+)
+
+// EffectiveEgress is a stack's mode, and everything the fleet and it allow.
+func EffectiveEgress(f *Fleet, s *Stack) (mode string, allow []string) {
+	mode = EgressOff
+	for _, e := range []*Egress{fleetEgress(f), stackEgress(s)} {
+		if e == nil {
+			continue
+		}
+		if e.Mode != "" {
+			mode = e.Mode
+		}
+		allow = append(allow, e.Allow...)
+	}
+	return mode, allow
+}
+
+// ValidHost says whether s is a plain host name, safe to hand to a resolver.
+func ValidHost(s string) bool { return hostRe.MatchString(s) }
 
 // BlockedHosts is what a stack's services must not reach: the telemetry
 // list unless the fleet or the stack turns it off, plus both Block lists.
@@ -77,6 +108,18 @@ var hostRe = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0
 func checkEgress(e *Egress) error {
 	if e == nil {
 		return nil
+	}
+	switch e.Mode {
+	case "", EgressOff, EgressEnforce:
+	default:
+		return fmt.Errorf("mode: %q is not off or enforce", e.Mode)
+	}
+	for _, a := range e.Allow {
+		_, aerr := netip.ParseAddr(a)
+		_, perr := netip.ParsePrefix(a)
+		if aerr != nil && perr != nil && !hostRe.MatchString(a) {
+			return fmt.Errorf("allow: %q is not a host name or address (no wildcards)", a)
+		}
 	}
 	for _, h := range e.Block {
 		if !hostRe.MatchString(h) {

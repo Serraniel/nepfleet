@@ -243,7 +243,29 @@ spec:
 - **Not covered:** services that share another container's network (`network_mode: service:…`) can't have `extra_hosts`. They're left out, and they usually share the other container's hosts anyway.
 - **When enabled:** the first apply after enabling shows the new `extra_hosts` lines in the plan and recreates the services once.
 
-Default-deny egress with allowlists is planned (#127).
+### Default-deny egress
+
+Blocking known hosts only stops what someone already knows about. `mode: enforce` denies everything that isn't allowed:
+
+```yaml
+spec:
+  egress:
+    mode: enforce               # default off; a stack's mode replaces the fleet's
+    allow:                      # host names, addresses or CIDR ranges; no wildcards
+      - smtp.example.org
+      - 203.0.113.5
+```
+
+- **What stays open:** private networks, so the stack's own services, the ingress and the LAN keep working. Inbound traffic and published ports aren't affected, and DNS still works.
+- **What is allowed besides `allow`:** the fleet's and stack's lists both count, plus what the template declares in `spec.egress` (`[{host: huggingface.co, why: model downloads}]`) and the hosts of its `url` inputs.
+- **How it works:** each service gets a `<service>-egress` sidecar that owns its network, ports and Caddy labels and sets the rules in that shared namespace. The service starts only once the rules are in place. If the sidecar fails, the service stays down rather than going out unfiltered.
+- **Names:** a host is looked up when the sidecar starts and every 5 minutes, and its addresses are allowed. A failed lookup keeps the last addresses. CDNs can make a host's addresses change faster, and they're shared: allowing one name allows everything else on those addresses.
+- **Raw sockets:** services lose Docker's default `NET_RAW`, which could get around the rules, unless they ask for it. Plain `ping` needs it on some images.
+- **Refused, not left unfiltered:** host networking, `network_mode: bridge` or `container:`, `privileged`, `cap_add: NET_ADMIN`, and swarm stacks. Set `mode: off` for those stacks.
+- **What it is for:** it catches telemetry and unwanted calls home. It isn't a boundary against an attacker who controls the sidecar's image or the Docker host.
+- **When enabled:** the first apply recreates the stack's services, as they move to the sidecar's network.
+
+A `log` mode, `nepfleet egress suggest` and reporting denials are planned (#127).
 
 ## Rules
 

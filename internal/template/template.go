@@ -52,15 +52,17 @@ type Metadata struct {
 
 // Spec is what NepFleet needs to install, update and migrate the stack.
 type Spec struct {
-	Version    string      `yaml:"version" schema:"required;pattern=^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$"`
-	Compose    string      `yaml:"compose" schema:"required"`
-	Images     []Image     `yaml:"images" schema:"required;minItems=1"`
-	Supports   Supports    `yaml:"supports"`
-	Inputs     []Input     `yaml:"inputs"`
-	Generate   []Generate  `yaml:"generate"`
-	Files      []File      `yaml:"files"`
-	Volumes    []Volume    `yaml:"volumes"`
-	Migrations []Migration `yaml:"migrations"`
+	Version  string   `yaml:"version" schema:"required;pattern=^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$"`
+	Compose  string   `yaml:"compose" schema:"required"`
+	Images   []Image  `yaml:"images" schema:"required;minItems=1"`
+	Supports Supports `yaml:"supports"`
+	Inputs   []Input  `yaml:"inputs"`
+	// Egress lists what the app needs to reach when a stack denies the rest.
+	Egress     []EgressHost `yaml:"egress"`
+	Generate   []Generate   `yaml:"generate"`
+	Files      []File       `yaml:"files"`
+	Volumes    []Volume     `yaml:"volumes"`
+	Migrations []Migration  `yaml:"migrations"`
 	// Hardware maps device and gpu inputs to services; NepFleet adds them
 	// to the rendered compose file only when the input has a value.
 	Hardware []Hardware `yaml:"hardware"`
@@ -111,6 +113,12 @@ type Supports struct {
 	// Metrics: services expose Prometheus metrics, declared with
 	// nepfleet.metrics.port (and optional .path, .scheme) labels.
 	Metrics bool `yaml:"metrics" json:"metrics"`
+}
+
+// EgressHost is one destination an app needs, and why.
+type EgressHost struct {
+	Host string `yaml:"host" schema:"required"`
+	Why  string `yaml:"why" schema:"required"`
 }
 
 // Input is a value the wizard asks the user for.
