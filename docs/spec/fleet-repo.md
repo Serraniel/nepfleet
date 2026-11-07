@@ -79,6 +79,28 @@ Files under `stacks/<name>/files/` are versioned with the stack and rendered int
 - **Secrets on the host:** files stay readable for the container's user, and the stack's working directory is `0700` to keep other users of the host out.
 - **Limits:** this is for config, not data: 1 MiB per file, 8 MiB and 500 files per stack. Symbolic links and the names `compose.yaml`, `.env` and `.nepfleet/` are refused. Keep what apps write themselves in volumes.
 
+## Network shares on a host
+
+Hosts mount network shares from `hosts/<name>.yaml`, so they're versioned rather than hidden in `fstab`:
+
+```yaml
+spec:
+  mounts:
+    - {name: media, type: nfs, source: "nas.local:/media", target: /mnt/media, options: [ro]}
+    - {name: box, type: cifs, source: "//u1.your-storagebox.de/backup", target: /mnt/box, user: u1, passwordSecret: BOX_PASSWORD}
+    - {name: far, type: sshfs, source: "me@far.example:/data", target: /mnt/far}
+```
+
+`nepfleet host apply <name> [ssh://address] [--fleet DIR]` shows a plan and asks, then installs the tools and writes systemd units that mount each share on first use.
+
+- **Defaults:** `_netdev` and `nofail`, so an absent share can't stop a boot. NFS uses 4.2. SMB uses 3.1.1 with encryption.
+- **Passwords:** `passwordSecret` names a value in `fleet.secret.yaml`. On the host it is only in a root-only file, never in the unit, which anyone may read.
+- **SSHFS:** logs in with a key you put at `/etc/nepfleet/mounts/<name>.key`, as root. It is your host key to give, so NepFleet doesn't create it. The remote's host key must be known to root.
+- **Stacks wait for their share:** an apply refuses a stack that bind-mounts a path on a share that isn't mounted, so a container never writes into the empty folder underneath. This check needs NepFleet running natively: in a container, it can't see the host's mounts and is skipped.
+- **Removing:** a share taken out of the file gets unmounted and its units removed. Data stays.
+- **What not to put on one:** databases and anything locking files heavily, as network shares can lose or delay locks.
+- **Not for:** volumes that follow a service across swarm nodes. Use [network storage](#network-storage) for those.
+
 ## Network storage
 
 Stack volumes can live on a NAS share or a Storage Box. Name the storage once in `fleet.yaml`:

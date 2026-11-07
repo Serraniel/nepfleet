@@ -561,6 +561,10 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 				continue
 			}
 		}
+		if err := e.checkMounts(p); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		var updated *lock.Lock
 		if *updateLock {
 			// Resolve before confirming, so the plan shows the image changes.
