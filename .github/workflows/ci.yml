@@ -61,6 +61,8 @@ jobs:
           go install filippo.io/age/cmd/...@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: go test -race -count=1 ./...
+        env:
+          NEPFLEET_TEST_DOCKER: "1"
       - run: go build ./...
       # The Go tests compare schemas and parser with a small validator; this
       # checks real files with a full JSON Schema implementation as well.

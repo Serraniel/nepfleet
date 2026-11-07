@@ -84,6 +84,31 @@
           "minLength": 1,
           "type": "string"
         },
+        "egress": {
+          "description": "Egress lists what the app needs to reach when a stack denies the rest.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "host": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "why": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "host",
+              "why"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "files": {
           "items": {
             "additionalProperties": false,
