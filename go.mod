@@ -7,7 +7,7 @@ require (
 	github.com/Serraniel/neptide v0.0.0-20261107090926-4ab2540500fa
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/descope/virtualwebauthn v1.0.5
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/nicholas-fedor/shoutrrr v0.23.0
 	go.yaml.in/yaml/v3 v3.0.6
