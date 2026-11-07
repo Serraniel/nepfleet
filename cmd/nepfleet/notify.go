@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/notify"
 )
@@ -67,11 +68,19 @@ func (e *env) notifier() (*notify.Notifier, error) {
 }
 
 // emit sends an event; a failing channel only warns.
+func eventStore(stateDir string) *events.Store {
+	return &events.Store{Dir: filepath.Join(stateDir, "events")}
+}
+
 func (e *env) emit(n *notify.Notifier, stdout io.Writer, ev notify.Event) {
+	ev.Host = e.host
+	// Always recorded: clients catch up from here, whatever channels exist.
+	if _, err := eventStore(e.stateDir).Add(events.Event{Name: ev.Name, Severity: ev.Severity, Stack: ev.Stack, Host: ev.Host, Title: ev.Title, Message: ev.Message}); err != nil {
+		fmt.Fprintf(stdout, "%s: ⚠ recording the event: %v\n", ev.Stack, err)
+	}
 	if n == nil {
 		return
 	}
-	ev.Host = e.host
 	if u := e.fleet.Spec.Notifications.UIURL; u != "" && ev.Stack != "" && ev.URL == "" {
 		ev.URL = strings.TrimRight(u, "/") + "/stacks/" + url.PathEscape(ev.Stack)
 	}

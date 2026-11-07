@@ -73,6 +73,9 @@ type Options struct {
 	StartApply func(ctx context.Context, stack, planID string, confirmDestructive bool, by string) (func(log io.Writer) error, error)
 	// Templates is the catalogue of every template source of the fleet.
 	Templates func(ctx context.Context) (any, error)
+	// Events returns events newer than the ID, at most limit, as far as allow
+	// lets through.
+	Events func(after int64, limit int, allow func(stack string) bool) (any, error)
 	// History lists the last n commits of a stack, newest first.
 	History func(ctx context.Context, stack string, n int) ([]HistoryEntry, error)
 	// Stacks lists the fleet's stacks.
@@ -132,6 +135,31 @@ func Handler(o Options) http.Handler {
 			return
 		}
 		writeJSON(w, c)
+	}))
+	mux.HandleFunc("GET /api/v1/events", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+		if o.Events == nil {
+			http.Error(w, "no events", http.StatusServiceUnavailable)
+			return
+		}
+		q := r.URL.Query()
+		after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
+		limit := 100
+		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+		t, _ := TokenFrom(r.Context())
+		// Events about the whole host are for tokens that cover everything.
+		allow := func(stack string) bool {
+			if stack == "" {
+				return len(t.Stacks) == 0
+			}
+			return t.Allows(auth.ScopeRead, stack)
+		}
+		ev, err := o.Events(after, limit, allow)
+		if writeErr(w, err) {
+			return
+		}
+		writeJSON(w, ev)
 	}))
 	js := newJobs()
 	mux.HandleFunc("POST /api/v1/stacks/{name}/apply", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {

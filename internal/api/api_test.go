@@ -416,3 +416,44 @@ func TestTemplates(t *testing.T) {
 		t.Errorf("without a token: %d", rec.Code)
 	}
 }
+
+func TestEvents(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	all, _, err := store.Create("all", auth.ScopeRead, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, _, _ := store.Create("web", auth.ScopeRead, []string{"web"}, time.Hour)
+	var gotAfter int64
+	var gotLimit int
+	h := Handler(Options{Tokens: store, Events: func(after int64, limit int, allow func(string) bool) (any, error) {
+		gotAfter, gotLimit = after, limit
+		out := []string{}
+		for _, s := range []string{"web", "db", ""} {
+			if allow(s) {
+				out = append(out, "stack:"+s)
+			}
+		}
+		return out, nil
+	}})
+	get := func(token, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("", "/api/v1/events"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("no token: %d", rec.Code)
+	}
+	rec := get(all, "/api/v1/events?after=7&limit=5")
+	if !strings.Contains(rec.Body.String(), "stack:db") || !strings.Contains(rec.Body.String(), `"stack:"`) || gotAfter != 7 || gotLimit != 5 {
+		t.Errorf("all: %s %d %d", rec.Body, gotAfter, gotLimit)
+	}
+	rec = get(web, "/api/v1/events?limit=99999")
+	if strings.Contains(rec.Body.String(), "stack:db") || strings.Contains(rec.Body.String(), `"stack:"`) || !strings.Contains(rec.Body.String(), "stack:web") || gotLimit != 100 {
+		t.Errorf("a token for web sees only web: %s (limit %d)", rec.Body, gotLimit)
+	}
+}
