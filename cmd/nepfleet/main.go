@@ -30,6 +30,7 @@ import (
 
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/deploy"
+	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
@@ -319,6 +320,9 @@ func serve(args []string, stderr io.Writer) error {
 			}
 			defer apiMu.Unlock()
 			return sourceCatalogues(c)
+		},
+		Events: func(after int64, limit int, allow func(string) bool) (any, error) {
+			return eventStore(*stateDir).After(after, limit, func(e events.Event) bool { return allow(e.Stack) })
 		},
 		StartApply: func(_ context.Context, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
 			return startApply(applyCtx, c, stack, planID, confirm, by)

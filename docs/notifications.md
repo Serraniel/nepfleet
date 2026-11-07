@@ -68,6 +68,10 @@ expected = "sha256=" + hmac.new(key, f"{ts}.".encode() + body, hashlib.sha256).h
 ok = hmac.compare_digest(expected, request.headers["X-NepFleet-Signature"]) and abs(time.time() - int(ts)) < 300
 ```
 
+## Event feed
+
+Every event is also recorded on the host, in `<state>/events/events.jsonl`, whether or not channels are configured. The last 1000 stay, and clients catch up with [`GET /api/v1/events`](api.md). The file is owner-only, because messages can hold a container's last log lines. Those lines can contain whatever an app logs, including secrets, so the read scope to this feed is worth treating like access to the logs.
+
 ## Container problems
 
 `nepfleet watch` follows Docker's events on a host and reports OOM kills, crashes, crash loops and failed health checks. Each message names the stack and includes the container's last log lines.
