@@ -17,9 +17,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/control"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
@@ -45,8 +47,51 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "running: version %s, pid %d, since %s\n", info.Version, info.PID, info.Started.Local().Format(time.RFC1123))
 		return nil
 	}
-	if len(args) > 0 {
-		return errors.New("usage: nepfleet control [status]")
+	if len(args) > 0 && args[0] == "token" {
+		t, err := control.LoadHTTPToken(controlDir())
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, t)
+		return nil
+	}
+	fs := flag.NewFlagSet("control", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	httpAddr := fs.String("http", "", "also listen on this loopback address for browsers, e.g. 127.0.0.1:7481")
+	origins := fs.String("allowed-origins", "", "comma separated origins of the web UI allowed to call --http")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return errors.New("usage: nepfleet control [--http ADDR --allowed-origins URLS] | control status | control token")
+	}
+	var httpSrv *http.Server
+	var httpGuard func(http.Handler) http.Handler
+	var httpL net.Listener
+	if *httpAddr != "" {
+		if err := control.CheckHTTPAddr(*httpAddr); err != nil {
+			return err
+		}
+		var allowed []string
+		for _, o := range strings.Split(*origins, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				if err := api.CheckOrigin(o); err != nil {
+					return fmt.Errorf("--allowed-origins: %w", err)
+				}
+				allowed = append(allowed, o)
+			}
+		}
+		token, err := control.LoadHTTPToken(controlDir())
+		if err != nil {
+			return err
+		}
+		lc := net.ListenConfig{}
+		if httpL, err = lc.Listen(context.Background(), "tcp", *httpAddr); err != nil {
+			return err
+		}
+		defer func() { _ = httpL.Close() }()
+		httpSrv = &http.Server{ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
+		httpGuard = func(h http.Handler) http.Handler { return control.Guard(h, *httpAddr, token, allowed) }
 	}
 	l, err := control.Listen(controlSocket())
 	if err != nil {
@@ -63,8 +108,12 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if httpSrv != nil {
+		httpSrv.Handler = httpGuard(s.Handler())
+		fmt.Fprintf(stderr, "nepfleet control also on http://%s (token: nepfleet control token)\n", *httpAddr)
+	}
 	fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
-	return s.Serve(ctx, l)
+	return s.Serve(ctx, l, httpSrv, httpL)
 }
 
 func controlClient() *http.Client {
