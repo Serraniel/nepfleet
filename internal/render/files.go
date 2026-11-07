@@ -13,9 +13,9 @@ import (
 
 // Limits for stacks/<name>/files/: config belongs in git, data does not.
 const (
-	maxStackFile  = 1 << 20 // per file
-	maxStackFiles = 8 << 20 // all files of a stack
-	maxFileCount  = 500
+	MaxStackFile  = 1 << 20 // per file
+	MaxStackFiles = 8 << 20 // all files of a stack
+	MaxFileCount  = 500
 )
 
 // StackFilesDir is the stack's folder of config files in the fleet repo.
@@ -55,10 +55,10 @@ func stackFiles(dir string, env map[string]string, out *Output) error {
 		count++
 		total += int(fi.Size())
 		switch {
-		case fi.Size() > maxStackFile:
-			return fmt.Errorf("%s/%s is %d KiB; config files may be at most %d KiB (keep data in volumes)", StackFilesDir, rel, fi.Size()>>10, maxStackFile>>10)
-		case total > maxStackFiles || count > maxFileCount:
-			return fmt.Errorf("%s/ holds more than %d files or %d MiB; keep data in volumes", StackFilesDir, maxFileCount, maxStackFiles>>20)
+		case fi.Size() > MaxStackFile:
+			return fmt.Errorf("%s/%s is %d KiB; config files may be at most %d KiB (keep data in volumes)", StackFilesDir, rel, fi.Size()>>10, MaxStackFile>>10)
+		case total > MaxStackFiles || count > MaxFileCount:
+			return fmt.Errorf("%s/ holds more than %d files or %d MiB; keep data in volumes", StackFilesDir, MaxFileCount, MaxStackFiles>>20)
 		}
 		raw, err := os.ReadFile(path) //nolint:gosec // inside the stack's folder, links refused above
 		if err != nil {

@@ -1260,6 +1260,8 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 	all := fs.Bool("all", false, "import every project found")
 	target := fs.String("target", "", "spec.target for the imported stacks (default: --host)")
 	encryptAll := fs.Bool("encrypt-all", false, "store every env value encrypted, not only secret-looking names")
+	var copyConfig multiFlag
+	fs.Var(&copyConfig, "copy-config", "a bind-mounted config file or folder to version with the stack (repeatable)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -1292,7 +1294,11 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 		delete(want, p.Name)
-		if err := e.importOne(ctx, stdout, p, importer.Options{Target: *target, EncryptAll: *encryptAll}, c.host, nil); err != nil {
+		var extra []string
+		if len(copyConfig) > 0 {
+			extra = []string{"its mounts moved into the fleet repository, so the running containers don't match yet: the next `nepfleet apply " + p.Name + "` recreates them, as a first deploy with no automatic rollback; the old folders stay where they are"}
+		}
+		if err := e.importOne(ctx, stdout, p, importer.Options{Target: *target, EncryptAll: *encryptAll, CopyConfig: copyConfig, NoAdopt: len(copyConfig) > 0}, c.host, extra); err != nil {
 			errs = append(errs, err)
 		}
 	}
