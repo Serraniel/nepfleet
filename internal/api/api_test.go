@@ -13,8 +13,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -278,6 +278,9 @@ func TestCertReloader(t *testing.T) {
 	}
 	if err := (&CertReloader{CertFile: filepath.Join(dir, "none"), KeyFile: kf}).Load(); err == nil {
 		t.Error("a missing file must fail at start")
+	}
+}
+
 func TestApplyJobs(t *testing.T) {
 	store := &auth.Store{Dir: t.TempDir()}
 	applier, _, err := store.Create("ci", auth.ScopeApply, nil, time.Hour)
