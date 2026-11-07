@@ -50,7 +50,8 @@ func mintScript(label, lifetime string) string {
 func parseMinted(out []byte) (Token, error) {
 	id, secret := mintedIDRe.FindSubmatch(out), mintedRe.FindSubmatch(out)
 	if id == nil || secret == nil {
-		return Token{}, fmt.Errorf("creating a token on the remote failed: %s", Clean(string(out)))
+		// Half an answer may still hold a secret: errors go to logs and clients.
+		return Token{}, fmt.Errorf("creating a token on the remote failed: %s", Clean(mintedRe.ReplaceAllString(string(out), "(token hidden)")))
 	}
 	return Token{ID: string(id[1]), Secret: string(secret[1])}, nil
 }

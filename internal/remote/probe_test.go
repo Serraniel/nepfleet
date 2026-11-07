@@ -111,6 +111,9 @@ func TestMintedToken(t *testing.T) {
 	if _, err := parseMinted([]byte("sh: nepfleet: not found\n")); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("a failure must say why: %v", err)
 	}
+	if _, err := parseMinted([]byte("something odd\nnft_abcdefghijklmnopqrstuvwxyz012345\n")); err == nil || strings.Contains(err.Error(), "nft_") {
+		t.Errorf("an error must not show a secret: %v", err)
+	}
 	s := SSH{}
 	if _, err := s.MintToken(context.Background(), Target{Host: "x"}, "a; rm", "24h"); err == nil {
 		t.Error("a label must be checked before it reaches a shell")

@@ -11,6 +11,8 @@ import (
 	"net/http/httputil"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -352,6 +354,11 @@ func (s *Server) apiProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if state, _ := t.status(); state != TunnelUp {
 		fail(w, http.StatusServiceUnavailable, name+" is "+state)
+		return
+	}
+	// Only the remote's /api/: an encoded ".." must not climb out of it.
+	if slices.Contains(strings.Split(r.PathValue("rest"), "/"), "..") {
+		fail(w, http.StatusBadRequest, "bad path")
 		return
 	}
 	r2 := r.Clone(r.Context())

@@ -132,6 +132,9 @@ func TestTunnels(t *testing.T) {
 	if want := "GET /api/v1/stacks auth=Bearer nft_secret1"; rec.Body.String() != want {
 		t.Errorf("proxied: %q", rec.Body)
 	}
+	if rec := do(http.MethodGet, "/v1/remotes/nas/api/%2e%2e/%2e%2e/healthz", ""); rec.Code == http.StatusOK {
+		t.Errorf("an encoded .. must not leave /api/: %s", rec.Body)
+	}
 	if rec := do(http.MethodGet, "/v1/remotes", ""); strings.Contains(rec.Body.String(), "nft_") {
 		t.Errorf("the token must not reach clients: %s", rec.Body)
 	}
