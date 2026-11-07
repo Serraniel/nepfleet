@@ -29,8 +29,10 @@ type Event struct {
 	Severity string    `json:"severity"`
 	Stack    string    `json:"stack,omitempty"`
 	Host     string    `json:"host,omitempty"`
-	Title    string    `json:"title"`
-	Message  string    `json:"message,omitempty"`
+	// Fleet names the remote, in the local control daemon's merged feed.
+	Fleet   string `json:"fleet,omitempty"`
+	Title   string `json:"title"`
+	Message string `json:"message,omitempty"`
 }
 
 // Store is <dir>/events.jsonl, owner-only: messages can hold log lines.

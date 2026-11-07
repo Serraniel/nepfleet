@@ -43,6 +43,13 @@ nepfleet control status
 - **If the daemon is killed outright** (`kill -9`), its `ssh` process stays until the connection drops, and the next start replaces the socket. The token it held expires within a day.
 - **A CLI install:** `nepfleet token create` must see the same state directory as the server: set `NEPFLEET_STATE` for non-interactive SSH, or use the container.
 
+## Events
+
+The daemon follows the [event feed](notifications.md#event-feed) of every connected fleet and merges them, each event labelled with its fleet. It remembers how far it read, so it catches up after a dropped tunnel or a restart. As it keeps running when clients close, nothing is lost while an app is closed, as long as the remote still holds the event (the last 1000).
+
+- `GET /v1/events?after=ID` returns events with the unread count; `POST /v1/events/seen` with `{"id": N}` marks them read.
+- **A newly connected fleet starts from now:** its history isn't news.
+
 ## Terminal client
 
 `nepfleet tui` shows your machines and, for a connected one, its stacks, each stack's plan with diffs, and applying it with a live log. It starts the daemon if needed, and closing it changes nothing: a running apply goes on.
