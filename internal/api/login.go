@@ -32,6 +32,9 @@ type Accounts struct {
 	WebAuthn *webauthn.WebAuthn
 	// SetupToken lets the first user register; empty once users exist.
 	SetupToken string
+	// OIDC signs in through an identity provider; nil means none. Without
+	// WebAuthn, it's the only way in.
+	OIDC *OIDC
 
 	mu         sync.Mutex
 	ceremonies map[string]ceremony
@@ -50,15 +53,19 @@ const (
 	kindLogin   = "login"
 	kindPasskey = "passkey"
 	kindTOTP    = "totp"
+	kindOIDC    = "oidc"
 )
 
 // ceremony is a passkey exchange between its two requests.
 type ceremony struct {
-	kind    string
-	addr    string
-	data    webauthn.SessionData
-	user    *auth.User // registering
-	secret  string     // a new authenticator's, until a code proves it
+	kind   string
+	addr   string
+	data   webauthn.SessionData
+	user   *auth.User // registering
+	secret string     // a new authenticator's, until a code proves it
+	// With an identity provider.
+	nonce, verifier, returnTo string
+
 	started time.Time
 	expires time.Time
 }
@@ -88,6 +95,14 @@ func (a *Accounts) setupNeeded() bool {
 	return want != "" && !a.Users.Any()
 }
 
+func randomToken() (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
 // addrKey groups an IPv6 client by its /64, as one host holds all of those.
 func addrKey(addr string) string {
 	ip := net.ParseIP(addr)
@@ -98,11 +113,10 @@ func addrKey(addr string) string {
 }
 
 func (a *Accounts) store(c ceremony) (string, error) {
-	raw := make([]byte, 24)
-	if _, err := rand.Read(raw); err != nil {
+	id, err := randomToken()
+	if err != nil {
 		return "", err
 	}
-	id := base64.RawURLEncoding.EncodeToString(raw)
 	c.addr = addrKey(c.addr)
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -255,9 +269,27 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 	}
 	mux.HandleFunc("GET /api/v1/auth/status", func(w http.ResponseWriter, r *http.Request) {
 		t, ok := a.sessionToken(r)
-		writeJSON(w, map[string]any{"setupNeeded": a.setupNeeded(), "signedIn": ok, "name": t.Name, "totp": ok && a.totpOn(r)})
+		writeJSON(w, map[string]any{"setupNeeded": a.setupNeeded(), "signedIn": ok, "name": t.Name, "totp": ok && a.totpOn(r),
+			"oidc": a.OIDC != nil, "passkeys": a.WebAuthn != nil})
+	})
+	mux.HandleFunc("POST /api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		if !sameOrigin(r, origins) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		if c, err := r.Cookie(SessionCookie); err == nil {
+			a.Sessions.End(c.Value)
+		}
+		a.setCookie(w, "", -1)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	a.totpRoutes(mux, guarded)
+	if a.OIDC != nil {
+		a.oidcRoutes(mux, guarded, origins)
+	}
+	if a.WebAuthn == nil {
+		return
+	}
 	mux.HandleFunc("POST /api/v1/auth/setup/begin", guarded(func(w http.ResponseWriter, r *http.Request, addr string) error {
 		var req struct {
 			SetupToken string `json:"setupToken"`
@@ -349,17 +381,6 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}))
-	mux.HandleFunc("POST /api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		if !sameOrigin(r, origins) {
-			http.Error(w, "origin not allowed", http.StatusForbidden)
-			return
-		}
-		if c, err := r.Cookie(SessionCookie); err == nil {
-			a.Sessions.End(c.Value)
-		}
-		a.setCookie(w, "", -1)
-		w.WriteHeader(http.StatusNoContent)
-	})
 	// Another passkey (a second device) needs a person signed in, not a token.
 	mux.HandleFunc("POST /api/v1/auth/passkeys/begin", guarded(func(w http.ResponseWriter, r *http.Request, addr string) error {
 		c, err := r.Cookie(SessionCookie)

@@ -52,6 +52,25 @@ People sign in with passkeys. Turn them on with `serve --passkey-domain fleet.ex
 - **Codes are weaker than passkeys:** they can be phished, a code alone signs in as that person, and the secret is stored in `users.json` (owner-only). Passkeys alone are safer, so only turn codes on if you need them.
 - **Guessing codes:** each works once. Failures count towards the address's lockout, and 5 for one user block that user's codes for 15 minutes from anywhere. Anyone can trigger that block, but it never affects passkeys.
 
+## Signing in through an identity provider
+
+Pocket ID, Authelia, Authentik and other OpenID Connect providers can sign people in, with or without passkeys:
+
+```sh
+NEPFLEET_OIDC_CLIENT_SECRET=… nepfleet serve \
+  --oidc-issuer https://id.example.org \
+  --oidc-client-id nepfleet \
+  --oidc-redirect-url https://api.example.org/api/v1/auth/oidc/callback \
+  --oidc-allow ada@example.org,group:fleet-admins
+```
+
+- **At the provider:** register a confidential client with that redirect URL.
+- **`--oidc-allow` is required,** as a provider often has more accounts than should run your fleet. It takes email addresses the provider has verified, `sub:<subject>`, and `group:<name>` from the `groups` claim. Prefer `sub:` or a group when the provider lets people change their email. Anyone on the list can do everything.
+- **Signing in:** send the browser to `GET /api/v1/auth/oidc/login?return=<URL>`, with a URL in an allowed origin. It uses the authorization code flow with PKCE, and comes back with the same session cookie as passkeys.
+- **Who someone is:** the provider's subject, never a name or email. A name that's taken gets a number.
+- **Removing someone:** take them off the list, then `nepfleet user remove NAME`, which ends their sessions. Off the list alone stops new sign-ins, but a session lasts up to 12 hours.
+- **A first user through OIDC closes passkey setup,** as the setup token is only for an empty server.
+
 ## TLS
 
 Tokens must not cross a network in the clear, so a plain-HTTP address beyond loopback is refused. Choose one:
