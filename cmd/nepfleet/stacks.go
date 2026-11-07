@@ -89,6 +89,9 @@ type prepared struct {
 	// means lock.yaml does not record it yet (first apply, --update-lock).
 	pin      *lock.TemplatePin
 	pinMoved bool
+	// lock is lock.yaml as this plan read it: apply pins exactly these
+	// digests, also if a pull changes the file meanwhile.
+	lock *lock.Lock
 }
 
 type env struct {
@@ -245,7 +248,7 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			p.TemplateFrom = l.Template.Source + "@" + l.Template.Commit[:min(12, len(l.Template.Commit))]
 		}
 	}
-	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved}
+	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved, lock: l}
 	e.finishPlan(pr)
 	return pr, nil
 }
@@ -485,31 +488,81 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	if *noLock && *updateLock {
 		return errors.New("--update-lock and --no-lock contradict each other")
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runApply(ctx, c, fs.Args(), applyOptions{yes: *yes, confirm: confirm, wait: *wait, noLock: *noLock, noSnapshot: *noSnapshot, updateLock: *updateLock}, stdout, stderr)
+}
+
+// applyOptions are the flags of nepfleet apply, for the CLI and the API.
+type applyOptions struct {
+	yes                            bool
+	confirm                        []string
+	wait                           time.Duration
+	noLock, noSnapshot, updateLock bool
+	// check, if set, sees each stack's plan before anything happens; an error
+	// refuses it. What it saw is exactly what is applied.
+	check func(*deploy.Plan) error
+}
+
+// lockStack keeps one apply per stack on this host, whether from the CLI or
+// the API. The kernel drops the lock when the process ends.
+func lockStack(stateDir, name string) (func(), error) {
+	dir := filepath.Join(stateDir, "locks")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, name+".lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the state directory, a checked stack name
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // a file descriptor fits an int
+		_ = f.Close()
+		return nil, fmt.Errorf("%s: another apply of this stack is running", name)
+	}
+	return func() { _ = f.Close() }, nil
+}
+
+func runApply(ctx context.Context, c common, names []string, o applyOptions, stdout, stderr io.Writer) error {
+	yes, wait, noLock, noSnapshot, updateLock, confirm := &o.yes, &o.wait, &o.noLock, &o.noSnapshot, &o.updateLock, o.confirm
 	e, err := c.open()
 	if err != nil {
 		return err
 	}
 	e.noSnapshot = *noSnapshot
 	e.updateLock = *updateLock
-	stacks, err := e.stacks(fs.Args())
+	stacks, err := e.stacks(names)
 	if err != nil {
 		return err
 	}
 	commit, dirty := gitRevision(e.fleet.Dir)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	notifier, nerr := e.notifier()
 	if nerr != nil {
 		fmt.Fprintf(stdout, "⚠ notifications: %v\n", nerr) // never blocks an apply
 	}
 	var errs []error
+	unlock := func() {}
+	defer func() { unlock() }()
 	for _, s := range stacks {
 		name := s.Metadata.Name
+		unlock()
+		unlock = func() {}
+		release, err := lockStack(e.stateDir, name)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		unlock = release
 		p, err := e.prepare(s)
 		if err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		if o.check != nil {
+			if err := o.check(p.plan); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 		}
 		var updated *lock.Lock
 		if *updateLock {
@@ -534,7 +587,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		}
 		pins := updated
 		if pins == nil && !*noLock {
-			pins, _ = lock.Load(s.Dir)
+			pins = p.lock
 		}
 		if err := archGate(ctx, stdout, name, p, pins); err != nil {
 			errs = append(errs, err)
@@ -571,9 +624,8 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 		if !*noLock {
 			if updated != nil {
 				opts.Lock = updated
-			} else if opts.Lock, err = lock.Load(s.Dir); err != nil {
-				errs = append(errs, err)
-				continue
+			} else {
+				opts.Lock = p.lock
 			}
 			opts.Resolver = e.resolverOnce()
 		}

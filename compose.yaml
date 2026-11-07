@@ -16,6 +16,8 @@ services:
   nepfleet:
     image: ghcr.io/serraniel/nepfleet:latest   # or :edge
     restart: unless-stopped
+    # Stopping waits for a running apply: health gate, then a possible rollback.
+    stop_grace_period: 10m
     read_only: true
     tmpfs: [/tmp]
     # Runs as the owner of /srv/nepfleet, so you can edit and commit the fleet
