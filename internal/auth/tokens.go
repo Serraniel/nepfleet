@@ -20,8 +20,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/Serraniel/nepfleet/internal/flock"
 )
 
 // Scopes, each including the ones before it.
@@ -218,15 +219,7 @@ func (s *Store) lock() (func(), error) {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(s.Dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the installation's own state directory
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil { //nolint:gosec // a file descriptor fits an int
-		_ = f.Close()
-		return nil, err
-	}
-	return func() { _ = f.Close() }, nil
+	return flock.Lock(filepath.Join(s.Dir, ".lock"), true)
 }
 
 func (s *Store) load() ([]Token, error) {

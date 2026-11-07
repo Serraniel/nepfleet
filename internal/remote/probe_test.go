@@ -5,6 +5,7 @@ package remote
 import (
 	"context"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -76,6 +77,9 @@ func TestNext(t *testing.T) {
 
 // The script itself, run by a local shell in place of ssh.
 func TestProbeScriptRuns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell; on Windows the script runs on the remote only")
+	}
 	run := func(ctx context.Context, _ Target, script string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, "sh", "-s")
 		cmd.Stdin = strings.NewReader(script)

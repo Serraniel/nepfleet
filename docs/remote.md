@@ -60,3 +60,9 @@ Any web page you open can send requests to a local port, and this one reaches al
 - **Loopback only:** other addresses are refused. To reach it from elsewhere, use SSH.
 
 Each connected remote then works as a backend at `http://127.0.0.1:7481/v1/remotes/<name>`.
+
+## Platforms
+
+The client side (`nepfleet remote`, `nepfleet control`) runs on Linux, macOS and Windows, using the system's `ssh` (Windows ships OpenSSH). Servers and the hosts NepFleet manages run Linux.
+
+On Windows, a tunnel's local end is a loopback port instead of a private socket, because its `ssh` can't forward to a Unix socket. Other local users could reach that port, but the remote's API still asks for the token, which only the daemon holds.
