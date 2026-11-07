@@ -15,6 +15,7 @@ import (
 	"github.com/Serraniel/neptide/pkg/registry"
 	track "github.com/Serraniel/neptide/pkg/version"
 
+	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/lock"
 )
 
@@ -39,6 +40,9 @@ type imageUpdate struct {
 // image's track (templates: spec.images; plain stacks follow digests),
 // beyond it, and tags rebuilt since lock.yaml pinned them. Read-only.
 func cmdUpdates(args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "apply" {
+		return cmdUpdatesApply(args[1:], stdout, stderr)
+	}
 	var c common
 	fs := flag.NewFlagSet("updates", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -60,24 +64,12 @@ func cmdUpdates(args []string, stdout, stderr io.Writer) error {
 	e.resolverOnce()
 	var all []imageUpdate
 	for _, s := range stacks {
-		p, err := e.prepare(s)
+		found, err := e.stackUpdates(ctx, s)
 		if err != nil {
 			fmt.Fprintf(stderr, "%v\n", err)
 			continue
 		}
-		tracks := map[string]track.Track{}
-		if p.tpl != nil {
-			for _, img := range p.tpl.Spec.Images {
-				if r, err := registry.ParseRef(img.Name); err == nil {
-					tracks[r.Name()] = track.Track(img.Track)
-				}
-			}
-		}
-		pins, _ := lock.Load(s.Dir)
-		images, _ := composeImages(p.out)
-		for _, img := range images {
-			all = append(all, e.checkImage(ctx, s.Metadata.Name, img, tracks, pins))
-		}
+		all = append(all, found...)
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -86,6 +78,29 @@ func cmdUpdates(args []string, stdout, stderr io.Writer) error {
 	}
 	printUpdates(stdout, all)
 	return nil
+}
+
+// stackUpdates is what the registry has for each image of a stack.
+func (e *env) stackUpdates(ctx context.Context, s *fleet.Stack) ([]imageUpdate, error) {
+	p, err := e.prepare(s)
+	if err != nil {
+		return nil, err
+	}
+	tracks := map[string]track.Track{}
+	if p.tpl != nil {
+		for _, img := range p.tpl.Spec.Images {
+			if r, err := registry.ParseRef(img.Name); err == nil {
+				tracks[r.Name()] = track.Track(img.Track)
+			}
+		}
+	}
+	pins, _ := lock.Load(s.Dir)
+	images, _ := composeImages(p.out)
+	var out []imageUpdate
+	for _, img := range images {
+		out = append(out, e.checkImage(ctx, s.Metadata.Name, img, tracks, pins))
+	}
+	return out, nil
 }
 
 func (e *env) checkImage(ctx context.Context, stack, img string, tracks map[string]track.Track, pins *lock.Lock) imageUpdate {

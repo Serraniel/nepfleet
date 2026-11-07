@@ -67,6 +67,10 @@ func ParsePolicy(dedup, from, to, timezone string) (Policy, error) {
 	return p, nil
 }
 
+// InWindow says whether a moment falls between from and to; with neither set, it
+// doesn't.
+func (p Policy) InWindow(t time.Time) bool { return p.quietAt(t) }
+
 func (p Policy) quietAt(t time.Time) bool {
 	if !p.Quiet {
 		return false
