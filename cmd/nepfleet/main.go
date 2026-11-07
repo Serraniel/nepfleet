@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -702,6 +703,7 @@ func stackInfos(dir string) ([]api.StackInfo, error) {
 		}
 		si.URL = stackAddress(f, s)
 		si.Links = stackLinks(f, all, s)
+		si.Uses = stackUses(s)
 		out = append(out, si)
 	}
 	return out, nil
@@ -721,6 +723,18 @@ func stackAddress(f *fleet.Fleet, s *fleet.Stack) string {
 		return "https://" + d.Literal
 	}
 	return ""
+}
+
+// stackUses lists the values a stack takes from others, sorted: names, not values.
+func stackUses(s *fleet.Stack) []api.StackRef {
+	var out []api.StackRef
+	for key, v := range s.Spec.Values {
+		if v.IsRef() {
+			out = append(out, api.StackRef{Key: key, From: v.From, Value: v.Value, Secret: v.Secret})
+		}
+	}
+	slices.SortFunc(out, func(a, b api.StackRef) int { return strings.Compare(a.Key, b.Key) })
+	return out
 }
 
 // stackLinks point to where else a stack can be looked at: its logs in the fleet's
