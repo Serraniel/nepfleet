@@ -34,10 +34,19 @@ Dependabot updates code dependencies, actions and digest-pinned base images, and
 - **Support period**: until 1.0, the latest release. From 1.0 on, the latest minor version of each supported major version, with the support period stated per major version.
 - **VEX**: when a dependency reports a vulnerability that NepFleet does not reach (`govulncheck` shows the call graph), we publish an OpenVEX statement with the release (planned).
 
-## Infrastructure SBOMs (planned)
+## Infrastructure SBOMs
 
-NepFleet knows every image running on every host and swarm node, so it can produce an SBOM of your *infrastructure*:
+NepFleet knows which images your stacks run, so it can produce an SBOM of your *infrastructure*:
 
-- `nepfleet sbom --target <host|swarm|stack>` builds one CycloneDX document per stack, plus an aggregate that references each image by digest.
-- For each image, NepFleet first uses the SBOM attestation if the image has one, and otherwise generates an SBOM with Syft. Results are cached by digest.
-- The documents can be committed to the fleet repository, which keeps a history of what ran when. They can also be checked against advisories, with alerts sent through [notifications](notifications.md).
+```sh
+nepfleet sbom                       # the stacks on this host, as one CycloneDX document
+nepfleet sbom web db --out sboms/   # one <stack>.cdx.json each, plus fleet.cdx.json
+nepfleet sbom --contents            # also what's inside each image, with Syft
+```
+
+- **Images are named by digest,** from `lock.yaml`. One without a pinned digest is listed by tag with a warning, as the tag can move.
+- **`--contents`** needs [Syft](https://github.com/anchore/syft) installed, and results are cached by digest. An image it can't read is still listed, and the command reports it and fails.
+- **It reports what the fleet says should run,** from the rendered stacks and pins, not by asking Docker what's running.
+- **To keep a history,** commit the documents to the fleet repository.
+
+Planned: using an image's SBOM attestation before falling back to Syft, swarm targets, and checking against advisories, with alerts through [notifications](notifications.md).
