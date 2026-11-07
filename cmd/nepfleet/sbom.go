@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,12 +13,15 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Serraniel/neptide/pkg/registry"
 
 	"github.com/Serraniel/nepfleet/internal/lock"
+	"github.com/Serraniel/nepfleet/internal/notify"
 	"github.com/Serraniel/nepfleet/internal/sbom"
 )
 
@@ -51,6 +55,85 @@ func imagesOf(refs []string, pins *lock.Lock) []sbom.Image {
 	return out
 }
 
+// reportAdvisories prints what's known about a document's packages. Not knowing is
+// an error, so it can't read as clean.
+func (e *env) reportAdvisories(ctx context.Context, doc *sbom.Document, notifyNew bool, stdout, stderr io.Writer) error {
+	found, unchecked, err := (&sbom.OSV{URL: sbom.OSVURL}).Check(ctx, doc)
+	if err != nil {
+		return fmt.Errorf("checking advisories: %w", err)
+	}
+	for _, image := range unchecked {
+		fmt.Fprintf(stderr, "⚠ %s wasn't checked: nothing is known about what's inside it\n", image)
+	}
+	if len(found) == 0 {
+		fmt.Fprintln(stdout, "no known vulnerabilities in the images that were checked")
+	}
+	for _, a := range found {
+		fixed := "no fix known"
+		if a.Fixed != "" {
+			fixed = "fixed in " + a.Fixed
+		}
+		fmt.Fprintf(stdout, "%s: %s %s %s (%s, %s)\n", a.Image, a.ID, a.Severity, a.Package, a.Summary, fixed)
+	}
+	if !notifyNew {
+		return nil
+	}
+	return e.notifyAdvisories(found, stdout)
+}
+
+// notifyAdvisories reports new advisories per image, once each.
+func (e *env) notifyAdvisories(found []sbom.Advisory, stdout io.Writer) error {
+	path := filepath.Join(e.stateDir, "sbom", "notified.json")
+	seen := map[string]bool{}
+	if raw, err := os.ReadFile(path); err == nil { //nolint:gosec // the installation's own state directory
+		if json.Unmarshal(raw, &seen) != nil {
+			seen = map[string]bool{} // damaged: report again rather than stay quiet
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fresh := map[string][]string{}
+	now := map[string]bool{}
+	for _, a := range found {
+		key := a.Image + " " + a.ID
+		now[key] = true
+		if !seen[key] {
+			line := a.ID + " in " + a.Package
+			if a.Fixed != "" {
+				line += ", fixed in " + a.Fixed
+			}
+			fresh[a.Image] = append(fresh[a.Image], line)
+		}
+	}
+	n, err := e.notifier()
+	if err != nil {
+		return err
+	}
+	const maxLines = 20
+	images := make([]string, 0, len(fresh))
+	for image := range fresh {
+		images = append(images, image)
+	}
+	slices.Sort(images)
+	for _, image := range images {
+		lines := fresh[image]
+		count := len(lines)
+		if count > maxLines {
+			lines = append(lines[:maxLines:maxLines], fmt.Sprintf("and %d more", count-maxLines))
+		}
+		e.emit(n, stdout, notify.Event{Name: "security.vulnerable_image", Severity: notify.Warning,
+			Title: fmt.Sprintf("%s has %d new known vulnerabilities", image, count), Message: strings.Join(lines, "\n")})
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(now)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
+}
+
 // cmdSBOM: nepfleet sbom [stack...] [--out DIR] [--contents]. It only reads.
 func cmdSBOM(args []string, stdout, stderr io.Writer) error {
 	var c common
@@ -59,8 +142,13 @@ func cmdSBOM(args []string, stdout, stderr io.Writer) error {
 	c.register(fs)
 	out := fs.String("out", "", "write one <stack>.cdx.json per stack and fleet.cdx.json here, instead of printing the aggregate")
 	contents := fs.Bool("contents", false, "also list what's inside each image, with Syft (cached by digest)")
+	advisories := fs.Bool("advisories", false, "look up known vulnerabilities at osv.dev instead of printing the document; sends package names and versions, and implies --contents")
+	notifyNew := fs.Bool("notify", false, "with --advisories: send new ones to the fleet's notification channels")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *advisories {
+		*contents = true
 	}
 	e, err := c.open()
 	if err != nil {
@@ -111,9 +199,16 @@ func cmdSBOM(args []string, stdout, stderr io.Writer) error {
 		enc.SetEscapeHTML(false) // package URLs hold &
 		return enc.Encode(doc)
 	}
-	if *out == "" {
-		if err := write(stdout, all); err != nil {
+	if *advisories {
+		if err := e.reportAdvisories(ctx, all, *notifyNew, stdout, stderr); err != nil {
 			return err
+		}
+	}
+	if *out == "" {
+		if !*advisories {
+			if err := write(stdout, all); err != nil {
+				return err
+			}
 		}
 	} else {
 		if err := os.MkdirAll(*out, 0o750); err != nil {
