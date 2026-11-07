@@ -54,6 +54,6 @@ func TestStackFiles(t *testing.T) {
 	write(t, env, "X=1\n")
 	refused(".env")
 	must(t, os.Remove(env))
-	write(t, filepath.Join(sdir, "files", "big.bin"), strings.Repeat("x", maxStackFile+1))
+	write(t, filepath.Join(sdir, "files", "big.bin"), strings.Repeat("x", MaxStackFile+1))
 	refused("a file over the size limit")
 }

@@ -141,6 +141,9 @@ type Options struct {
 	NoAdopt bool
 	// EncryptAll stores every env value encrypted, not only secret-looking ones.
 	EncryptAll bool
+	// CopyConfig lists bind-mounted paths to move into the stack's files/, so
+	// they're versioned with it. Those mounts change, so the stack isn't adopted.
+	CopyConfig []string
 }
 
 // ImportCompose writes stacks/<project>/ from a running Compose project.
@@ -208,7 +211,27 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 		res.Warnings = append(res.Warnings, fmt.Sprintf("service %s had %s written into the compose file; it is now stored encrypted as ${%s}", m.service, m.key, name))
 	}
 
+	configSecrets := map[string]string{}
+	configFiles := map[string][]byte{}
+	if len(o.CopyConfig) > 0 {
+		var warnings []string
+		if cfg, configFiles, warnings, err = copyConfig(cfg, o.CopyConfig, configSecrets); err != nil {
+			return nil, err
+		}
+		res.Warnings = append(res.Warnings, warnings...)
+	}
+	for _, p := range configCandidates(cfg, o.CopyConfig) {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%s looks like a small config folder: --copy-config %s versions it with the stack", p, p))
+	}
+
 	values, sec := map[string]string{}, map[string]string{}
+	for k, v := range configSecrets {
+		if _, clash := env[k]; clash {
+			return nil, fmt.Errorf("%s is already a value of this project, and a secret from a config file got the same name", k)
+		}
+		sec[k] = v
+		res.Secrets = append(res.Secrets, k)
+	}
 	for k, v := range env {
 		if strings.ContainsAny(v, "'\n\r") {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("%s contains a single quote or newline and cannot be written to an env file literally; change it before applying", k))
@@ -236,6 +259,9 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 	}
 	header := fmt.Sprintf("# Imported by NepFleet on %s from %s\n", time.Now().UTC().Format("2006-01-02"), source)
 	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), append([]byte(header), cfg...), 0o600); err != nil {
+		return nil, err
+	}
+	if err := writeConfigFiles(dir, configFiles); err != nil {
 		return nil, err
 	}
 	stack := map[string]any{
