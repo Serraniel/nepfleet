@@ -68,6 +68,25 @@ expected = "sha256=" + hmac.new(key, f"{ts}.".encode() + body, hashlib.sha256).h
 ok = hmac.compare_digest(expected, request.headers["X-NepFleet-Signature"]) and abs(time.time() - int(ts)) < 300
 ```
 
+## Dedup and quiet hours
+
+```yaml
+spec:
+  notifications:
+    dedupWindow: 1h        # the same event at most once per hour
+    quietHours:
+      from: "22:00"
+      to: "07:00"
+      timezone: Europe/Berlin   # default: the host's
+```
+
+- **The same event** means the same name, stack, host and title, so two different containers crashing are two events.
+- **Quiet hours** hold `info` events back. Warnings and errors always go out at once.
+- **The digest** lists what was held, per channel. It goes out with the next event after quiet hours end, or within a minute if `nepfleet watch` is running.
+- **The [event feed](#event-feed) has everything:** this only limits messages to channels. A digest that fails to send isn't retried, but its events stay in the feed.
+- **Off by default,** and `nepfleet notify test` ignores both.
+- **If the state can't be read,** in `<state>/notify`, events go out: too many messages beat a missed one.
+
 ## Event feed
 
 Every event is also recorded on the host, in `<state>/events/events.jsonl`, whether or not channels are configured. The last 1000 stay, and clients catch up with [`GET /api/v1/events`](api.md). The file is owner-only, because messages can hold a container's last log lines. Those lines can contain whatever an app logs, including secrets, so the read scope to this feed is worth treating like access to the logs.
