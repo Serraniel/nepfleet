@@ -49,4 +49,16 @@ nepfleet sbom --contents            # also what's inside each image, with Syft
 - **It reports what the fleet says should run,** from the rendered stacks and pins, not by asking Docker what's running.
 - **To keep a history,** commit the documents to the fleet repository.
 
-Planned: using an image's SBOM attestation before falling back to Syft, swarm targets, and checking against advisories, with alerts through [notifications](notifications.md).
+### Known vulnerabilities
+
+```sh
+nepfleet sbom --advisories            # what's known about the images' packages
+nepfleet sbom --advisories --notify   # for a timer: sends what's new, once
+```
+
+- **Looked up at [OSV](https://osv.dev),** which includes GitHub's advisories. It sends package names and versions, and nothing about your hosts, stacks or images. It needs Syft, as `--contents` does.
+- **Not knowing isn't clean:** if the lookup fails, the command fails, and images it couldn't look inside are named.
+- **New ones** reach your channels as `security.vulnerable_image`, one message per image. Run it on a schedule.
+- **Expect noise:** a package can be listed without the vulnerable code being reachable, and distribution packages may have fixes that OSV doesn't know about.
+
+Planned: using an image's SBOM attestation before falling back to Syft, and swarm targets.
