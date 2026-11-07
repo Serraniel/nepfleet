@@ -401,6 +401,15 @@ func fileMode(path string) os.FileMode {
 }
 
 func writeFiles(dir string, files map[string][]byte, prev *Manifest) error {
+	// Rendered files can hold secrets, and containers with another user must
+	// read them (0644). So the directory keeps other users of the host out;
+	// bind mounts still work, as the Docker daemon resolves them.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory: needs its execute bit
+		return err
+	}
 	for path, content := range files {
 		if !filepath.IsLocal(path) {
 			return fmt.Errorf("refusing to write outside the stack directory: %s", path)

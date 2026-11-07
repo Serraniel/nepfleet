@@ -68,6 +68,17 @@ spec:
 - **No ingress at all:** in port mode, the Caddy labels of every service of the stack are dropped.
 - **Swarm:** port mode is for compose stacks for now.
 
+## Config files
+
+Files under `stacks/<name>/files/` are versioned with the stack and rendered into its working directory: `files/config/app.yaml` becomes `config/app.yaml`, which the compose file mounts as `./config/app.yaml`.
+
+- **Variables:** `${VAR}` is replaced as in template files, including secrets. Write `$${VAR}` for a literal `${VAR}`.
+- **Overriding a template:** a file with the same destination as a template's file replaces it; the template's other files stay. So the template ships defaults, and the repository owns what it overrides.
+- **Changes:** plans show these files like compose changes, with secret values masked. `history` and `rollback` cover them, as they are part of the stack's directory, and deleted files are removed on apply.
+- **Restarts:** files change in place, so an app that only reads its config at start needs a restart to see it.
+- **Secrets on the host:** files stay readable for the container's user, and the stack's working directory is `0700` to keep other users of the host out.
+- **Limits:** this is for config, not data: 1 MiB per file, 8 MiB and 500 files per stack. Symbolic links and the names `compose.yaml`, `.env` and `.nepfleet/` are refused. Keep what apps write themselves in volumes.
+
 ## Network storage
 
 Stack volumes can live on a NAS share or a Storage Box. Name the storage once in `fleet.yaml`:
