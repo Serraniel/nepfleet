@@ -3,7 +3,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -123,5 +125,56 @@ func TestLimiterBounded(t *testing.T) {
 	}
 	if len(l.fails) > maxTracked {
 		t.Errorf("tracked %d addresses", len(l.fails))
+	}
+}
+
+func TestStackEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	all, _, err := store.Create("all", auth.ScopeRead, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webOnly, _, _ := store.Create("web", auth.ScopeRead, []string{"web"}, time.Hour)
+	h := Handler(Options{Tokens: store,
+		Plan: func(_ context.Context, s string) (any, error) {
+			switch s {
+			case "web", "db":
+				return map[string]string{"stack": s}, nil
+			case "broken":
+				return nil, errors.New("/srv/secret/path: git failed")
+			}
+			return nil, ErrNotFound
+		},
+		History: func(_ context.Context, s string, n int) ([]HistoryEntry, error) {
+			return []HistoryEntry{{Commit: "abc", Subject: fmt.Sprintf("%s %d", s, n), Applied: true}}, nil
+		},
+	})
+	get := func(token, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get(all, "/api/v1/stacks/db/plan"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"db"`) {
+		t.Errorf("plan: %d %s", rec.Code, rec.Body)
+	}
+	if rec := get(webOnly, "/api/v1/stacks/db/plan"); rec.Code != http.StatusNotFound {
+		t.Errorf("a token limited to web must not see db: %d", rec.Code)
+	}
+	if rec := get(all, "/api/v1/stacks/nope/plan"); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown stack: %d", rec.Code)
+	}
+	if rec := get(all, "/api/v1/stacks/broken/plan"); rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "/srv") {
+		t.Errorf("errors must not leak internals: %d %s", rec.Code, rec.Body)
+	}
+	if rec := get(all, "/api/v1/stacks/Bad..Name/plan"); rec.Code != http.StatusNotFound {
+		t.Errorf("invalid name: %d", rec.Code)
+	}
+	if rec := get(webOnly, "/api/v1/stacks/web/history?n=5"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"web 5"`) {
+		t.Errorf("history: %d %s", rec.Code, rec.Body)
+	}
+	if rec := get("", "/api/v1/stacks/web/history"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("no token: %d", rec.Code)
 	}
 }

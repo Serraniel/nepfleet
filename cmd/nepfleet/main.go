@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -234,6 +235,7 @@ func serve(args []string, stderr io.Writer) error {
 	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
 	stateDir := fs.String("state", envOr("NEPFLEET_STATE", defaultState()), "state directory (API tokens live in <state>/api)")
 	name := fs.String("name", hostname(), "name shown to frontends")
+	host := fs.String("host", envOr("NEPFLEET_HOST", hostname()), "this host's name, as for plan and apply")
 	origins := fs.String("allowed-origins", "", "comma separated frontend origins allowed via CORS")
 	proxies := fs.String("trusted-proxies", "", "comma separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. 172.16.0.0/12")
 	if err := fs.Parse(args); err != nil {
@@ -262,12 +264,31 @@ func serve(args []string, stderr io.Writer) error {
 			allowed = append(allowed, o)
 		}
 	}
+	c := common{fleetDir: *fleetDir, stateDir: *stateDir, host: *host}
 	srv := api.Server(*addr, api.Options{
 		Info:           api.Info{Name: *name, Version: version, APIVersion: "v1"},
 		AllowedOrigins: allowed,
 		Tokens:         tokenStore(*stateDir),
 		TrustedProxies: trustedNets,
 		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
+		Plan: func(_ context.Context, stack string) (any, error) {
+			return withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
+				p, err := e.prepare(s)
+				if err != nil {
+					return nil, err
+				}
+				pl := *p.plan
+				pl.Dir = "" // the server's paths are none of the client's business
+				return &pl, nil
+			})
+		},
+		History: func(_ context.Context, stack string, n int) ([]api.HistoryEntry, error) {
+			h, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) { return e.history(s, n) })
+			if err != nil {
+				return nil, err
+			}
+			return h.([]api.HistoryEntry), nil
+		},
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -295,6 +316,31 @@ func hostname() string {
 		return "nepfleet"
 	}
 	return h
+}
+
+// apiMu runs one fleet operation of the API at a time: plans fetch template
+// sources and render into shared directories.
+var apiMu sync.Mutex
+
+// withStack opens the fleet fresh (edits and pulls show without a restart)
+// and runs fn on one of its stacks; an unknown stack is api.ErrNotFound.
+func withStack(c common, name string, fn func(*env, *fleet.Stack) (any, error)) (any, error) {
+	apiMu.Lock()
+	defer apiMu.Unlock()
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	all, err := e.fleet.Stacks()
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range all {
+		if s.Metadata.Name == name {
+			return fn(e, s)
+		}
+	}
+	return nil, api.ErrNotFound
 }
 
 // stackInfos reads the fleet's stacks for the API, fresh on every request,
