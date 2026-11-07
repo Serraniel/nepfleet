@@ -194,6 +194,44 @@
                 "null"
               ]
             },
+            "dedupWindow": {
+              "description": "DedupWindow sends the same event at most once per this long (\"1h\").",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "quietHours": {
+              "additionalProperties": false,
+              "description": "QuietHours hold info events back, for a digest afterwards.",
+              "properties": {
+                "from": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "timezone": {
+                  "description": "Timezone is an IANA name; empty means the host's.",
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "to": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
             "routes": {
               "items": {
                 "additionalProperties": false,

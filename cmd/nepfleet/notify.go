@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/fleet"
@@ -84,8 +85,66 @@ func (e *env) emit(n *notify.Notifier, stdout io.Writer, ev notify.Event) {
 	if u := e.fleet.Spec.Notifications.UIURL; u != "" && ev.Stack != "" && ev.URL == "" {
 		ev.URL = strings.TrimRight(u, "/") + "/stacks/" + url.PathEscape(ev.Stack)
 	}
+	now := time.Now()
+	gate, err := e.notifyGate()
+	if err != nil {
+		// Checked when the fleet loads; if it still fails, better too many messages.
+		fmt.Fprintf(stdout, "%s: ⚠ notification policy: %v\n", ev.Stack, err)
+	}
+	if gate != nil {
+		action, err := gate.Admit(ev, n.Channels(ev), now)
+		if err != nil {
+			fmt.Fprintf(stdout, "%s: ⚠ notification state: %v\n", ev.Stack, err)
+		}
+		if action != notify.Deliver {
+			e.sendDigests(n, stdout)
+			return
+		}
+	}
 	if err := n.Send(ev); err != nil {
 		fmt.Fprintf(stdout, "%s: ⚠ notification: %v\n", ev.Stack, err)
+	} else if gate != nil {
+		if err := gate.Delivered(ev, now); err != nil {
+			fmt.Fprintf(stdout, "%s: ⚠ notification state: %v\n", ev.Stack, err)
+		}
+	}
+	e.sendDigests(n, stdout)
+}
+
+// notifyGate is the fleet's dedup and quiet hours; nil if neither is set.
+func (e *env) notifyGate() (*notify.Gate, error) {
+	cfg := e.fleet.Spec.Notifications
+	if cfg.DedupWindow == "" && cfg.QuietHours == nil {
+		return nil, nil
+	}
+	var from, to, timezone string
+	if q := cfg.QuietHours; q != nil {
+		from, to, timezone = q.From, q.To, q.Timezone
+	}
+	p, err := notify.ParsePolicy(cfg.DedupWindow, from, to, timezone)
+	if err != nil {
+		return nil, err
+	}
+	return &notify.Gate{Dir: filepath.Join(e.stateDir, "notify"), Policy: p}, nil
+}
+
+// sendDigests sends what quiet hours held back, once they're over.
+func (e *env) sendDigests(n *notify.Notifier, stdout io.Writer) {
+	gate, err := e.notifyGate()
+	if gate == nil || err != nil {
+		return
+	}
+	due, err := gate.Due(time.Now())
+	if err != nil {
+		fmt.Fprintf(stdout, "⚠ notification state: %v\n", err)
+		return
+	}
+	for _, d := range due {
+		ev := d.Event
+		ev.Host = e.host
+		if err := n.SendTo([]string{d.Channel}, ev); err != nil {
+			fmt.Fprintf(stdout, "⚠ notification digest: %v\n", err)
+		}
 	}
 }
 

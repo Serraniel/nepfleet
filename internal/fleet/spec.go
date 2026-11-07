@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -43,6 +44,10 @@ type Spec struct {
 		// UIURL is where the NepFleet UI is reached; messages about a
 		// stack link to <UIURL>/stacks/<name>.
 		UIURL string `yaml:"uiURL"`
+		// DedupWindow sends the same event at most once per this long ("1h").
+		DedupWindow string `yaml:"dedupWindow"`
+		// QuietHours hold info events back, for a digest afterwards.
+		QuietHours *QuietHours `yaml:"quietHours"`
 	} `yaml:"notifications"`
 	// UptimeKuma instances get maintenance windows while stacks with their
 	// monitors are being changed (docs/maintenance.md).
@@ -94,6 +99,42 @@ type NotifyRoute struct {
 	// Stacks limits the route to these stacks; empty matches all.
 	Stacks      []string `yaml:"stacks"`
 	MinSeverity string   `yaml:"minSeverity" schema:"enum=info|warning|error"`
+}
+
+// QuietHours run from one time of day to another, perhaps over midnight.
+type QuietHours struct {
+	From string `yaml:"from" schema:"required"`
+	To   string `yaml:"to" schema:"required"`
+	// Timezone is an IANA name; empty means the host's.
+	Timezone string `yaml:"timezone"`
+}
+
+func checkNotifyPolicy(dedup string, q *QuietHours) error {
+	if dedup != "" {
+		if d, err := time.ParseDuration(dedup); err != nil || d <= 0 {
+			return fmt.Errorf("fleet.yaml: notifications.dedupWindow: %q is not a duration like 1h", dedup)
+		}
+	}
+	if q == nil {
+		return nil
+	}
+	from, err := time.Parse("15:04", q.From)
+	if err != nil {
+		return fmt.Errorf("fleet.yaml: notifications.quietHours.from: %q is not a time like 22:00", q.From)
+	}
+	to, err := time.Parse("15:04", q.To)
+	if err != nil {
+		return fmt.Errorf("fleet.yaml: notifications.quietHours.to: %q is not a time like 07:00", q.To)
+	}
+	if from.Equal(to) {
+		return errors.New("fleet.yaml: notifications.quietHours: from and to are the same")
+	}
+	if q.Timezone != "" {
+		if _, err := time.LoadLocation(q.Timezone); err != nil {
+			return fmt.Errorf("fleet.yaml: notifications.quietHours.timezone: %q is unknown", q.Timezone)
+		}
+	}
+	return nil
 }
 
 // KumaInstance is an Uptime Kuma NepFleet may open maintenance windows in.
@@ -347,6 +388,9 @@ func Load(dir string) (*Fleet, error) {
 	}
 	if u := f.Spec.Notifications.UIURL; u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
 		return nil, fmt.Errorf("fleet.yaml: notifications.uiURL: %q is not an http(s) URL", u)
+	}
+	if err := checkNotifyPolicy(f.Spec.Notifications.DedupWindow, f.Spec.Notifications.QuietHours); err != nil {
+		return nil, err
 	}
 	for i, r := range f.Spec.Notifications.Routes {
 		if len(r.Channels) == 0 {
