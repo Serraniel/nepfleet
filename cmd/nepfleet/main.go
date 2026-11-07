@@ -54,7 +54,8 @@ Usage:
   nepfleet new <template> [name]        create a stack from a template (asks for its inputs)
   nepfleet enable [feature]             add an opt-in feature (ingress, logs, uptime, dashboard, …) as a system stack; lists them without args
   nepfleet plan [stack...] [--json]     show what apply would change
-  nepfleet apply [stack...]             apply, health-gated, rolls back on failure
+  nepfleet adopt [stack...]             a new installation takes over what runs, restarting nothing
+  nepfleet apply [stack...]             apply, health-gated, rollsback on failure
   nepfleet render <stack>               print rendered files (secrets masked)
   nepfleet egress suggest <stack>       an allowlist from what a stack in egress mode log did
   nepfleet sbom [stack...] [--out DIR]what the fleet runs, as CycloneDX (--contents: inside each image, with Syft)
@@ -174,6 +175,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdEnable(args[1:], stdout, stderr)
 	case "updates":
 		return cmdUpdates(args[1:], stdout, stderr)
+	case "adopt":
+		return cmdAdopt(args[1:], stdout, stderr)
 	case "sbom":
 		return cmdSBOM(args[1:], stdout, stderr)
 	case "egress":
