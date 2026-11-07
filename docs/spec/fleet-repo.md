@@ -20,7 +20,7 @@ tunnels/
 
 ## JSON Schemas
 
-`schemas/` in the nepfleet repository holds JSON Schemas for [`fleet.yaml`](../../schemas/fleet.schema.json), [`stack.yaml`](../../schemas/stack.schema.json) and [`template.yaml`](../../schemas/template.schema.json). They are generated from the Go types that parse these files, so they cannot drift (`go run ./tools/schema`; CI fails when they are stale), and each release attaches them. `nepfleet init`, `new` and `import` write a `# yaml-language-server: $schema=…` line, so editors with the YAML language server (VS Code, Neovim, Helix, Zed) complete and check fields as you type. `hosts/*.yaml` gets a schema once its format is implemented.
+`schemas/` in the nepfleet repository holds JSON Schemas for [`fleet.yaml`](../../schemas/fleet.schema.json), [`stack.yaml`](../../schemas/stack.schema.json) and [`template.yaml`](../../schemas/template.schema.json). They are generated from the Go types that parse these files, so they cannot drift (`go run ./tools/schema`; CI fails when they are stale), and each release attaches them. `nepfleet init`, `new` and `import` write a `# yaml-language-server: $schema=…` line, so editors with the YAML language server (VS Code, Neovim, Helix, Zed) complete and check fields as you type. `hosts/*.yaml` has [its own](../../schemas/host.schema.json).
 
 ## Logging
 
@@ -46,7 +46,7 @@ kind: Host
 metadata:
   name: nas
 spec:
-  address: nas.local            # how devices on the LAN reach it (a name or an IP)
+  address: nas.local            # how devices on the LAN reach it (a name or an IPv4 address)
   ports: {from: 8000, to: 8999} # LAN ports NepFleet hands out to stacks
 ```
 
@@ -64,7 +64,9 @@ spec:
 - **Domain mode:** `${NEPFLEET_URL}` is `https://<DOMAIN>`.
 - **Creating a stack:** `nepfleet new <template> --access port` picks the lowest port in the host's range that no stack on it uses, or takes `--port N`. It doesn't ask for a domain.
 - **Conflicts:** two stacks on one host with the same port make `plan` and `apply` fail.
-- **Which templates:** only templates that declare their web UI (`spec.web`) can use port mode.
+- **Which templates:** only templates that declare their web UI (`spec.web`) can use port mode, and not when that service uses the host's network.
+- **No ingress at all:** in port mode, the Caddy labels of every service of the stack are dropped.
+- **Swarm:** port mode is for compose stacks for now.
 
 ## Network storage
 

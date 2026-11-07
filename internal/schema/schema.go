@@ -45,6 +45,7 @@ type File struct {
 var Files = []File{
 	{"fleet.schema.json", "NepFleet fleet.yaml", fleet.Fleet{}, "internal/fleet"},
 	{"stack.schema.json", "NepFleet stack.yaml", fleet.Stack{}, "internal/fleet"},
+	{"host.schema.json", "NepFleet hosts/<name>.yaml", fleet.Host{}, "internal/fleet"},
 	{"template.schema.json", "NepFleet template.yaml", template.Template{}, "internal/template"},
 }
 

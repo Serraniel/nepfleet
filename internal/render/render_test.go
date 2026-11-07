@@ -397,6 +397,21 @@ func TestAccessPortMode(t *testing.T) {
 	if !strings.Contains(string(out.Files[ComposeFile]), "caddy:") || EnvValues(out.Files[EnvFile])["NEPFLEET_URL"] != "https://app.example.org" {
 		t.Errorf("domain mode:\n%s", out.Files[ComposeFile])
 	}
+	// Other services lose their Caddy labels too; a host-network web service is refused.
+	write(t, filepath.Join(dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    network_mode: host\n  admin:\n    image: nginx:1.29\n    labels: [\"caddy=admin.${DOMAIN}\"]\n")
+	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Host: host}); err != nil {
+		t.Fatal(err) // domain mode still fine
+	}
+	s.Spec.Access = &fleet.Access{Mode: "port", Port: 8060}
+	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Host: host}); err == nil {
+		t.Error("a host-network web service must be refused in port mode")
+	}
+	write(t, filepath.Join(dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n  admin:\n    image: nginx:1.29\n    labels: [\"caddy=admin.${DOMAIN}\"]\n")
+	out, err = Render(Input{Fleet: f, Stack: s, Template: tpl, Host: host})
+	must(t, err)
+	if strings.Contains(string(out.Files[ComposeFile]), "caddy") {
+		t.Errorf("caddy labels left:\n%s", out.Files[ComposeFile])
+	}
 	// Without spec.web, port mode cannot work.
 	tpl.Spec.Web = nil
 	s.Spec.Access = &fleet.Access{Mode: "port", Port: 8060}

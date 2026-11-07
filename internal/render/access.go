@@ -40,6 +40,11 @@ func WithAccess(compose []byte, t *template.Template, s *fleet.Stack) ([]byte, e
 	if !portMode(s) {
 		return compose, nil
 	}
+	if s.Spec.Mode == "swarm" {
+		// Swarm publishes on every node; port registry and URLs per cluster
+		// come later.
+		return nil, fmt.Errorf("spec.access: mode port is not supported for swarm stacks yet")
+	}
 	if t == nil || t.Spec.Web == nil {
 		return nil, fmt.Errorf("spec.access: mode port needs a template that declares its web UI (spec.web)")
 	}
@@ -50,17 +55,28 @@ func WithAccess(compose []byte, t *template.Template, s *fleet.Stack) ([]byte, e
 	if len(doc.Content) == 0 {
 		return nil, fmt.Errorf("empty compose file")
 	}
-	svc := mapGet(mapGet(doc.Content[0], "services"), t.Spec.Web.Service)
+	services := mapGet(doc.Content[0], "services")
+	svc := mapGet(services, t.Spec.Web.Service)
 	if svc == nil || svc.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("spec.web: service %q is not in the compose file", t.Spec.Web.Service)
 	}
-	if labels := mapGet(svc, "labels"); labels != nil {
-		dropCaddy(labels)
+	if nm := mapGet(svc, "network_mode"); nm != nil && nm.Value == "host" {
+		return nil, fmt.Errorf("spec.access: %s uses the host's network, it cannot be published on a port", t.Spec.Web.Service)
+	}
+	// No ingress route at all: Caddy would otherwise ask for certificates
+	// for the LAN address that fills DOMAIN.
+	for i := 1; i < len(services.Content); i += 2 {
+		if labels := mapGet(services.Content[i], "labels"); labels != nil {
+			dropCaddy(labels)
+		}
 	}
 	ports := mapGet(svc, "ports")
-	if ports == nil {
+	switch {
+	case ports == nil:
 		ports = &yaml.Node{Kind: yaml.SequenceNode}
 		mapSet(svc, "ports", ports)
+	case ports.Kind != yaml.SequenceNode:
+		return nil, fmt.Errorf("compose file: ports of %s is not a list", t.Spec.Web.Service)
 	}
 	ports.Content = append(ports.Content, &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle,
 		Value: fmt.Sprintf("%d:%d", s.Spec.Access.Port, t.Spec.Web.Port)})

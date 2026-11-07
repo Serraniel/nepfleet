@@ -268,7 +268,7 @@ func TestHostsAndPorts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must("hosts/nas.yaml", "apiVersion: nepfleet/v1alpha1\nkind: Host\nmetadata: {name: nas}\nspec: {address: nas.local, ports: {from: 8060, to: 8062}}\n")
+	must("hosts/nas.yaml", "apiVersion: nepfleet/v1alpha1\nkind: Host\nmetadata: {name: nas}\nspec: {address: nas.local, ports: {from: 8060, to: 8062}, updates: {enabled: true, schedule: \"Sun 03:00\", reboot: when-required}}\n")
 	stack := func(name, extra string) string {
 		return "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: " + name + "}\nspec:\n  target: nas\n" + extra
 	}
@@ -289,6 +289,9 @@ func TestHostsAndPorts(t *testing.T) {
 	}
 	if h, err := f.LoadHost("other"); err != nil || h.Spec.Address != "other" || h.PortRange() != DefaultPorts {
 		t.Errorf("a host without a file: %+v %v", h, err)
+	}
+	if _, err := f.LoadHost("../x"); err == nil {
+		t.Error("a host name with a path must be refused")
 	}
 	must("stacks/b/stack.yaml", stack("b", "  access: {mode: port, port: 80}\n"))
 	if _, err := f.LoadStack("b"); err == nil {

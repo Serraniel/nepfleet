@@ -103,7 +103,18 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("%s declares no web UI (spec.web), so it can only run behind Caddy", tpl.Metadata.Name)
 		}
 		if *port == 0 {
-			if *port, err = e.fleet.FreePort(*target); err != nil {
+			if *port, err = e.fleet.FreePort(e.targetHost(*target), e.targetNames(*target)...); err != nil {
+				return err
+			}
+		} else {
+			h, err := e.fleet.LoadHost(e.targetHost(*target))
+			if err != nil {
+				return err
+			}
+			if r := h.PortRange(); *port < r.From || *port > r.To {
+				return fmt.Errorf("--port %d is outside %s's range %d-%d (hosts/%s.yaml spec.ports)", *port, *target, r.From, r.To, e.targetHost(*target))
+			}
+			if err := e.portFree(*target, *port, name); err != nil {
 				return err
 			}
 		}
@@ -185,7 +196,13 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	// Validate now, so a typo surfaces here and not at apply time.
 	s, err := e.fleet.LoadStack(name)
 	if err == nil {
-		_, err = render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: secretVals})
+		var host *fleet.Host
+		if *access == "port" {
+			if host, err = e.fleet.LoadHost(e.targetHost(*target)); err != nil {
+				return err
+			}
+		}
+		_, err = render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: secretVals, Host: host})
 	}
 	if err != nil {
 		cleanup()
@@ -193,7 +210,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "\nwrote %s\n", relTo(e.fleet.Dir, dir))
 	if *access == "port" {
-		fmt.Fprintf(stdout, "reached on port %d of %s\n", *port, *target)
+		fmt.Fprintf(stdout, "reached on port %d of %s\n", *port, e.targetHost(*target))
 	}
 	if len(secretVals) > 0 {
 		fmt.Fprintf(stdout, "secrets stored encrypted in %s\n", filepath.Join(relTo(e.fleet.Dir, dir), fleet.SecretsFile))
