@@ -40,6 +40,75 @@
             "boolean"
           ]
         },
+        "mounts": {
+          "description": "Mounts are network shares the host mounts (nepfleet host apply).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+                "type": "string"
+              },
+              "options": {
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "passwordSecret": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "source": {
+                "description": "Source: host:/path (NFS), //host/share (SMB/CIFS), user@host:path (SSHFS).",
+                "minLength": 1,
+                "type": "string"
+              },
+              "target": {
+                "description": "Target is where it appears on the host.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "nfs",
+                  "cifs",
+                  "sshfs"
+                ],
+                "type": "string"
+              },
+              "user": {
+                "description": "User and PasswordSecret (a name in fleet.secret.yaml) log in to SMB.",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "source",
+              "target",
+              "type"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "ports": {
           "additionalProperties": false,
           "description": "Ports is the range NepFleet picks LAN ports from for stacks with access mode port.",

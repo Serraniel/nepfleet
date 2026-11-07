@@ -59,6 +59,7 @@ Usage:
   nepfleet remote probe <ssh://host>    look at a machine over SSH without changing it: OS, Docker, swarm, fleet
   nepfleet remote add|list|refresh|connect|disconnect|remove  machines the local control daemon knows
   nepfleet host bootstrap <ssh://host>  prepare a machine over SSH: Docker, Compose, ingress network (shows a plan first)
+  nepfleet host apply <name>            make a host's network mounts match hosts/<name>.yaml (shows a plan first)
   nepfleet tui                          terminal client: machines, stacks, plans, apply
   nepfleet control [status|token|http]  the local control daemon (started on demand; keeps running)
   nepfleet watch                        report OOM kills, crashes, crash loops and failed health checks
