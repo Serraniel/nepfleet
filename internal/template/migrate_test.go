@@ -22,7 +22,7 @@ func TestUpgradePath(t *testing.T) {
 		{"1.2.0", "2.4.0", "2.0.0", ""},       // and a plain upgrade after it
 		{"1.2.0", "3.1.0", "2.0.0 3.0.0", ""}, // chained
 		{"2.5.0", "2.7.0", "2.6.0", ""},       // a minor can need one too
-		{"3.0.0", "2.0.0", "", "older"},
+		{"3.0.0", "2.0.0", "", "goes down"},
 		{"3.0.0", "4.0.0", "", "no migration path"},
 		{"0.9.0", "1.0.0", "", "no migration path"},
 	} {

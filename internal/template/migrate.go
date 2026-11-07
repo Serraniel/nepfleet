@@ -4,12 +4,16 @@ package template
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 )
+
+// ErrDowngrade means the target version is older than the installed one.
+var ErrDowngrade = errors.New("template version goes down")
 
 // semver is a parsed version; pre orders below the release, as in Semantic
 // Versioning.
@@ -122,8 +126,8 @@ func inRange(v semver, r string) (bool, error) {
 //
 // Every migration on the way has to run: one that applies can't be skipped, as
 // it is there because the data needs it. An upgrade to another major version
-// with no migrations leading to it is refused, as nothing says it is safe. So is
-// going down, which only a rollback may do.
+// with no migrations leading to it is refused, as nothing says it is safe. Going
+// down is ErrDowngrade: it has no path, and only the caller knows if it's wanted.
 func UpgradePath(ms []Migration, from, to string) ([]Migration, error) {
 	start, err := parseSemver(from)
 	if err != nil {
@@ -137,7 +141,7 @@ func UpgradePath(ms []Migration, from, to string) ([]Migration, error) {
 	case c == 0:
 		return nil, nil
 	case c > 0:
-		return nil, fmt.Errorf("template version %s is older than the installed %s: migrations only go up", to, from)
+		return nil, fmt.Errorf("%w: %s is older than the installed %s", ErrDowngrade, to, from)
 	}
 	seen := map[string]bool{}
 	var walk func(v semver, name string) ([]Migration, bool, error)

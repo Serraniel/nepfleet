@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -25,6 +26,11 @@ func (e *env) planMigration(pr *prepared) {
 	}
 	path, err := template.UpgradePath(pr.tpl.Spec.Migrations, man.TemplateVersion, pr.tpl.Spec.Version)
 	switch {
+	case errors.Is(err, template.ErrDowngrade):
+		// A rollback comes this way, and has to work. It runs no steps, so the
+		// data stays as the newer version left it: that takes a confirmation.
+		p.Destructive = append(p.Destructive, fmt.Sprintf("goes back from template version %s to %s; the data isn't migrated back, so restore a backup if the newer version changed it", man.TemplateVersion, pr.tpl.Spec.Version))
+		return
 	case err != nil:
 		p.MigrationError = err.Error()
 		return

@@ -168,7 +168,7 @@ Steps run only inside the stack's own containers. A failed step triggers `rollba
 How an upgrade runs:
 
 - **Where it starts:** each apply records the template version in the stack's manifest. A stack last applied before versions were recorded has no starting point, so that apply only records it and runs no migration.
-- **When one is needed:** every migration whose `from` matches on the way to the new version has to run. An upgrade to another major version (or another minor below 1.0) with no migrations leading to it is refused. Upgrades within a major version with no matching migration just apply. Going to an older version is refused too; `nepfleet rollback` is the way back.
+- **When one is needed:** every migration whose `from` matches on the way to the new version has to run. An upgrade to another major version (or another minor below 1.0) with no migrations leading to it is refused. Upgrades within a major version with no matching migration just apply. Going to an older version runs no steps and asks for confirmation, as the data stays as the newer version left it. A rollback works this way.
 - **Order:** the data is snapshotted, the steps before `deploy: true` run in the old version, the new version starts and passes its health gate, and the remaining steps run in it. Without a deploy step, the new version starts last.
 - **Confirmation:** the plan lists the steps, and it counts as destructive: you confirm by typing the stack's name, or with `--confirm`.
 - **On failure:** `rollback: restore` restores the snapshot and the previous version. `rollback: revert` starts the previous version and keeps the data as it is.
