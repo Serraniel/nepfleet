@@ -6,9 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"syscall"
 )
 
 // Hardware is what this host offers to device and gpu inputs.
@@ -58,8 +56,8 @@ func RenderGID(root string) string {
 	nodes, _ := filepath.Glob(filepath.Join(root, "dev/dri/renderD*"))
 	for _, n := range nodes {
 		if fi, err := os.Stat(n); err == nil {
-			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-				return strconv.FormatUint(uint64(st.Gid), 10)
+			if gid := fileGID(fi); gid != "" {
+				return gid
 			}
 		}
 	}

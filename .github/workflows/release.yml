@@ -41,9 +41,11 @@ jobs:
           set -euo pipefail
           commit="$(git rev-parse HEAD)"
           mkdir dist
-          for target in linux/amd64 linux/arm64 linux/arm/v7; do
+          # Servers run on Linux; macOS and Windows run the client side.
+          for target in linux/amd64 linux/arm64 linux/arm/v7 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             IFS=/ read -r os arch arm <<<"$target"
             out="dist/nepfleet_${TAG#v}_${os}_${arch}${arm}"
+            [ "$os" = windows ] && out="$out.exe"
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=${arm#v} go build -trimpath -buildvcs=false \
               -ldflags "-buildid= -s -w -X main.version=${TAG} -X main.commit=${commit}" \
               -o "$out" ./cmd/nepfleet

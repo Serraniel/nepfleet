@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,7 @@ func TestHTTPToken(t *testing.T) {
 		t.Errorf("the token must stay: %v", err)
 	}
 	fi, err := os.Stat(filepath.Join(dir, "http.token"))
-	if err != nil || fi.Mode().Perm() != 0o600 {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Errorf("mode: %v %v", fi, err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "http.token"), []byte("x"), 0o600); err != nil {

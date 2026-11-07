@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/Serraniel/nepfleet/internal/deploy"
 )
@@ -58,16 +57,10 @@ type Env struct {
 // Host returns an Env backed by the real host.
 func Host() Env {
 	return Env{
-		Docker:   deploy.Docker{},
-		LookPath: exec.LookPath,
-		ReadFile: os.ReadFile,
-		FreeBytes: func(p string) (uint64, error) {
-			var st syscall.Statfs_t
-			if err := syscall.Statfs(p, &st); err != nil {
-				return 0, err
-			}
-			return st.Bavail * uint64(st.Bsize), nil //nolint:gosec // block size is positive
-		},
+		Docker:    deploy.Docker{},
+		LookPath:  exec.LookPath,
+		ReadFile:  os.ReadFile,
+		FreeBytes: freeBytes,
 		Command: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return exec.CommandContext(ctx, name, args...).Output()
 		},
