@@ -36,9 +36,10 @@ type Egress struct {
 	BlockTelemetry *bool `yaml:"blockTelemetry"`
 	// Block lists more host names to resolve to 0.0.0.0.
 	Block []string `yaml:"block"`
-	// Mode is off (the default) or enforce: containers reach only private
-	// networks and what is allowed. A stack's mode replaces the fleet's.
-	Mode string `yaml:"mode" schema:"enum=off|enforce"`
+	// Mode is off (the default), log, or enforce. In enforce, containers reach
+	// only private networks and what is allowed; log allows everything and records
+	// where they go, for nepfleet egress suggest. A stack's mode replaces the fleet's.
+	Mode string `yaml:"mode" schema:"enum=off|log|enforce"`
 	// Allow lists host names or addresses (or CIDR ranges) containers may
 	// reach in mode enforce. Both lists count.
 	Allow []string `yaml:"allow"`
@@ -47,6 +48,7 @@ type Egress struct {
 // Egress modes.
 const (
 	EgressOff     = "off"
+	EgressLog     = "log"
 	EgressEnforce = "enforce"
 )
 
@@ -110,9 +112,9 @@ func checkEgress(e *Egress) error {
 		return nil
 	}
 	switch e.Mode {
-	case "", EgressOff, EgressEnforce:
+	case "", EgressOff, EgressLog, EgressEnforce:
 	default:
-		return fmt.Errorf("mode: %q is not off or enforce", e.Mode)
+		return fmt.Errorf("mode: %q is not off, log or enforce", e.Mode)
 	}
 	for _, a := range e.Allow {
 		_, aerr := netip.ParseAddr(a)

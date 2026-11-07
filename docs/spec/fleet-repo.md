@@ -284,7 +284,21 @@ spec:
 - **What it is for:** it catches telemetry and unwanted calls home. It isn't a boundary against an attacker who controls the sidecar's image or the Docker host.
 - **When enabled:** the first apply recreates the stack's services, as they move to the sidecar's network.
 
-A `log` mode, `nepfleet egress suggest` and reporting denials are planned (#127).
+#### Finding out what to allow
+
+`mode: log` blocks nothing, and records where a stack's services go. Run it for a while, then turn that into a list to review:
+
+```sh
+nepfleet egress suggest vaultwarden
+```
+
+- **How it works:** the same sidecar, running `tcpdump` instead of setting rules. It records DNS answers and new connections, not their contents, in the sidecar's container log. These logs show what each service talks to, so treat them accordingly.
+- **What it suggests:** names that were looked up and then connected to, under the name the app asked for. Addresses with no name seen are listed apart, as they may change. Names looked up but never connected to are only mentioned. What's already allowed is left out.
+- **It shows what the app did, not what it should do,** so review it: telemetry shows up too.
+- **Limits:** only what happened while it ran, and only as far back as the container's logs go, so log rotation and recreating the stack lose history. A DNS server other than Docker's is seen as an address, not its answers. Run `suggest` on the host where the stack runs.
+- **Turning it on or off** recreates the stack's services, as it moves them to or from the sidecar's network.
+
+Reporting denials is still planned (#127).
 
 ## Rules
 

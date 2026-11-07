@@ -4,7 +4,6 @@ package render
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -123,6 +122,27 @@ func isCaddyLabel(k string) bool {
 // the service, and the service can't start before the rules are in place: if the
 // sidecar fails, the service stays down rather than going out unfiltered.
 func WithEgress(compose []byte, allow []string) ([]byte, error) {
+	return egressSidecars(compose, allow, false)
+}
+
+// WithEgressLog puts the same sidecars in place, but they block nothing: they only
+// record names looked up and connections started, in their logs, for
+// nepfleet egress suggest.
+func WithEgressLog(compose []byte) ([]byte, error) {
+	return egressSidecars(compose, nil, true)
+}
+
+// egressLogScript records DNS answers (on loopback: Docker's resolver rewrites the
+// ports of the questions, not of the answers) and new connections going out.
+const egressLogScript = `set -u
+tcpdump -l -n -p -v -i lo -Z root -s 512 'udp and src port 53' &
+tcpdump -l -n -p -i any -Q out -Z root -s 128 '(tcp[tcpflags] & tcp-syn != 0 and tcp[tcpflags] & tcp-ack == 0) or (udp and dst port 53 and not dst host 127.0.0.11)' &
+sleep 1
+touch /run/nepfleet-egress-ready
+wait
+`
+
+func egressSidecars(compose []byte, allow []string, logOnly bool) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(compose, &doc); err != nil {
 		return nil, err
@@ -145,8 +165,10 @@ func WithEgress(compose []byte, allow []string) ([]byte, error) {
 		if svc.Kind != yaml.MappingNode {
 			continue
 		}
-		if err := egressCaps(name, svc); err != nil {
-			return nil, err
+		if !logOnly {
+			if err := egressCaps(name, svc); err != nil {
+				return nil, err
+			}
 		}
 		if nm := mapGet(svc, "network_mode"); nm != nil {
 			if nm.Value == "none" || strings.HasPrefix(nm.Value, "service:") {
@@ -161,16 +183,24 @@ func WithEgress(compose []byte, allow []string) ([]byte, error) {
 		mapSet(side, "image", str(egressImage))
 		mapSet(side, "restart", str("unless-stopped"))
 		mapSet(side, "cap_drop", seq("ALL"))
-		mapSet(side, "cap_add", seq("NET_ADMIN", "NET_RAW"))
+		if logOnly {
+			mapSet(side, "cap_add", seq("NET_RAW", "SETUID", "SETGID")) // tcpdump changes its user
+		} else {
+			mapSet(side, "cap_add", seq("NET_ADMIN", "NET_RAW"))
+		}
 		mapSet(side, "read_only", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
 		mapSet(side, "tmpfs", seq("/run"))
 		mapSet(side, "security_opt", seq("no-new-privileges:true"))
-		env := &yaml.Node{Kind: yaml.MappingNode}
-		mapSet(env, "NEPFLEET_EGRESS_HOSTS", str(strings.Join(hosts, " ")))
-		mapSet(env, "NEPFLEET_EGRESS_V4", str(strings.Join(v4, " ")))
-		mapSet(env, "NEPFLEET_EGRESS_V6", str(strings.Join(v6, " ")))
-		mapSet(side, "environment", env)
-		mapSet(side, "command", seq("/bin/sh", "-c", egressScript))
+		if logOnly {
+			mapSet(side, "command", seq("/bin/sh", "-c", egressLogScript))
+		} else {
+			env := &yaml.Node{Kind: yaml.MappingNode}
+			mapSet(env, "NEPFLEET_EGRESS_HOSTS", str(strings.Join(hosts, " ")))
+			mapSet(env, "NEPFLEET_EGRESS_V4", str(strings.Join(v4, " ")))
+			mapSet(env, "NEPFLEET_EGRESS_V6", str(strings.Join(v6, " ")))
+			mapSet(side, "environment", env)
+			mapSet(side, "command", seq("/bin/sh", "-c", egressScript))
+		}
 		health := &yaml.Node{Kind: yaml.MappingNode}
 		mapSet(health, "test", seq("CMD", "test", "-f", "/run/nepfleet-egress-ready"))
 		mapSet(health, "interval", str("2s"))
@@ -194,7 +224,9 @@ func WithEgress(compose []byte, allow []string) ([]byte, error) {
 		}
 		sideName := name + "-egress"
 		owners[name] = sideName
-		dropNetRaw(svc)
+		if !logOnly {
+			dropNetRaw(svc)
+		}
 		mapSet(svc, "network_mode", str("service:"+sideName))
 		mapSet(svc, "depends_on", dependOnHealthy(mapGet(svc, "depends_on"), sideName))
 		added = append(added, &yaml.Node{Kind: yaml.ScalarNode, Value: sideName}, side)
@@ -211,7 +243,9 @@ func WithEgress(compose []byte, allow []string) ([]byte, error) {
 		}
 		if target, ok := strings.CutPrefix(nm.Value, "service:"); ok && owners[target] != "" {
 			nm.Value = "service:" + owners[target]
-			dropNetRaw(svc)
+			if !logOnly {
+				dropNetRaw(svc)
+			}
 		}
 	}
 	services.Content = append(services.Content, added...)
@@ -360,11 +394,14 @@ func dropNetRaw(svc *yaml.Node) {
 // network namespaces.
 func enforceEgress(compose []byte, in Input, env map[string]string) ([]byte, error) {
 	mode, allow := fleet.EffectiveEgress(in.Fleet, in.Stack)
-	if mode != fleet.EgressEnforce {
+	if mode != fleet.EgressEnforce && mode != fleet.EgressLog {
 		return compose, nil
 	}
 	if in.Stack.Spec.Mode == "swarm" {
-		return nil, errors.New("spec.egress: mode enforce is for compose stacks; swarm has no shared network namespaces")
+		return nil, fmt.Errorf("spec.egress: mode %s is for compose stacks; swarm has no shared network namespaces", mode)
+	}
+	if mode == fleet.EgressLog {
+		return WithEgressLog(compose)
 	}
 	return WithEgress(compose, EgressAllow(allow, in.Template, env))
 }

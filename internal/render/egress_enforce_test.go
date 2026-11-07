@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/Serraniel/nepfleet/internal/egress"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
@@ -132,6 +134,74 @@ func TestEnforceEgressModes(t *testing.T) {
 	if _, err := enforceEgress(compose, Input{Stack: stack}, nil); err == nil {
 		t.Error("swarm must be refused, not left unfiltered")
 	}
+}
+
+func TestEgressLogBlocksNothing(t *testing.T) {
+	// Modes enforce refuses go through, as nothing here can be undone by them.
+	out, err := WithEgressLog([]byte("services:\n  a:\n    image: x\n    privileged: true\n    cap_add: [NET_ADMIN]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := string(out)
+	if !strings.Contains(all, "tcpdump") || strings.Contains(all, "iptables") || strings.Contains(all, "NEPFLEET_EGRESS_HOSTS") {
+		t.Errorf("%s", all)
+	}
+	if strings.Contains(all, "cap_drop:\n      - \"NET_RAW\"") {
+		t.Errorf("the service keeps what it had: %s", all)
+	}
+	stack := &fleet.Stack{}
+	stack.Spec.Egress = &fleet.Egress{Mode: fleet.EgressLog}
+	compose := []byte("services:\n  a:\n    image: x\n")
+	if got, err := enforceEgress(compose, Input{Stack: stack}, nil); err != nil || !strings.Contains(string(got), "a-egress") {
+		t.Errorf("log: %s %v", got, err)
+	}
+	stack.Spec.Mode = "swarm"
+	if _, err := enforceEgress(compose, Input{Stack: stack}, nil); err == nil {
+		t.Error("swarm must be refused")
+	}
+}
+
+// With real containers: what the sidecar writes is what Parse reads.
+func TestEgressLogInDocker(t *testing.T) {
+	if os.Getenv("NEPFLEET_TEST_DOCKER") == "" {
+		t.Skip("set NEPFLEET_TEST_DOCKER to run with Docker and internet access")
+	}
+	out, err := WithEgressLog([]byte(`services:
+  app:
+    image: alpine:3.22
+    command: ["sh", "-c", "sleep 2; wget -q -T 5 -O /dev/null http://one.one.one.one/; nc -z -w 3 9.9.9.9 443; sleep 600"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "compose.yaml")
+	if err := os.WriteFile(file, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	dc := func(args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, "docker", append([]string{"compose", "-p", "nepfleet-egress-log-test", "-f", file}, args...)...).CombinedOutput()
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "compose", "-p", "nepfleet-egress-log-test", "-f", file, "down", "-v", "-t", "1").Run()
+	})
+	if o, err := dc("up", "-d", "--wait"); err != nil {
+		t.Fatalf("%s: %v", o, err)
+	}
+	var report egress.Report
+	var logs []byte
+	for range 20 {
+		if logs, err = dc("logs", "--no-log-prefix", "app-egress"); err != nil {
+			t.Fatal(err)
+		}
+		report = egress.Parse(string(logs))
+		if slices.Contains(report.Hosts, "one.one.one.one") && slices.Contains(report.Addresses, "9.9.9.9") {
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Errorf("%+v from:\n%s", report, logs)
 }
 
 // With real containers and the internet: what is denied, what still works, and
