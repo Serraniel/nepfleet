@@ -81,11 +81,13 @@ func defaultState() string {
 type prepared struct {
 	// dataSafe: apply snapshots the volumes first (see DataSafety).
 	dataSafe bool
-	tpl      *template.Template // nil for a plain compose stack
-	stack    *fleet.Stack
-	out      *render.Output
-	plan     *deploy.Plan
-	secrets  map[string]string
+	// migrationSteps is the migration this apply runs (see planMigration).
+	migrationSteps *template.Migration
+	tpl            *template.Template // nil for a plain compose stack
+	stack          *fleet.Stack
+	out            *render.Output
+	plan           *deploy.Plan
+	secrets        map[string]string
 	// pin is the template source commit this stack renders from; pinMoved
 	// means lock.yaml does not record it yet (first apply, --update-lock).
 	pin      *lock.TemplatePin
@@ -373,6 +375,7 @@ func (e *env) finishPlan(pr *prepared) {
 	// Data-safe rollback: an apply that recreates running services copies
 	// the stack's volumes first (compose stacks; swarm rolls back by itself).
 	pr.dataSafe = !e.noSnapshot && pr.stack.Spec.Snapshot != "off" && !p.First && p.Mode != "swarm" && p.Recreates()
+	e.planMigration(pr)
 	if pr.dataSafe {
 		p.UseSnapshots()
 	}
@@ -406,6 +409,7 @@ func printPlan(w io.Writer, p *deploy.Plan) {
 	for _, d := range p.Destructive {
 		fmt.Fprintf(w, "  ⚠ DESTRUCTIVE: %s\n", d)
 	}
+	printMigration(w, p)
 	if len(p.Steps) > 0 {
 		if p.Approximate {
 			fmt.Fprintln(w, "  steps (approximate: docker was not reachable to compute them exactly):")
@@ -574,6 +578,10 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			}
 		}
 		printPlan(stdout, p.plan)
+		if p.plan.MigrationError != "" {
+			errs = append(errs, fmt.Errorf("%s: %s", name, p.plan.MigrationError))
+			continue
+		}
 		if p.plan.Empty() {
 			// Same files from another commit (or a stack from before pins):
 			// only the pin moves.
@@ -616,6 +624,10 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		opts := deploy.Options{
 			WaitTimeout: *wait, Commit: commit, Dirty: dirty, IngressNetwork: e.fleet.Spec.IngressNetwork,
 		}
+		if p.tpl != nil {
+			opts.Template, opts.TemplateVersion = p.tpl.Metadata.Name, p.tpl.Spec.Version
+		}
+		opts.Migration = p.migration(stdout)
 		if p.dataSafe {
 			if opts.DataSafety, err = e.dataSafety(ctx, p, stdout); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", name, err))

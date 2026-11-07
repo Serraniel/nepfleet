@@ -164,3 +164,12 @@ migrations:
 ```
 
 Steps run only inside the stack's own containers. A failed step triggers `rollback`. Your own fleet repository can define migrations for your own templates.
+
+How an upgrade runs:
+
+- **Where it starts:** each apply records the template version in the stack's manifest. A stack last applied before versions were recorded has no starting point, so that apply only records it and runs no migration.
+- **When one is needed:** every migration whose `from` matches on the way to the new version has to run. An upgrade to another major version (or another minor below 1.0) with no migrations leading to it is refused. Upgrades within a major version with no matching migration just apply. Going to an older version is refused too; `nepfleet rollback` is the way back.
+- **Order:** the data is snapshotted, the steps before `deploy: true` run in the old version, the new version starts and passes its health gate, and the remaining steps run in it. Without a deploy step, the new version starts last.
+- **Confirmation:** the plan lists the steps, and it counts as destructive: you confirm by typing the stack's name, or with `--confirm`.
+- **On failure:** `rollback: restore` restores the snapshot and the previous version. `rollback: revert` starts the previous version and keeps the data as it is.
+- **Refused:** `backup: required` or `rollback: restore` with snapshots off, swarm stacks, and paths of several migrations. Those need each version's own compose file, so apply the first version named in the error, then the next.

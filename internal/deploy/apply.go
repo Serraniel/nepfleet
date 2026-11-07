@@ -64,6 +64,11 @@ type Options struct {
 	// DataSafety, when set, snapshots the running stack's volumes before
 	// the new version starts and restores them on rollback (compose only).
 	DataSafety *DataSafety
+	// Template and TemplateVersion go into the manifest.
+	Template        string
+	TemplateVersion string
+	// Migration runs around the new version's start; a failure rolls back.
+	Migration *Migration
 }
 
 // Result reports side effects the caller has to persist.
@@ -144,7 +149,20 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 			return res, err
 		}
 	}
-	err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
+	if o.Migration != nil && g != nil {
+		// The steps before the deploy run in the old version, which the
+		// snapshot stopped.
+		err = g.startAgain(ctx)
+	}
+	if err == nil {
+		err = o.Migration.before(ctx, r, p.Stack)
+	}
+	if err == nil {
+		err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
+	}
+	if err == nil {
+		err = o.Migration.after(ctx, r, p.Stack)
+	}
 	if err == nil {
 		g.discard(context.WithoutCancel(ctx))
 		return res, writeManifest(p.Dir, out.Files, pins, o)
@@ -169,8 +187,11 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	}
 	// The new version may have migrated the data: put it back before the
 	// previous version starts on it, or leave the stack stopped.
-	if rerr := g.restore(ctx); rerr != nil {
-		return res, fmt.Errorf("%w; restoring the data snapshot failed, so the stack stays stopped rather than run the previous version on changed data: %w", err, rerr)
+	// With rollback: revert, the template says the previous version copes.
+	if o.Migration == nil || o.Migration.RestoreData {
+		if rerr := g.restore(ctx); rerr != nil {
+			return res, fmt.Errorf("%w; restoring the data snapshot failed, so the stack stays stopped rather than run the previous version on changed data: %w", err, rerr)
+		}
 	}
 	// The failed attempt may have moved local tags: put back what they were,
 	// then re-pin the previous digests on top.
@@ -480,7 +501,7 @@ func restore(dir string, current map[string][]byte, prev *Manifest) error {
 }
 
 func writeManifest(dir string, files map[string][]byte, pins map[string]string, o Options) error {
-	m := Manifest{Commit: o.Commit, Dirty: o.Dirty, Images: pins}
+	m := Manifest{Commit: o.Commit, Dirty: o.Dirty, Images: pins, Template: o.Template, TemplateVersion: o.TemplateVersion}
 	for path := range files {
 		m.Files = append(m.Files, path)
 	}
