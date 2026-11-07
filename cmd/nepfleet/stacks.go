@@ -319,6 +319,44 @@ func (e *env) portFree(target string, port int, self string) error {
 	return nil
 }
 
+// renderedPorts are the ports other stacks on a target publish, whether through an
+// access mode or their own ports:. A stack that can't render is skipped: doctor
+// reports it, and it shouldn't stop picking a port for another.
+func (e *env) renderedPorts(target, self string) map[int]string {
+	out := map[int]string{}
+	stacks, err := e.fleet.Stacks()
+	if err != nil {
+		return out
+	}
+	names := e.targetNames(target)
+	for _, s := range stacks {
+		if s.Metadata.Name == self || !slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, s.Spec.Target) }) {
+			continue
+		}
+		p, err := e.prepare(s)
+		if err != nil {
+			continue
+		}
+		for _, pub := range deploy.PublishedPorts(p.out) {
+			out[pub.Port] = s.Metadata.Name
+		}
+	}
+	return out
+}
+
+// pickPort is the first port of a host's range nothing wants: no stack in the
+// fleet, and on this machine, nothing listening.
+func (e *env) pickPort(host, target, self string) (int, error) {
+	used := e.renderedPorts(target, self)
+	here := strings.EqualFold(target, "local") || strings.EqualFold(target, e.host)
+	return e.fleet.FreePortExcept(host, func(p int) bool {
+		if _, taken := used[p]; taken {
+			return true
+		}
+		return here && deploy.PortBusy(deploy.Published{Port: p, Proto: "tcp"})
+	}, e.targetNames(target)...)
+}
+
 // usesBuiltin reports whether a template's compose file or files use ${name}.
 func usesBuiltin(tpl *template.Template, name string) bool {
 	if tpl == nil {
@@ -1520,11 +1558,27 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	if cycleErr != nil {
 		renderErrs = append(renderErrs, cycleErr)
 	}
+	portsByStack := map[string][]deploy.Published{}
+	var portChecks []doctor.Check
 	for _, s := range stacks {
 		p, err := e.prepare(s)
 		if err != nil {
 			renderErrs = append(renderErrs, err)
 			continue
+		}
+		ports := deploy.PublishedPorts(p.out)
+		if strings.EqualFold(s.Spec.Target, "local") || strings.EqualFold(s.Spec.Target, e.host) {
+			portsByStack[s.Metadata.Name] = ports
+			// A stack that runs holds its own ports; one that doesn't yet needs them free.
+			if p.plan.First {
+				for _, pub := range ports {
+					if deploy.PortBusy(pub) {
+						portChecks = append(portChecks, doctor.Check{Name: "Ports", Status: doctor.Fail,
+							Detail: fmt.Sprintf("%s wants port %d, but something on this host holds it", s.Metadata.Name, pub.Port),
+							Fix:    "stop what holds it (ss -ltnp), or change the stack's port"})
+					}
+				}
+			}
 		}
 		imgs, publishes := composeImages(p.out)
 		in.Ingress = in.Ingress || publishes
@@ -1536,6 +1590,15 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	checks := doctor.Run(context.Background(), doctor.Host(), in)
+	for _, c := range deploy.PortClashes(portsByStack) {
+		portChecks = append(portChecks, doctor.Check{Name: "Ports", Status: doctor.Fail,
+			Detail: fmt.Sprintf("%s and %s both publish port %d on this host", c.First, c.Other, c.Port),
+			Fix:    "change one stack's port; the second to start would fail"})
+	}
+	if len(portChecks) == 0 && len(portsByStack) > 0 {
+		portChecks = append(portChecks, doctor.Check{Name: "Ports", Status: doctor.OK, Detail: "no stacks on this host fight over a port"})
+	}
+	checks = append(checks, portChecks...)
 	// Hardware and shared folders that the stacks' inputs use must be there:
 	// a stick that is unplugged, a GPU this host lacks, an unmounted share.
 	hw := doctor.HostHardware("/")
