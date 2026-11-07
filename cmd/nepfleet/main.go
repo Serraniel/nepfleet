@@ -282,8 +282,14 @@ func serve(args []string, stderr io.Writer) error {
 	if *oidcIssuer != "" {
 		oidcConfig = &api.OIDC{Issuer: *oidcIssuer, ClientID: *oidcClient, ClientSecret: os.Getenv("NEPFLEET_OIDC_CLIENT_SECRET"),
 			RedirectURL: *oidcRedirect, Allow: splitCSV(*oidcAllow)}
+		// Not for child processes: stacks are rendered and run from here.
+		_ = os.Unsetenv("NEPFLEET_OIDC_CLIENT_SECRET")
 		if err := oidcConfig.CheckOIDC(); err != nil {
 			return fmt.Errorf("--oidc-issuer: %w", err)
+		}
+		// A session could read but not change anything, and there'd be nowhere to return to.
+		if strings.TrimSpace(*origins) == "" && *rpID == "" {
+			return errors.New("--oidc-issuer needs --allowed-origins: where the web UI runs")
 		}
 	}
 	tlsConfig, err := serveTLS(*tlsCert, *tlsKey, *tlsDomain, *stateDir)

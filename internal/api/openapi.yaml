@@ -233,8 +233,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [setupNeeded, signedIn, name, totp, oidc, passkeys]
+                required: [setupNeeded, signedIn, name, totp, oidc, passkeys, external]
                 properties:
+                  external:
+                    type: boolean
+                    description: Whether the signed-in user came through the identity provider, so can't add a passkey or codes.
                   oidc:
                     type: boolean
                     description: Whether an identity provider can sign people in.

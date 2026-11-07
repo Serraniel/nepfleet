@@ -4,8 +4,11 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -23,10 +27,12 @@ import (
 )
 
 const (
-	oidcStateCookie = "nepfleet_oidc_state"
+	oidcStateCookie = "nepfleet_oidc_"
 	oidcCookiePath  = "/api/v1/auth/oidc/"
 	oidcCallback    = "/api/v1/auth/oidc/callback"
 	oidcTimeout     = 15 * time.Second
+	// A sign-in may take a while at the provider.
+	oidcLifetime = 10 * time.Minute
 )
 
 // OIDC is signing in through an identity provider (Pocket ID, Authelia, …). A
@@ -43,6 +49,7 @@ type OIDC struct {
 
 	mu       sync.Mutex
 	provider *oidc.Provider
+	key      []byte
 }
 
 // CheckOIDC checks settings before anything listens: nobody allowed would leave
@@ -102,13 +109,121 @@ func (o *OIDC) config(p *oidc.Provider) *oauth2.Config {
 	}
 }
 
+// oidcPending is a sign-in underway. It lives in the browser, not here, so nobody
+// else's requests can push it out, and tabs don't get in each other's way.
+type oidcPending struct {
+	Nonce    string `json:"n"`
+	Verifier string `json:"v"`
+	Return   string `json:"r"`
+	Expires  int64  `json:"e"`
+}
+
+func (o *OIDC) sign(value string) (string, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.key == nil {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return "", err
+		}
+		o.key = key
+	}
+	mac := hmac.New(sha256.New, o.key)
+	mac.Write([]byte(value))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+// The state is the cookie's signature, so an answer fits only the browser that
+// asked, and only a cookie this server made. Its name is part of that state.
+func oidcCookieName(state string) string {
+	return oidcStateCookie + state[:16]
+}
+
+func oidcCookie(name, value string, maxAge int) *http.Cookie {
+	// Lax: the browser comes back here from another site.
+	return &http.Cookie{Name: name, Value: value, Path: oidcCookiePath, MaxAge: maxAge, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
+}
+
+func (o *OIDC) readPending(r *http.Request, now time.Time) (*oidcPending, string, error) {
+	state := r.URL.Query().Get("state")
+	if len(state) < 16 {
+		return nil, "", errors.New("the answer has no state")
+	}
+	name := oidcCookieName(state)
+	cookie, err := r.Cookie(name)
+	if err != nil {
+		return nil, "", errors.New("the answer isn't for this browser")
+	}
+	want, err := o.sign(cookie.Value)
+	if err != nil {
+		return nil, "", err
+	}
+	if !hmac.Equal([]byte(want), []byte(state)) {
+		return nil, "", errors.New("the answer isn't for this browser")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cookie.Value)
+	if err != nil {
+		return nil, "", err
+	}
+	var p oidcPending
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, "", err
+	}
+	if now.Unix() > p.Expires {
+		return nil, "", errors.New("the sign-in took too long")
+	}
+	return &p, name, nil
+}
+
 type oidcClaims struct {
-	Subject           string   `json:"sub"`
-	Email             string   `json:"email"`
-	EmailVerified     bool     `json:"email_verified"`
-	PreferredUsername string   `json:"preferred_username"`
-	Name              string   `json:"name"`
-	Groups            []string `json:"groups"`
+	Subject           string
+	Email             string
+	EmailVerified     bool
+	PreferredUsername string
+	Name              string
+	Groups            []string
+}
+
+// parseClaims reads what providers send in their own ways. One oddly typed claim
+// mustn't refuse someone a sub: entry would let in.
+func parseClaims(m map[string]any) oidcClaims {
+	text := func(key string) string {
+		s, _ := m[key].(string)
+		return s
+	}
+	c := oidcClaims{Subject: text("sub"), Email: text("email"), PreferredUsername: text("preferred_username"), Name: text("name")}
+	switch v := m["email_verified"].(type) {
+	case bool:
+		c.EmailVerified = v
+	case string:
+		c.EmailVerified = v == "true"
+	}
+	switch v := m["groups"].(type) {
+	case string:
+		c.Groups = []string{v}
+	case []any:
+		for _, g := range v {
+			if s, ok := g.(string); ok {
+				c.Groups = append(c.Groups, s)
+			}
+		}
+	}
+	return c
+}
+
+// sameEmail ignores the case of ASCII only: Unicode folding makes other addresses
+// match, such as a K from the Kelvin sign.
+func sameEmail(a, b string) bool {
+	lower := func(s string) string {
+		out := []byte(s)
+		for i, c := range out {
+			if c >= 'A' && c <= 'Z' {
+				out[i] = c + 'a' - 'A'
+			}
+		}
+		return string(out)
+	}
+	return lower(a) == lower(b)
 }
 
 // allowed says whether the list lets someone in. An email counts only if the
@@ -125,12 +240,36 @@ func (o *OIDC) allowed(c oidcClaims) bool {
 				return true
 			}
 		default:
-			if c.EmailVerified && c.Email != "" && strings.EqualFold(a, c.Email) {
+			if c.EmailVerified && c.Email != "" && sameEmail(a, c.Email) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// withUserInfo asks the provider for what its ID tokens leave out (Authelia does,
+// for email and groups). It's the same person only if the subject is the same.
+func withUserInfo(ctx context.Context, p *oidc.Provider, token *oauth2.Token, c oidcClaims) oidcClaims {
+	info, err := p.UserInfo(ctx, oauth2.StaticTokenSource(token))
+	if err != nil || info.Subject != c.Subject {
+		return c
+	}
+	var m map[string]any
+	if err := info.Claims(&m); err != nil {
+		return c
+	}
+	extra := parseClaims(m)
+	if c.Email == "" {
+		c.Email, c.EmailVerified = extra.Email, extra.EmailVerified
+	}
+	if len(c.Groups) == 0 {
+		c.Groups = extra.Groups
+	}
+	if c.PreferredUsername == "" {
+		c.PreferredUsername = extra.PreferredUsername
+	}
+	return c
 }
 
 // oidcUserID is who someone is: their provider's subject, never a name or email,
@@ -143,7 +282,7 @@ func oidcUserID(issuer, subject string) []byte {
 func (c oidcClaims) displayName() string {
 	email, _, _ := strings.Cut(c.Email, "@")
 	for _, n := range []string{c.PreferredUsername, c.Name, email} {
-		if auth.ValidUserName(n) {
+		if auth.ValidUserName(n) && utf8.ValidString(n) {
 			return n
 		}
 	}
@@ -163,9 +302,11 @@ func returnURL(raw string, origins []string) string {
 	return "/"
 }
 
-func (a *Accounts) oidcRoutes(mux *http.ServeMux, guarded guardedRoute, origins []string) {
+// oidcRoutes take a route that always tries: the state can't be guessed, and noise
+// from a shared address mustn't block everyone's sign-in.
+func (a *Accounts) oidcRoutes(mux *http.ServeMux, open guardedRoute, origins []string) {
 	o := a.OIDC
-	mux.HandleFunc("GET /api/v1/auth/oidc/login", guarded(func(w http.ResponseWriter, r *http.Request, addr string) error {
+	mux.HandleFunc("GET /api/v1/auth/oidc/login", open(func(w http.ResponseWriter, r *http.Request, _ string) error {
 		ctx, cancel := context.WithTimeout(r.Context(), oidcTimeout)
 		defer cancel()
 		p, err := o.discover(ctx)
@@ -177,28 +318,26 @@ func (a *Accounts) oidcRoutes(mux *http.ServeMux, guarded guardedRoute, origins 
 			return err
 		}
 		verifier := oauth2.GenerateVerifier()
-		state, err := a.store(ceremony{kind: kindOIDC, addr: addr, nonce: nonce, verifier: verifier, returnTo: returnURL(r.URL.Query().Get("return"), origins)})
+		raw, err := json.Marshal(oidcPending{Nonce: nonce, Verifier: verifier, Return: returnURL(r.URL.Query().Get("return"), origins), Expires: a.now().Add(oidcLifetime).Unix()})
 		if err != nil {
 			return err
 		}
-		// Ties the answer to this browser. Lax: it comes back from another site.
-		http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Value: state, Path: oidcCookiePath, MaxAge: int(ceremonyLifetime.Seconds()),
-			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		value := base64.RawURLEncoding.EncodeToString(raw)
+		state, err := o.sign(value)
+		if err != nil {
+			return err
+		}
+		http.SetCookie(w, oidcCookie(oidcCookieName(state), value, int(oidcLifetime.Seconds())))
 		http.Redirect(w, r, o.config(p).AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)), http.StatusFound)
 		return nil
 	}))
-	mux.HandleFunc("GET /api/v1/auth/oidc/callback", guarded(func(w http.ResponseWriter, r *http.Request, _ string) error {
+	mux.HandleFunc("GET /api/v1/auth/oidc/callback", open(func(w http.ResponseWriter, r *http.Request, _ string) error {
 		q := r.URL.Query()
-		state := q.Get("state")
-		cookie, err := r.Cookie(oidcStateCookie)
-		if err != nil || state == "" || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(state)) != 1 {
-			return errors.New("the answer isn't for this browser")
+		pending, name, err := o.readPending(r, a.now())
+		if err != nil {
+			return err
 		}
-		c, ok := a.take(state, kindOIDC)
-		if !ok {
-			return errors.New("unknown or old sign-in")
-		}
-		http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Path: oidcCookiePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		http.SetCookie(w, oidcCookie(name, "", -1))
 		if q.Get("error") != "" {
 			return fmt.Errorf("the provider refused: %.100q", q.Get("error"))
 		}
@@ -209,7 +348,8 @@ func (a *Accounts) oidcRoutes(mux *http.ServeMux, guarded guardedRoute, origins 
 		if err != nil {
 			return fmt.Errorf("identity provider: %w", err)
 		}
-		token, err := o.config(p).Exchange(ctx, q.Get("code"), oauth2.VerifierOption(c.verifier))
+		// The provider takes a code once, which stops a replay.
+		token, err := o.config(p).Exchange(ctx, q.Get("code"), oauth2.VerifierOption(pending.Verifier))
 		if err != nil {
 			return fmt.Errorf("exchanging the code: %w", err)
 		}
@@ -221,15 +361,21 @@ func (a *Accounts) oidcRoutes(mux *http.ServeMux, guarded guardedRoute, origins 
 		if err != nil {
 			return fmt.Errorf("ID token: %w", err)
 		}
-		if subtle.ConstantTimeCompare([]byte(id.Nonce), []byte(c.nonce)) != 1 {
+		if !hmac.Equal([]byte(id.Nonce), []byte(pending.Nonce)) {
 			return errors.New("ID token: wrong nonce")
 		}
-		var claims oidcClaims
-		if err := id.Claims(&claims); err != nil {
+		if id.Subject == "" {
+			return errors.New("ID token: no subject")
+		}
+		var m map[string]any
+		if err := id.Claims(&m); err != nil {
 			return fmt.Errorf("ID token: %w", err)
 		}
-		// Already checked by the library against the signed token.
+		claims := parseClaims(m)
 		claims.Subject = id.Subject
+		if !o.allowed(claims) {
+			claims = withUserInfo(ctx, p, token, claims)
+		}
 		if !o.allowed(claims) {
 			return fmt.Errorf("%q isn't on --oidc-allow", claims.Subject)
 		}
@@ -237,11 +383,16 @@ func (a *Accounts) oidcRoutes(mux *http.ServeMux, guarded guardedRoute, origins 
 		if err != nil {
 			return err
 		}
+		// A user exists now, even if they're removed later: the logged token is spent.
+		a.mu.Lock()
+		a.SetupToken = ""
+		a.mu.Unlock()
 		log.Printf("api: %q signed in through the identity provider", u.Name) //nolint:gosec // a checked name, and %q escapes it
 		if err := a.signIn(w, u); err != nil {
 			return err
 		}
-		http.Redirect(w, r, c.returnTo, http.StatusSeeOther)
+		// Again here: a cookie can be set by a sibling domain.
+		http.Redirect(w, r, returnURL(pending.Return, origins), http.StatusSeeOther)
 		return nil
 	}))
 }

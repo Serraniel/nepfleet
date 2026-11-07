@@ -61,15 +61,20 @@ NEPFLEET_OIDC_CLIENT_SECRET=… nepfleet serve \
   --oidc-issuer https://id.example.org \
   --oidc-client-id nepfleet \
   --oidc-redirect-url https://api.example.org/api/v1/auth/oidc/callback \
-  --oidc-allow ada@example.org,group:fleet-admins
+  --oidc-allow ada@example.org,group:fleet-admins \
+  --allowed-origins https://ui.example.org
 ```
 
 - **At the provider:** register a confidential client with that redirect URL.
 - **`--oidc-allow` is required,** as a provider often has more accounts than should run your fleet. It takes email addresses the provider has verified, `sub:<subject>`, and `group:<name>` from the `groups` claim. Prefer `sub:` or a group when the provider lets people change their email. Anyone on the list can do everything.
 - **Signing in:** send the browser to `GET /api/v1/auth/oidc/login?return=<URL>`, with a URL in an allowed origin. It uses the authorization code flow with PKCE, and comes back with the same session cookie as passkeys.
 - **Who someone is:** the provider's subject, never a name or email. A name that's taken gets a number.
+- **Their only way in:** people who sign in this way can't add a passkey or codes, so the provider and the list keep deciding.
 - **Removing someone:** take them off the list, then `nepfleet user remove NAME`, which ends their sessions. Off the list alone stops new sign-ins, but a session lasts up to 12 hours.
 - **A first user through OIDC closes passkey setup,** as the setup token is only for an empty server.
+- **Claims:** email and groups are read from the ID token, or from the provider's UserInfo endpoint if it leaves them out.
+- **Same site:** like passkeys, this needs the UI and the API on the same site, or the browser won't send the session cookie.
+- **A restart** ends sign-ins underway, which then have to start again.
 
 ## TLS
 

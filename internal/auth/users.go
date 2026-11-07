@@ -29,6 +29,9 @@ type User struct {
 	Credentials []webauthn.Credential `json:"credentials"`
 	TOTP        *TOTP                 `json:"totp,omitempty"`
 	Created     time.Time             `json:"created"`
+	// External users exist through an identity provider, which decides if they
+	// may come in: a passkey or code of their own would get around that.
+	External bool `json:"external,omitempty"`
 }
 
 // WebAuthnID and the rest make a User what the passkey library works with.
@@ -175,12 +178,16 @@ func (s *UserStore) EnsureExternal(id []byte, name string) (*User, error) {
 	}
 	unique := name
 	for n := 2; taken(unique); n++ {
-		unique = fmt.Sprintf("%s-%d", name, n)
+		suffix := fmt.Sprintf("-%d", n)
+		base := []rune(name)
+		// Room for the number: names have a maximum length.
+		base = base[:min(len(base), 63-len(suffix))]
+		unique = string(base) + suffix
 	}
 	if !ValidUserName(unique) {
 		return nil, fmt.Errorf("%q can't be a user name", unique)
 	}
-	u := User{ID: id, Name: unique, Created: time.Now().UTC().Truncate(time.Second)}
+	u := User{ID: id, Name: unique, Created: time.Now().UTC().Truncate(time.Second), External: true}
 	if err := s.save(append(all, u)); err != nil {
 		return nil, err
 	}

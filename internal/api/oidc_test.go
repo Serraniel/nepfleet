@@ -31,6 +31,9 @@ type fakeProvider struct {
 	nonce    string
 	verifier string
 	change   func(map[string]any)
+	// userInfo answers the UserInfo endpoint; used are codes already taken.
+	userInfo map[string]any
+	used     map[string]bool
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -43,7 +46,7 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &fakeProvider{t: t, key: key, signer: signer, claims: map[string]any{
+	p := &fakeProvider{t: t, key: key, signer: signer, used: map[string]bool{}, claims: map[string]any{
 		"sub": "person-1", "email": "ada@example.test", "email_verified": true, "preferred_username": "ada",
 	}}
 	mux := http.NewServeMux()
@@ -51,7 +54,12 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"issuer": p.srv.URL, "authorization_endpoint": p.srv.URL + "/authorize", "token_endpoint": p.srv.URL + "/token",
 			"jwks_uri": p.srv.URL + "/keys", "id_token_signing_alg_values_supported": []string{"RS256"},
+			"userinfo_endpoint": p.srv.URL + "/userinfo",
 		})
+	})
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(p.userInfo)
 	})
 	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: key.Public(), KeyID: "k", Algorithm: "RS256", Use: "sig"}}})
@@ -61,6 +69,11 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 			t.Error(err)
 		}
 		p.verifier = r.Form.Get("code_verifier")
+		if p.used[r.Form.Get("code")] {
+			http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+			return
+		}
+		p.used[r.Form.Get("code")] = true
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "a", "token_type": "Bearer", "id_token": p.token()})
 	})
@@ -137,7 +150,7 @@ func (h *oidcHarness) begin(ret string) (*url.URL, *http.Cookie) {
 	}
 	var state *http.Cookie
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == oidcStateCookie {
+		if strings.HasPrefix(c.Name, oidcStateCookie) {
 			state = c
 		}
 	}
@@ -150,7 +163,149 @@ func (h *oidcHarness) begin(ret string) (*url.URL, *http.Cookie) {
 
 func (h *oidcHarness) finish(loc *url.URL, state *http.Cookie) *httptest.ResponseRecorder {
 	h.t.Helper()
-	return h.get(oidcCallback+"?code=c&state="+url.QueryEscape(loc.Query().Get("state")), state)
+	// A code per sign-in, which the provider takes once.
+	s := url.QueryEscape(loc.Query().Get("state"))
+	return h.get(oidcCallback+"?code="+s+"&state="+s, state)
+}
+
+func TestOIDCNoiseDoesNotBlockSignIn(t *testing.T) {
+	h := newOIDCHarness(t, "ada@example.test")
+	loc, state := h.begin(oidcUI)
+	const addr = "203.0.113.5:1"
+	send := func(path string, cookies ...*http.Cookie) int {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = addr
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		h.h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for range 20 {
+		send("/api/v1/stacks")
+		send(oidcCallback + "?code=x&state=bogus-state-long-enough")
+	}
+	s := url.QueryEscape(loc.Query().Get("state"))
+	if got := send(oidcCallback+"?code="+s+"&state="+s, state); got != http.StatusSeeOther {
+		t.Errorf("a real answer from a noisy address: %d", got)
+	}
+}
+
+func TestOIDCSignInsDoNotPushEachOtherOut(t *testing.T) {
+	h := newOIDCHarness(t, "ada@example.test")
+	loc, state := h.begin(oidcUI)
+	nonce := h.p.nonce
+	// A flood of sign-ins, and another tab: the first stays good.
+	for range maxCeremonies + 100 {
+		rec := h.get("/api/v1/auth/oidc/login")
+		if rec.Code != http.StatusFound {
+			t.Fatal(rec.Code)
+		}
+	}
+	h.p.nonce = nonce
+	if rec := h.finish(loc, state); rec.Code != http.StatusSeeOther {
+		t.Errorf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestOIDCCookieMustBeOurs(t *testing.T) {
+	h := newOIDCHarness(t, "ada@example.test")
+	loc, state := h.begin(oidcUI)
+	forged := *state
+	forged.Value = state.Value + "x"
+	if rec := h.finish(loc, &forged); rec.Code != http.StatusUnauthorized {
+		t.Errorf("a changed cookie: %d", rec.Code)
+	}
+	// Past its time.
+	h.a.Sessions.Now = func() time.Time { return time.Now().Add(oidcLifetime + time.Minute) }
+	if rec := h.finish(loc, state); rec.Code != http.StatusUnauthorized {
+		t.Errorf("an old sign-in: %d", rec.Code)
+	}
+}
+
+func TestOIDCOddClaims(t *testing.T) {
+	for name, claims := range map[string]map[string]any{
+		"verified as text": {"sub": "x", "email": "ada@example.test", "email_verified": "true"},
+		"odd others":       {"sub": "x", "email": "ada@example.test", "email_verified": true, "groups": 7, "preferred_username": 12},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newOIDCHarness(t, "ada@example.test")
+			h.p.claims = claims
+			loc, state := h.begin(oidcUI)
+			if rec := h.finish(loc, state); rec.Code != http.StatusSeeOther {
+				t.Errorf("%d %s", rec.Code, rec.Body)
+			}
+		})
+	}
+	// One group as text; objects are ignored.
+	if c := parseClaims(map[string]any{"groups": "admins"}); len(c.Groups) != 1 {
+		t.Errorf("%+v", c)
+	}
+	if c := parseClaims(map[string]any{"groups": []any{"a", map[string]any{"x": 1}}}); len(c.Groups) != 1 {
+		t.Errorf("%+v", c)
+	}
+	if c := parseClaims(map[string]any{"email_verified": "false"}); c.EmailVerified {
+		t.Error("the text false isn't verified")
+	}
+	h := newOIDCHarness(t, "ada@example.test")
+	h.p.claims = map[string]any{"email": "ada@example.test", "email_verified": true}
+	loc, state := h.begin(oidcUI)
+	if rec := h.finish(loc, state); rec.Code != http.StatusUnauthorized {
+		t.Errorf("no subject: %d", rec.Code)
+	}
+}
+
+func TestOIDCUserInfo(t *testing.T) {
+	h := newOIDCHarness(t, "group:admins")
+	h.p.claims = map[string]any{"sub": "x"}
+	h.p.userInfo = map[string]any{"sub": "x", "groups": []string{"admins"}, "preferred_username": "ada"}
+	loc, state := h.begin(oidcUI)
+	if rec := h.finish(loc, state); rec.Code != http.StatusSeeOther {
+		t.Errorf("groups from UserInfo: %d %s", rec.Code, rec.Body)
+	}
+	// Someone else's answer doesn't count.
+	h = newOIDCHarness(t, "group:admins")
+	h.p.claims = map[string]any{"sub": "x"}
+	h.p.userInfo = map[string]any{"sub": "other", "groups": []string{"admins"}}
+	loc, state = h.begin(oidcUI)
+	if rec := h.finish(loc, state); rec.Code != http.StatusUnauthorized {
+		t.Errorf("another subject: %d", rec.Code)
+	}
+}
+
+func TestOIDCUsersHaveNoOtherWayIn(t *testing.T) {
+	h := newOIDCHarness(t, "ada@example.test")
+	h.a.SetupToken = "logged-token"
+	loc, state := h.begin(oidcUI)
+	rec := h.finish(loc, state)
+	session := sessionCookie(t, rec)
+	if h.a.SetupToken != "" {
+		t.Error("the setup token still works after a first user")
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/totp/begin", nil)
+	req.Header.Set("Origin", oidcUI)
+	req.RemoteAddr = "10.2.0.1:1"
+	req.AddCookie(session)
+	got := httptest.NewRecorder()
+	h.h.ServeHTTP(got, req)
+	if got.Code != http.StatusUnauthorized {
+		t.Errorf("codes for someone from a provider: %d", got.Code)
+	}
+	if body := h.get("/api/v1/auth/status", session).Body.String(); !strings.Contains(body, `"external":true`) {
+		t.Errorf("%s", body)
+	}
+}
+
+func TestSameEmailIsASCIIOnly(t *testing.T) {
+	if !sameEmail("ADA@Example.test", "ada@example.TEST") {
+		t.Error("case")
+	}
+	for _, other := range []string{"ada@miſſion.example", "Kay@mission.example"} {
+		if sameEmail(other, "ada@mission.example") || sameEmail(other, "kay@mission.example") {
+			t.Errorf("%s", other)
+		}
+	}
 }
 
 func TestOIDCSignIn(t *testing.T) {

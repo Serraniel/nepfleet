@@ -53,19 +53,15 @@ const (
 	kindLogin   = "login"
 	kindPasskey = "passkey"
 	kindTOTP    = "totp"
-	kindOIDC    = "oidc"
 )
 
 // ceremony is a passkey exchange between its two requests.
 type ceremony struct {
-	kind   string
-	addr   string
-	data   webauthn.SessionData
-	user   *auth.User // registering
-	secret string     // a new authenticator's, until a code proves it
-	// With an identity provider.
-	nonce, verifier, returnTo string
-
+	kind    string
+	addr    string
+	data    webauthn.SessionData
+	user    *auth.User // registering
+	secret  string     // a new authenticator's, until a code proves it
 	started time.Time
 	expires time.Time
 }
@@ -270,7 +266,7 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 	mux.HandleFunc("GET /api/v1/auth/status", func(w http.ResponseWriter, r *http.Request) {
 		t, ok := a.sessionToken(r)
 		writeJSON(w, map[string]any{"setupNeeded": a.setupNeeded(), "signedIn": ok, "name": t.Name, "totp": ok && a.totpOn(r),
-			"oidc": a.OIDC != nil, "passkeys": a.WebAuthn != nil})
+			"oidc": a.OIDC != nil, "passkeys": a.WebAuthn != nil, "external": ok && a.isExternal(r)})
 	})
 	mux.HandleFunc("POST /api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		if !sameOrigin(r, origins) {
@@ -285,7 +281,7 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 	})
 	a.totpRoutes(mux, guarded)
 	if a.OIDC != nil {
-		a.oidcRoutes(mux, guarded, origins)
+		a.oidcRoutes(mux, open, origins)
 	}
 	if a.WebAuthn == nil {
 		return
@@ -394,6 +390,9 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		u, err := a.Users.ByID(uid)
 		if err != nil {
 			return err
+		}
+		if u.External {
+			return errors.New("people from an identity provider sign in there")
 		}
 		exclude := make([]protocol.CredentialDescriptor, 0, len(u.Credentials))
 		for _, cr := range u.Credentials {
