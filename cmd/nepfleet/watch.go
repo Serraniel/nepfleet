@@ -148,6 +148,21 @@ func cmdWatch(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("docker events: %w", err)
 	}
 	fmt.Fprintf(stderr, "watching containers on %s\n", e.host)
+	if n != nil {
+		// The digest goes out when quiet hours end, even if nothing else happens.
+		go func() {
+			tick := time.NewTicker(time.Minute)
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+					e.sendDigests(n, stdout)
+				}
+			}
+		}()
+	}
 	sc := bufio.NewScanner(out)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
