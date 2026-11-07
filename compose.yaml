@@ -43,7 +43,9 @@ services:
       GIT_AUTHOR_EMAIL: "${NEPFLEET_GIT_EMAIL:-nepfleet@localhost}"
       GIT_COMMITTER_NAME: "${NEPFLEET_GIT_NAME:-NepFleet}"
       GIT_COMMITTER_EMAIL: "${NEPFLEET_GIT_EMAIL:-nepfleet@localhost}"
-    command: ["serve", "--listen", ":7480"]
+    # Plain HTTP inside the container: the port below is published on the
+    # host's loopback only. Put TLS in front before you publish it wider.
+    command: ["serve", "--listen", ":7480", "--behind-proxy"]
     volumes:
       # Root-equivalent access to this host. Read docs/security.md first.
       - /var/run/docker.sock:/var/run/docker.sock

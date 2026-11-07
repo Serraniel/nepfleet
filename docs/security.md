@@ -4,7 +4,7 @@ NepFleet controls Docker, and **Docker access is root access** to the host. A co
 
 ## Defaults
 
-- The API is **off**. `nepfleet serve` binds to `127.0.0.1` and warns if it is bound anywhere else without TLS.
+- The API is **off**. `nepfleet serve` binds to `127.0.0.1` and refuses any other address without TLS (see [the API reference](api.md#tls)).
 - Agents open no ports. They dial the server over mTLS with short-lived certificates (24 h), and certificates are revoked when a host is removed.
 - The server holds no Docker socket unless it is also an agent.
 - Templates cannot execute host commands (see [decisions](decisions.md#d10-templates-are-data-not-code)).

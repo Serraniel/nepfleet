@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,6 +23,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/fleet"
@@ -238,13 +241,19 @@ func serve(args []string, stderr io.Writer) error {
 	host := fs.String("host", envOr("NEPFLEET_HOST", hostname()), "this host's name, as for plan and apply")
 	origins := fs.String("allowed-origins", "", "comma separated frontend origins allowed via CORS")
 	proxies := fs.String("trusted-proxies", "", "comma separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. 172.16.0.0/12")
+	tlsCert := fs.String("tls-cert", "", "TLS certificate file (with --tls-key; renewals are picked up without a restart)")
+	tlsKey := fs.String("tls-key", "", "TLS private key file")
+	tlsDomain := fs.String("tls-domain", "", "get a certificate for this domain from Let's Encrypt, accepting its terms (the domain must reach this server on port 443)")
+	behindProxy := fs.Bool("behind-proxy", false, "listen on plain HTTP beyond loopback: a reverse proxy in front terminates TLS")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if host, _, err := net.SplitHostPort(*addr); err == nil {
-		if ip := net.ParseIP(host); host == "" || (ip != nil && !ip.IsLoopback()) {
-			fmt.Fprintln(stderr, "warning: listening beyond loopback without TLS; put a TLS proxy in front (see docs/security.md)")
-		}
+	tlsConfig, err := serveTLS(*tlsCert, *tlsKey, *tlsDomain, *stateDir)
+	if err != nil {
+		return err
+	}
+	if err := api.CheckListen(*addr, tlsConfig != nil, *behindProxy); err != nil {
+		return err
 	}
 
 	var trustedNets []*net.IPNet
@@ -294,7 +303,14 @@ func serve(args []string, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
+	srv.TLSConfig = tlsConfig
+	go func() {
+		if tlsConfig != nil {
+			errc <- srv.ListenAndServeTLS("", "")
+			return
+		}
+		errc <- srv.ListenAndServe()
+	}()
 	fmt.Fprintf(stderr, "nepfleet API listening on %s\n", *addr)
 
 	select {
@@ -341,6 +357,33 @@ func withStack(c common, name string, fn func(*env, *fleet.Stack) (any, error)) 
 		}
 	}
 	return nil, api.ErrNotFound
+}
+
+// serveTLS builds the server's TLS configuration from its flags; nil means
+// plain HTTP.
+func serveTLS(cert, key, domain, stateDir string) (*tls.Config, error) {
+	switch {
+	case domain != "" && (cert != "" || key != ""):
+		return nil, errors.New("--tls-domain and --tls-cert/--tls-key exclude each other")
+	case (cert == "") != (key == ""):
+		return nil, errors.New("--tls-cert and --tls-key belong together")
+	case domain != "":
+		m := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(domain),
+			Cache:      autocert.DirCache(filepath.Join(stateDir, "api", "acme")),
+		}
+		c := m.TLSConfig()
+		c.MinVersion = tls.VersionTLS12
+		return c, nil
+	case cert != "":
+		r := &api.CertReloader{CertFile: cert, KeyFile: key}
+		if err := r.Load(); err != nil {
+			return nil, fmt.Errorf("TLS certificate: %w", err)
+		}
+		return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: r.GetCertificate}, nil
+	}
+	return nil, nil
 }
 
 // stackInfos reads the fleet's stacks for the API, fresh on every request,
