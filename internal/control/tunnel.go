@@ -95,6 +95,8 @@ func (s *Server) startTunnel(name, address string) error {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme, r.Out.URL.Host = "http", "remote"
 			r.Out.Host = "remote"
+			// The remote has its own CORS rules: the browser only talks to us.
+			r.Out.Header.Del("Origin")
 			// The client has no token of its own: this is the only one sent.
 			r.Out.Header.Set("Authorization", "Bearer "+t.secret())
 		},

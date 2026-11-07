@@ -42,3 +42,21 @@ nepfleet control status
 - **What the remote needs:** a running NepFleet server on port 7480, and SSH allowing TCP forwarding (`AllowTcpForwarding`).
 - **If the daemon is killed outright** (`kill -9`), its `ssh` process stays until the connection drops, and the next start replaces the socket. The token it held expires within a day.
 - **A CLI install:** `nepfleet token create` must see the same state directory as the server: set `NEPFLEET_STATE` for non-interactive SSH, or use the container.
+
+## Browsers
+
+The web UI can't open a Unix socket, so the daemon can also listen on a loopback port:
+
+```sh
+nepfleet control --http 127.0.0.1:7481 --allowed-origins http://localhost:5173
+nepfleet control token     # paste this into the UI once
+```
+
+Any web page you open can send requests to a local port, and this one reaches all your fleets, so:
+
+- **Token:** every request needs the token in `<control dir>/http.token`, which a web page can't read.
+- **Origins:** requests from a browser are refused unless they come from an exact allowed origin.
+- **Host:** the `Host` header must be the loopback address itself, which stops DNS rebinding.
+- **Loopback only:** other addresses are refused. To reach it from elsewhere, use SSH.
+
+Each connected remote then works as a backend at `http://127.0.0.1:7481/v1/remotes/<name>`.
