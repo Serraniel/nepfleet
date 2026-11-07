@@ -49,7 +49,7 @@ type UserStore struct {
 	mu  sync.Mutex
 }
 
-var userNameRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,62}$`)
+var userNameRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{M}\p{N} ._-]{0,62}$`)
 
 // ValidUserName checks a name: it ends up as a commit's author.
 func ValidUserName(s string) bool { return userNameRe.MatchString(s) }

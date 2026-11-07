@@ -257,7 +257,7 @@ func Handler(o Options) http.Handler {
 		writeJSON(w, h)
 	})))
 	if o.Accounts != nil {
-		o.Accounts.routes(mux, l, o)
+		o.Accounts.routes(mux, l, o, o.sessionOrigins())
 	}
 	return secure(cors(o.AllowedOrigins, mux))
 }
@@ -310,6 +310,15 @@ func CheckOrigin(o string) error {
 		return fmt.Errorf("%q is not an exact origin such as https://ui.example.org", o)
 	}
 	return nil
+}
+
+// sessionOrigins may use a session: the allowed origins and the passkey origins.
+func (o Options) sessionOrigins() []string {
+	out := slices.Clone(o.AllowedOrigins)
+	if o.Accounts != nil && o.Accounts.WebAuthn != nil {
+		out = append(out, o.Accounts.WebAuthn.Config.RPOrigins...)
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

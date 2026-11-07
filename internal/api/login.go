@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -196,19 +195,14 @@ func (a *Accounts) sessionToken(r *http.Request) (auth.Token, bool) {
 
 // sameOrigin stops other sites' pages from using a session: SameSite already
 // keeps the cookie from their requests, and this holds if a browser doesn't.
+// Exact origins, scheme included, and never the request's own Host, which a
+// client chooses.
 func sameOrigin(r *http.Request, allowed []string) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return true
 	}
 	o := r.Header.Get("Origin")
-	if o == "" {
-		return false
-	}
-	if slices.Contains(allowed, o) {
-		return true
-	}
-	u, err := url.Parse(o)
-	return err == nil && u.Host == r.Host
+	return o != "" && slices.Contains(allowed, o)
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -223,10 +217,10 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 
 // routes adds the sign-in endpoints. All failures read alike and count towards
 // the lockout.
-func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options) {
+func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []string) {
 	run := func(w http.ResponseWriter, r *http.Request, addr string, next func(http.ResponseWriter, *http.Request, string) error) {
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-		if !sameOrigin(r, o.AllowedOrigins) {
+		if !sameOrigin(r, origins) {
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
 		}
@@ -352,7 +346,7 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options) {
 		return nil
 	}))
 	mux.HandleFunc("POST /api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		if !sameOrigin(r, o.AllowedOrigins) {
+		if !sameOrigin(r, origins) {
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
 		}

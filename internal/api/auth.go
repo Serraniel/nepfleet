@@ -119,7 +119,7 @@ func requireAuth(o Options, l *limiter, scope string, next http.HandlerFunc) htt
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
 			if t, ok := o.Accounts.sessionToken(r); ok {
-				if !sameOrigin(r, o.AllowedOrigins) {
+				if !sameOrigin(r, o.sessionOrigins()) {
 					http.Error(w, "origin not allowed", http.StatusForbidden)
 					return
 				}

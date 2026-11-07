@@ -413,3 +413,33 @@ func TestAddrKey(t *testing.T) {
 		}
 	}
 }
+
+func TestSameOriginIsExact(t *testing.T) {
+	allowed := []string{"https://fleet.example.test"}
+	for origin, want := range map[string]bool{
+		"https://fleet.example.test":        true,
+		"http://fleet.example.test":         false, // another scheme
+		"https://fleet.example.test:8443":   false,
+		"https://api.example.test":          false, // the request's own host doesn't count
+		"https://fleet.example.test.evil.x": false,
+		"null":                              false,
+		"":                                  false,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Host = "api.example.test"
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if got := sameOrigin(req, allowed); got != want {
+			t.Errorf("%q: %v", origin, got)
+		}
+	}
+}
+
+func TestNames(t *testing.T) {
+	for name, ok := range map[string]bool{"Ada": true, "हिन्दी": true, "Müller": true, "-x": false, "a<b": false, "a\nb": false, "": false} {
+		if auth.ValidUserName(name) != ok {
+			t.Errorf("%q", name)
+		}
+	}
+}
