@@ -31,6 +31,7 @@ import (
 	"github.com/Serraniel/neptide/pkg/registry"
 	"github.com/Serraniel/neptide/pkg/snapshot"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/fleet"
@@ -1029,19 +1030,37 @@ func cmdHistory(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	applied, _ := deploy.Applied(deploy.StackDir(e.stateDir, s.Metadata.Name))
-	out, err := gitOut(e.fleet.Dir, "log", fmt.Sprintf("-n%d", *n), "--date=short", "--format=%h %ad %an  %s", "--", relTo(e.fleet.Dir, s.Dir))
+	entries, err := e.history(s, *n)
 	if err != nil {
 		return err
 	}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for _, h := range entries {
 		mark := "  "
-		if applied != nil && applied.Commit != "" && strings.HasPrefix(applied.Commit, strings.Fields(line + " x")[0]) {
+		if h.Applied {
 			mark = "▶ " // currently applied
 		}
-		fmt.Fprintln(stdout, mark+line)
+		fmt.Fprintf(stdout, "%s%s %s %s  %s\n", mark, h.Commit[:min(7, len(h.Commit))], h.Date[:min(10, len(h.Date))], h.Author, h.Subject)
 	}
 	return nil
+}
+
+// history lists the last n commits that touched a stack, newest first.
+func (e *env) history(s *fleet.Stack, n int) ([]api.HistoryEntry, error) {
+	applied, _ := deploy.Applied(deploy.StackDir(e.stateDir, s.Metadata.Name))
+	out, err := gitOut(e.fleet.Dir, "log", fmt.Sprintf("-n%d", n), "--format=%H%x1f%aI%x1f%an%x1f%s", "--", relTo(e.fleet.Dir, s.Dir))
+	if err != nil {
+		return nil, err
+	}
+	var entries []api.HistoryEntry
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Split(line, "\x1f")
+		if len(f) != 4 {
+			continue
+		}
+		entries = append(entries, api.HistoryEntry{Commit: f[0], Date: f[1], Author: f[2], Subject: f[3],
+			Applied: applied != nil && applied.Commit != "" && applied.Commit == f[0]})
+	}
+	return entries, nil
 }
 
 func cmdRollback(args []string, stdout, stderr io.Writer) error {
