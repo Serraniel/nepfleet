@@ -375,3 +375,20 @@ func TestJobPanicFails(t *testing.T) {
 		t.Errorf("job: %+v", got)
 	}
 }
+
+func TestCheckOrigin(t *testing.T) {
+	for o, ok := range map[string]bool{
+		"https://ui.example.org":      true,
+		"http://localhost:5173":       true,
+		"*":                           false,
+		"ui.example.org":              false,
+		"https://ui.example.org/":     false,
+		"https://ui.example.org/a":    false,
+		"https://user@ui.example.org": false,
+		"ftp://ui.example.org":        false,
+	} {
+		if err := CheckOrigin(o); (err == nil) != ok {
+			t.Errorf("%s: %v", o, err)
+		}
+	}
+}
