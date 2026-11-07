@@ -3,6 +3,8 @@
 package control
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -155,5 +157,60 @@ func TestEnableHTTP(t *testing.T) {
 	defer s2.stopHTTP()
 	if got := get(); got != 200 {
 		t.Errorf("after a restart: %d", got)
+	}
+}
+
+func TestEnableHTTPOrigins(t *testing.T) {
+	s := &Server{Dir: t.TempDir()}
+	if err := s.Load(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.stopHTTP()
+	token, err := LoadHTTPToken(s.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := func(addr, origin string) int {
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/info", nil) //nolint:noctx // a test
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Origin", origin)
+		res, err := http.DefaultClient.Do(req) //nolint:gosec // a test's own port
+		if err != nil {
+			return 0
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	const a, b = "127.0.0.1:17494", "127.0.0.1:17495"
+	// Quickly in a row: a new listener in between would race for the address.
+	for range 20 {
+		if err := s.EnableHTTP(a, []string{"http://one.test"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := from(a, "http://two.test"); got != http.StatusForbidden {
+		t.Errorf("not allowed yet: %d", got)
+	}
+	if err := s.EnableHTTP(a, []string{"http://two.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := from(a, "http://two.test"); got != 200 {
+		t.Errorf("allowed without a new listener: %d", got)
+	}
+	if got := from(a, "http://one.test"); got != 200 {
+		t.Errorf("origins add up: %d", got)
+	}
+	// A new address that can't be opened leaves the working one alone.
+	lc := net.ListenConfig{}
+	busy, err := lc.Listen(context.Background(), "tcp", b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnableHTTP(b, nil); err == nil {
+		t.Error("a taken address must fail")
+	}
+	_ = busy.Close()
+	if got := from(a, "http://one.test"); got != 200 {
+		t.Errorf("the old port must survive: %d", got)
 	}
 }

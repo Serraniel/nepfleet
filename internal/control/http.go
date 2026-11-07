@@ -81,6 +81,10 @@ func CheckHTTPAddr(addr string) error {
 //   - browsers may only call from exact allowed origins;
 //   - every request needs the token, which a page can't read from a file.
 func Guard(next http.Handler, addr, token string, origins []string) http.Handler {
+	return guard(next, addr, token, func() []string { return origins })
+}
+
+func guard(next http.Handler, addr, token string, origins func() []string) http.Handler {
 	_, port, _ := net.SplitHostPort(addr)
 	hosts := []string{net.JoinHostPort("127.0.0.1", port), net.JoinHostPort("localhost", port), net.JoinHostPort("::1", port)}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +97,7 @@ func Guard(next http.Handler, addr, token string, origins []string) http.Handler
 		h.Set("Cache-Control", "no-store")
 		h.Set("Referrer-Policy", "no-referrer")
 		if o := r.Header.Get("Origin"); o != "" {
-			if !slices.Contains(origins, o) {
+			if !slices.Contains(origins(), o) {
 				fail(w, http.StatusForbidden, "origin not allowed")
 				return
 			}
@@ -184,26 +188,34 @@ func (s *Server) EnableHTTP(addr string, origins []string) error {
 	return os.WriteFile(filepath.Join(s.Dir, "http.json"), raw, 0o600)
 }
 
-// listenHTTP replaces the running port. Call with s.httpMu held.
+// listenHTTP opens or updates the port. Call with s.httpMu held. The same address
+// keeps its listener and only changes who may call. A new one opens first, so a
+// failure leaves the working port as it is.
 func (s *Server) listenHTTP(addr string, origins []string) error {
+	if s.httpSrv != nil && s.httpAddr == addr {
+		s.httpOrigins.Store(&origins)
+		return nil
+	}
 	token, err := LoadHTTPToken(s.Dir)
 	if err != nil {
 		return err
-	}
-	if s.httpSrv != nil {
-		_ = s.httpSrv.Close()
-		s.httpSrv = nil
 	}
 	lc := net.ListenConfig{}
 	l, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return err
 	}
+	s.httpOrigins.Store(&origins)
+	if s.httpSrv != nil {
+		_ = s.httpSrv.Close()
+	}
 	// The plain handler: changing this port's rules is for the socket only, so
 	// a page holding the token can't add its own origin.
-	srv := &http.Server{Handler: Guard(s.Handler(), addr, token, origins), ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
-	s.httpSrv = srv
+	allowed := func() []string { return *s.httpOrigins.Load() }
+	srv := &http.Server{Handler: guard(s.Handler(), addr, token, allowed), ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
+	s.httpSrv, s.httpAddr = srv, addr
 	go func() {
+		// Serve closes l on the way out, also if srv was closed first.
 		if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("control: http: %v", err)
 		}
@@ -254,6 +266,6 @@ func (s *Server) stopHTTP() {
 	defer s.httpMu.Unlock()
 	if s.httpSrv != nil {
 		_ = s.httpSrv.Close()
-		s.httpSrv = nil
+		s.httpSrv, s.httpAddr = nil, ""
 	}
 }

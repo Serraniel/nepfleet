@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Serraniel/nepfleet/internal/remote"
@@ -63,8 +64,10 @@ type Server struct {
 	tunnels map[string]*tunnel
 	started time.Time
 
-	httpMu  sync.Mutex
-	httpSrv *http.Server
+	httpMu      sync.Mutex
+	httpSrv     *http.Server
+	httpAddr    string
+	httpOrigins atomic.Pointer[[]string]
 }
 
 // Load reads the state, or starts empty.
