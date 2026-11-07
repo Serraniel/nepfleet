@@ -356,3 +356,19 @@ func TestApplyJobs(t *testing.T) {
 		t.Errorf("a token limited to db must not see web's job: %d", r.Code)
 	}
 }
+
+func TestJobPanicFails(t *testing.T) {
+	js := newJobs()
+	job := js.start("apply", "web", "ci", func(*jobLog) error { panic("boom") })
+	var got Job
+	for range 200 {
+		got, _ = js.get(job.ID)
+		if got.State != "running" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got.State != "failed" || !strings.Contains(got.Error, "boom") {
+		t.Errorf("job: %+v", got)
+	}
+}

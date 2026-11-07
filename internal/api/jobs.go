@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -87,7 +88,15 @@ func (j *jobs) start(kind, stack, by string, fn func(log *jobLog) error) Job {
 	}
 	j.mu.Unlock()
 	go func() {
-		err := fn(e.log)
+		err := func() (err error) {
+			// A bug in a job must not take the server down mid-deploy.
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("the job crashed: %v", r)
+				}
+			}()
+			return fn(e.log)
+		}()
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		e.job.Finished = time.Now().UTC()
