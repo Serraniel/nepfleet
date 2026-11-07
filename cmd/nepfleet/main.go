@@ -330,6 +330,21 @@ func serve(args []string, stderr io.Writer) error {
 		if err := srv.Shutdown(shutdown); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
+		// An apply stopped halfway leaves a stack half updated: let a
+		// running one finish (its own health gate bounds it).
+		if !apiMu.TryLock() {
+			fmt.Fprintln(stderr, "waiting for the running apply to finish (stop again to abort)")
+			done := make(chan struct{})
+			go func() { apiMu.Lock(); close(done) }()
+			again := make(chan os.Signal, 1)
+			signal.Notify(again, os.Interrupt, syscall.SIGTERM)
+			defer signal.Stop(again)
+			select {
+			case <-done:
+			case <-again:
+				return errors.New("stopped during an apply; check the stack with nepfleet plan")
+			}
+		}
 		return nil
 	}
 }
@@ -401,8 +416,14 @@ func startApply(c common, stack, planID string, confirm bool, by string) (func(i
 		apiMu.Unlock()
 		return nil, err
 	}
-	return func(log io.Writer) error {
+	return func(log io.Writer) (err error) {
 		defer apiMu.Unlock()
+		defer func() {
+			// A bug in apply must not hold the lock (and so the API) forever.
+			if r := recover(); r != nil {
+				err = fmt.Errorf("apply crashed: %v", r)
+			}
+		}()
 		fmt.Fprintf(log, "apply %s, requested by %s over the API\n", stack, by)
 		// --yes: the client reviewed and asked; --confirm: destructive
 		// changes were confirmed above. So apply never prompts.
