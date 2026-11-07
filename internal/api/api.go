@@ -71,6 +71,8 @@ type Options struct {
 	// apply to run in the background. Errors: ErrNotFound, ErrBusy,
 	// ErrPlanChanged, ErrNeedsConfirm.
 	StartApply func(ctx context.Context, stack, planID string, confirmDestructive bool, by string) (func(log io.Writer) error, error)
+	// Templates is the catalogue of every template source of the fleet.
+	Templates func(ctx context.Context) (any, error)
 	// History lists the last n commits of a stack, newest first.
 	History func(ctx context.Context, stack string, n int) ([]HistoryEntry, error)
 	// Stacks lists the fleet's stacks.
@@ -120,6 +122,17 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, p)
 	})))
+	mux.HandleFunc("GET /api/v1/templates", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
+		if o.Templates == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		c, err := o.Templates(r.Context())
+		if writeErr(w, err) {
+			return
+		}
+		writeJSON(w, c)
+	}))
 	js := newJobs()
 	mux.HandleFunc("POST /api/v1/stacks/{name}/apply", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.StartApply == nil {
