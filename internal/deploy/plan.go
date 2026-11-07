@@ -49,7 +49,11 @@ type Plan struct {
 	First       bool     `json:"first"` // never applied before
 	Changes     []Change `json:"changes"`
 	Destructive []string `json:"destructive,omitempty"`
-	Generated   []string `json:"generated,omitempty"` // secrets created by this apply
+	// Migration is the data migration this apply runs, and MigrationError why
+	// this apply is refused instead.
+	Migration      *PlannedMigration `json:"migration,omitempty"`
+	MigrationError string            `json:"migrationError,omitempty"`
+	Generated      []string          `json:"generated,omitempty"` // secrets created by this apply
 	// Steps is everything apply will do, in order (see steps.go).
 	Steps []Step `json:"steps,omitempty"`
 	// Approximate means the per-service steps were derived without asking
@@ -62,7 +66,9 @@ type Plan struct {
 }
 
 // Empty reports whether nothing would change.
-func (p *Plan) Empty() bool { return len(p.Changes) == 0 }
+func (p *Plan) Empty() bool {
+	return len(p.Changes) == 0 && p.Migration == nil && p.MigrationError == ""
+}
 
 // Manifest is .nepfleet/manifest.json.
 type Manifest struct {
@@ -71,6 +77,9 @@ type Manifest struct {
 	Dirty  bool     `json:"dirty,omitempty"`
 	// Images are the digests that ran; a rollback re-pins them.
 	Images map[string]string `json:"images,omitempty"`
+	// Template and TemplateVersion are what was applied: migrations start here.
+	Template        string `json:"template,omitempty"`
+	TemplateVersion string `json:"templateVersion,omitempty"`
 }
 
 const metaDir = ".nepfleet"

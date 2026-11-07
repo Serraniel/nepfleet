@@ -351,6 +351,9 @@ func (t *Template) Validate() error {
 		if len(mg.Steps) == 0 {
 			bad("spec.migrations[%d]: needs at least one step", i)
 		}
+		for _, m := range checkMigration(mg) {
+			bad("spec.migrations[%d]: %s", i, m)
+		}
 	}
 	return errors.Join(errs...)
 }
