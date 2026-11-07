@@ -103,6 +103,18 @@ nepfleet import portainer --url https://portainer.lan:9443   # lists Portainer's
 nepfleet import portainer --url https://portainer.lan:9443 nextcloud
 ```
 
+Small config folders can move into the fleet repository, so they're versioned and roll back with the stack. The import names the bind mounts that fit:
+
+```sh
+nepfleet import compose homepage --copy-config /home/me/docker/homepage
+```
+
+- **What moves:** the files go to `stacks/<name>/files/config/`, and the mount points at the rendered copy. They render exactly as they were. Values that look secret, such as `api_key: …`, are stored encrypted as `${CONFIG_API_KEY}`; the import lists them, so check them.
+- **What stays out:** binary files, links, and folders over the limits of [config files](spec/fleet-repo.md).
+- **What changes:** the mount does, so the stack isn't adopted. The next apply recreates its containers, as a first deploy with no automatic rollback. The old folder stays where it is.
+- **Apps that write there:** each apply overwrites their changes, so the import warns about mounts that aren't read-only. Leave out folders the app keeps changing.
+- `import portainer` doesn't offer this yet.
+
 Stacks Portainer manages keep their compose files in Portainer's data volume, out of reach for `import compose`; `import portainer` reads them and their environment through the Portainer API instead, exactly as Portainer passed them to compose. Create an access token in Portainer (My account → Access tokens) and pass it as `PORTAINER_TOKEN` or at the prompt, never as a flag. With several Portainer environments, pass `--endpoint` with this host's (the listing shows them); only stacks running here are adopted. Relative bind mounts keep the host path Portainer gave the daemon (`/data/compose/<id>/…`), so they keep their data. Stacks with additional compose files or deployed from git are refused; create those in the fleet by hand from their files. Portainer's default certificate is self-signed: pass it with `--ca-file`. Afterwards leave those stacks alone in Portainer, since deleting one there removes its containers.
 
 The import moves secrets into `values.secret.yaml` (encrypted), keeps bind mounts pointing at the existing data, and records the running containers as the applied state. The first plan is therefore empty. Read the warnings it prints.
