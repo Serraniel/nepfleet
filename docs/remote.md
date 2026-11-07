@@ -13,3 +13,19 @@ It reports the system and architecture, your user's rights, Docker and Compose, 
 - **Your SSH setup:** it uses the system `ssh`, with your keys, agent and config. NepFleet never asks for a password.
 - **Host keys:** an unknown or changed host key is refused, never accepted. Connect once with `ssh` and check the fingerprint.
 - **Remote output is untrusted:** only known fields are read, and control characters are removed before anything is shown.
+
+## The control daemon
+
+`nepfleet control` is a small service on your own machine that remembers your remotes and will own the connections to them. Clients talk to it, so closing one changes nothing. `nepfleet remote` starts it when it isn't running, and it keeps running afterwards.
+
+```sh
+nepfleet remote add ssh://me@nas.local --name nas   # probes it first; an unreachable machine isn't added
+nepfleet remote list
+nepfleet remote refresh nas
+nepfleet remote remove nas
+nepfleet control status
+```
+
+- **Access:** a Unix socket that only you can open, in a private directory (`~/.local/state/nepfleet/control`). It refuses a directory that others can enter.
+- **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
+- **To start it at login:** run `nepfleet control` from a systemd user unit.
