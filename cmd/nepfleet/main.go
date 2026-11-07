@@ -57,7 +57,7 @@ Usage:
   nepfleet notify test <channel>        send a test message to a notification channel
   nepfleet remote probe <ssh://host>    look at a machine over SSH without changing it: OS, Docker, swarm, fleet
   nepfleet remote add|list|refresh|connect|disconnect|remove  machines the local control daemon knows
-  nepfleet control [status]             the local control daemon (started on demand; keeps running)
+  nepfleet control [status|token]       the local control daemon (started on demand; keeps running)
   nepfleet watch                        report OOM kills, crashes, crash loops and failed health checks
   nepfleet key backup --out FILE        copy the age key, encrypted with a passphrase (or --recipient)
   nepfleet mirror                       push origin's branches and tags to fleet.yaml's spec.mirrors (no force, no deletes)
