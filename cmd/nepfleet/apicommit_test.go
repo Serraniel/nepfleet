@@ -140,6 +140,16 @@ func TestStartRollbackOnlyOwnHistory(t *testing.T) {
 	apiMu.Unlock()
 }
 
+func TestAPIAuthorWithoutLatinLetters(t *testing.T) {
+	one, two := apiAuthor("花子"), apiAuthor("太郎")
+	if one == two || !strings.HasPrefix(one, "花子 <u-") || !strings.HasSuffix(one, "@tokens.nepfleet.invalid>") {
+		t.Errorf("%q %q", one, two)
+	}
+	if one != apiAuthor("花子") {
+		t.Error("one person must keep one address")
+	}
+}
+
 func TestAPIAuthor(t *testing.T) {
 	for by, want := range map[string]string{
 		"ci":      "ci <ci@tokens.nepfleet.invalid>",

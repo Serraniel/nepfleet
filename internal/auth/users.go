@@ -196,7 +196,32 @@ func (s *UserStore) EnsureExternal(id []byte, name string) (*User, error) {
 
 // AddCredential gives a user another passkey.
 func (s *UserStore) AddCredential(id []byte, c webauthn.Credential) error {
-	return s.update(id, func(u *User) { u.Credentials = append(u.Credentials, c) })
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	all, err := s.load()
+	if err != nil {
+		return err
+	}
+	// A credential belongs to one person: it says who is signing in.
+	for i := range all {
+		for j := range all[i].Credentials {
+			if subtle.ConstantTimeCompare(all[i].Credentials[j].ID, c.ID) == 1 {
+				return errors.New("that passkey is registered already")
+			}
+		}
+	}
+	for i := range all {
+		if subtle.ConstantTimeCompare(all[i].ID, id) == 1 {
+			all[i].Credentials = append(all[i].Credentials, c)
+			return s.save(all)
+		}
+	}
+	return ErrUnauthorized
 }
 
 // UpdateCredential records a passkey's new signature count after a login.

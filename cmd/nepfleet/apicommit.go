@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,7 +27,13 @@ func apiAuthor(by string) string {
 	if strings.TrimSpace(name) == "" {
 		name = "token"
 	}
-	return fmt.Sprintf("%s <%s@tokens.nepfleet.invalid>", name, strings.Trim(slugRe.ReplaceAllString(strings.ToLower(name), "-"), "-"))
+	slug := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if slug == "" {
+		// A name with no Latin letters, such as 花子: two people mustn't share an address.
+		sum := sha256.Sum256([]byte(name))
+		slug = "u-" + hex.EncodeToString(sum[:6])
+	}
+	return fmt.Sprintf("%s <%s@tokens.nepfleet.invalid>", name, slug)
 }
 
 // commitAs commits paths in the fleet repository as the given author. Nothing
