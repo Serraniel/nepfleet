@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -699,7 +700,43 @@ func stackInfos(dir string) ([]api.StackInfo, error) {
 		if t := s.Spec.Template; t != nil {
 			si.Template = t.Source + "/" + t.Name + "@" + t.Version
 		}
+		si.URL = stackAddress(f, s)
+		si.Links = stackLinks(f, all, s)
 		out = append(out, si)
 	}
 	return out, nil
+}
+
+// stackAddress is where a stack's web UI is, as far as its settings say, without
+// rendering it: domain values that come from another stack aren't resolved.
+func stackAddress(f *fleet.Fleet, s *fleet.Stack) string {
+	if a := s.Spec.Access; a != nil && a.Mode == "port" && a.Port > 0 {
+		addr := s.Spec.Target
+		if h, err := f.LoadHost(addr); err == nil && h.Spec.Address != "" {
+			addr = h.Spec.Address
+		}
+		return fmt.Sprintf("http://%s:%d", addr, a.Port)
+	}
+	if d := s.Spec.Values["DOMAIN"]; !d.IsRef() && d.Literal != "" {
+		return "https://" + d.Literal
+	}
+	return ""
+}
+
+// stackLinks point to where else a stack can be looked at: its logs in the fleet's
+// Dozzle on the same host, and the fleet's Uptime Kuma instances.
+func stackLinks(f *fleet.Fleet, all []*fleet.Stack, s *fleet.Stack) []api.StackLink {
+	var links []api.StackLink
+	for _, other := range all {
+		if t := other.Spec.Template; t != nil && t.Name == "dozzle" && other.Spec.Target == s.Spec.Target {
+			if u := stackAddress(f, other); u != "" {
+				links = append(links, api.StackLink{Name: "Logs in Dozzle", URL: u + "/stack/" + url.PathEscape(s.Metadata.Name)})
+				break
+			}
+		}
+	}
+	for _, k := range f.Spec.UptimeKuma {
+		links = append(links, api.StackLink{Name: "Monitors in " + k.Name, URL: strings.TrimRight(k.URL, "/") + "/dashboard"})
+	}
+	return links
 }

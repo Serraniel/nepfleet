@@ -536,6 +536,16 @@ components:
         apply: { type: string }
         template: { type: string, description: source/name@version }
         updates: { type: string }
+        url: { type: string, description: "Where its web UI is, if its settings say" }
+        links:
+          type: array
+          description: Other places to look at it, such as its logs.
+          items:
+            type: object
+            required: [name, url]
+            properties:
+              name: { type: string }
+              url: { type: string }
     HistoryEntry:
       type: object
       required: [commit, date, author, subject]

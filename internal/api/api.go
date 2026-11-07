@@ -39,6 +39,16 @@ type StackInfo struct {
 	Apply    string `json:"apply"`
 	Template string `json:"template,omitempty"` // source/name@version
 	Updates  string `json:"updates"`
+	// URL is where its web UI is, if its settings say.
+	URL string `json:"url,omitempty"`
+	// Links are other places to look at it, such as its logs.
+	Links []StackLink `json:"links,omitempty"`
+}
+
+// StackLink is a place to look at a stack.
+type StackLink struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 // HistoryEntry is one commit that touched a stack.
