@@ -69,10 +69,11 @@
               "type": "boolean"
             },
             "mode": {
-              "description": "Mode is off (the default) or enforce: containers reach only private networks and what is allowed. A stack's mode replaces the fleet's.",
+              "description": "Mode is off (the default), log, or enforce. In enforce, containers reach only private networks and what is allowed; log allows everything and records where they go, for nepfleet egress suggest. A stack's mode replaces the fleet's.",
               "enum": [
                 "",
                 "off",
+                "log",
                 "enforce"
               ],
               "type": "string"
