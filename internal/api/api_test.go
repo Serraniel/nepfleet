@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -277,5 +278,81 @@ func TestCertReloader(t *testing.T) {
 	}
 	if err := (&CertReloader{CertFile: filepath.Join(dir, "none"), KeyFile: kf}).Load(); err == nil {
 		t.Error("a missing file must fail at start")
+func TestApplyJobs(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	applier, _, err := store.Create("ci", auth.ScopeApply, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, _, _ := store.Create("ro", auth.ScopeRead, nil, time.Hour)
+	dbOnly, _, _ := store.Create("db", auth.ScopeRead, []string{"db"}, time.Hour)
+	done := make(chan struct{})
+	h := Handler(Options{Tokens: store,
+		StartApply: func(_ context.Context, s, plan string, confirm bool, by string) (func(io.Writer) error, error) {
+			switch {
+			case s != "web":
+				return nil, ErrNotFound
+			case plan == "old":
+				return nil, ErrPlanChanged
+			case plan == "destructive" && !confirm:
+				return nil, ErrNeedsConfirm
+			}
+			return func(w io.Writer) error {
+				fmt.Fprintf(w, "applied by %s\n", by)
+				close(done)
+				return nil
+			}, nil
+		},
+	})
+	do := func(method, token, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(http.MethodPost, reader, "/api/v1/stacks/web/apply", `{"plan":"x"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("a read token must not apply: %d", rec.Code)
+	}
+	for body, want := range map[string]int{
+		`{"plan":"old"}`:         http.StatusConflict,
+		`{"plan":"destructive"}`: http.StatusConflict,
+		`{}`:                     http.StatusBadRequest,
+		`{"plan":"x","extra":1}`: http.StatusBadRequest,
+		`{"plan":"x","confirmDestructive":"yes"}`:      http.StatusBadRequest,
+		`{"plan":"` + strings.Repeat("x", 5000) + `"}`: http.StatusBadRequest,
+	} {
+		if rec := do(http.MethodPost, applier, "/api/v1/stacks/web/apply", body); rec.Code != want {
+			t.Errorf("%.40s: %d, want %d", body, rec.Code, want)
+		}
+	}
+	if rec := do(http.MethodPost, applier, "/api/v1/stacks/nope/apply", `{"plan":"x"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown stack: %d", rec.Code)
+	}
+	rec := do(http.MethodPost, applier, "/api/v1/stacks/web/apply", `{"plan":"destructive","confirmDestructive":true}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
+	}
+	var job Job
+	if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil || job.ID == "" || rec.Header().Get("Location") != "/api/v1/jobs/"+job.ID {
+		t.Fatalf("job: %+v %v", job, err)
+	}
+	<-done
+	var got Job
+	for range 100 {
+		r := do(http.MethodGet, reader, "/api/v1/jobs/"+job.ID, "")
+		if err := json.Unmarshal(r.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.State != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got.State != "succeeded" || got.Log != "applied by ci\n" || got.By != "ci" {
+		t.Errorf("finished job: %+v", got)
+	}
+	if r := do(http.MethodGet, dbOnly, "/api/v1/jobs/"+job.ID, ""); r.Code != http.StatusNotFound {
+		t.Errorf("a token limited to db must not see web's job: %d", r.Code)
 	}
 }

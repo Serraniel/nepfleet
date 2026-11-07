@@ -6,7 +6,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,6 +29,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/Serraniel/nepfleet/internal/api"
+	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
@@ -281,15 +284,20 @@ func serve(args []string, stderr io.Writer) error {
 		TrustedProxies: trustedNets,
 		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
 		Plan: func(_ context.Context, stack string) (any, error) {
+			if !apiMu.TryLock() {
+				return nil, api.ErrBusy
+			}
+			defer apiMu.Unlock()
 			return withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
 				p, err := e.prepare(s)
 				if err != nil {
 					return nil, err
 				}
-				pl := *p.plan
-				pl.Dir = "" // the server's paths are none of the client's business
-				return &pl, nil
+				return apiPlanOf(p.plan)
 			})
+		},
+		StartApply: func(_ context.Context, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
+			return startApply(c, stack, planID, confirm, by)
 		},
 		History: func(_ context.Context, stack string, n int) ([]api.HistoryEntry, error) {
 			h, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) { return e.history(s, n) })
@@ -335,14 +343,80 @@ func hostname() string {
 }
 
 // apiMu runs one fleet operation of the API at a time: plans fetch template
-// sources and render into shared directories.
+// sources and render into shared directories, applies change the host.
+// Requests that find it taken are refused at once (busy), not queued.
 var apiMu sync.Mutex
+
+// apiPlan is a plan as the API returns it: with an ID the client sends back
+// to apply exactly what it reviewed.
+type apiPlan struct {
+	*deploy.Plan
+	ID string `json:"id"`
+}
+
+// secretMark is a masked secret's keyed mark in a plan diff.
+var secretMark = regexp.MustCompile(`•••••• \([0-9a-f]+\)`)
+
+// apiPlanOf hides the server's paths and adds the plan's ID: a hash of
+// everything the client was shown (secret marks are keyed per process, so
+// a restart changes the ID and asks for a fresh review).
+func apiPlanOf(p *deploy.Plan) (*apiPlan, error) {
+	pl := *p
+	pl.Dir = "" // the server's paths are none of the client's business
+	raw, err := json.Marshal(&pl)
+	if err != nil {
+		return nil, err
+	}
+	// Secrets NepFleet generates are new on every plan, and so are their
+	// marks: the ID covers which secrets change, not the marks.
+	sum := sha256.Sum256(secretMark.ReplaceAll(raw, []byte("••••••")))
+	return &apiPlan{Plan: &pl, ID: hex.EncodeToString(sum[:16])}, nil
+}
+
+// startApply plans the stack again and, if the plan is still the reviewed
+// one, returns the apply to run as a job. The API lock is held from the
+// check to the end of the apply, so nothing changes in between.
+func startApply(c common, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
+	if !apiMu.TryLock() {
+		return nil, api.ErrBusy
+	}
+	_, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
+		p, err := e.prepare(s)
+		if err != nil {
+			return nil, err
+		}
+		ap, err := apiPlanOf(p.plan)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case ap.ID != planID:
+			return nil, api.ErrPlanChanged
+		case len(p.plan.Destructive) > 0 && !confirm:
+			return nil, api.ErrNeedsConfirm
+		}
+		return nil, nil
+	})
+	if err != nil {
+		apiMu.Unlock()
+		return nil, err
+	}
+	return func(log io.Writer) error {
+		defer apiMu.Unlock()
+		fmt.Fprintf(log, "apply %s, requested by %s over the API\n", stack, by)
+		// --yes: the client reviewed and asked; --confirm: destructive
+		// changes were confirmed above. So apply never prompts.
+		args := []string{"--fleet", c.fleetDir, "--state", c.stateDir, "--host", c.host, "--yes"}
+		if confirm {
+			args = append(args, "--confirm", stack)
+		}
+		return cmdApply(append(args, stack), log, log)
+	}, nil
+}
 
 // withStack opens the fleet fresh (edits and pulls show without a restart)
 // and runs fn on one of its stacks; an unknown stack is api.ErrNotFound.
 func withStack(c common, name string, fn func(*env, *fleet.Stack) (any, error)) (any, error) {
-	apiMu.Lock()
-	defer apiMu.Unlock()
 	e, err := c.open()
 	if err != nil {
 		return nil, err
