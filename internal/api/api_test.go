@@ -457,3 +457,49 @@ func TestEvents(t *testing.T) {
 		t.Errorf("a token for web sees only web: %s (limit %d)", rec.Body, gotLimit)
 	}
 }
+
+func TestRollbackEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	applier, _, err := store.Create("ci", auth.ScopeApply, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, _, _ := store.Create("ro", auth.ScopeRead, nil, time.Hour)
+	other, _, _ := store.Create("o", auth.ScopeApply, []string{"db"}, time.Hour)
+	const good = "0123456789abcdef0123456789abcdef01234567"
+	const foreign = "1123456789abcdef0123456789abcdef01234567"
+	var by string
+	h := Handler(Options{Tokens: store, StartRollback: func(_ context.Context, _, commit string, _ bool, who string) (func(io.Writer) error, error) {
+		by = who
+		if commit == foreign {
+			return nil, ErrNotInHistory
+		}
+		return func(io.Writer) error { return nil }, nil
+	}})
+	post := func(token, stack, body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/stacks/"+stack+"/rollback", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for _, c := range []struct {
+		name, token, stack, body string
+		want                     int
+	}{
+		{"read token", reader, "web", `{"commit":"` + good + `"}`, http.StatusForbidden},
+		{"another stack's token", other, "web", `{"commit":"` + good + `"}`, http.StatusNotFound},
+		{"a ref", applier, "web", `{"commit":"HEAD~1"}`, http.StatusBadRequest},
+		{"an option", applier, "web", `{"commit":"--orphan"}`, http.StatusBadRequest},
+		{"short ID", applier, "web", `{"commit":"0123456"}`, http.StatusBadRequest},
+		{"not in history", applier, "web", `{"commit":"` + foreign + `"}`, http.StatusConflict},
+		{"valid", applier, "web", `{"commit":"` + good + `"}`, http.StatusAccepted},
+	} {
+		if got := post(c.token, c.stack, c.body); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+	if by != "ci" {
+		t.Errorf("by = %q", by)
+	}
+}
