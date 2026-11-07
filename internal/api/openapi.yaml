@@ -233,14 +233,57 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [setupNeeded, signedIn, name, totp]
+                required: [setupNeeded, signedIn, name, totp, oidc, passkeys, external]
                 properties:
+                  external:
+                    type: boolean
+                    description: Whether the signed-in user came through the identity provider, so can't add a passkey or codes.
+                  oidc:
+                    type: boolean
+                    description: Whether an identity provider can sign people in.
+                  passkeys:
+                    type: boolean
+                    description: Whether passkeys are on.
                   setupNeeded: { type: boolean }
                   signedIn: { type: boolean }
                   name: { type: string }
                   totp:
                     type: boolean
                     description: Whether the signed-in user has sign-in codes on.
+  /api/v1/auth/oidc/login:
+    get:
+      tags: [signing-in]
+      operationId: oidcLogin
+      summary: Start signing in through the identity provider
+      description: Only with --oidc-issuer. Open it in the browser, not with fetch.
+      security: []
+      parameters:
+        - name: return
+          in: query
+          description: Where to go afterwards, in an allowed origin.
+          schema: { type: string }
+      responses:
+        "302": { description: On to the provider }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
+  /api/v1/auth/oidc/callback:
+    get:
+      tags: [signing-in]
+      operationId: oidcCallback
+      summary: Where the provider sends the browser back
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "303": { description: Signed in; on to the return URL }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
   /api/v1/auth/setup/begin:
     post:
       tags: [signing-in]

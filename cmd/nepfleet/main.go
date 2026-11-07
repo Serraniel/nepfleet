@@ -271,8 +271,26 @@ func serve(args []string, stderr io.Writer) error {
 	rpID := fs.String("passkey-domain", "", "turn on passkey sign-in for this domain, e.g. fleet.example.org")
 	rpOrigins := fs.String("passkey-origins", "", "comma separated exact origins of the web UI, for passkeys (default https://<passkey-domain>)")
 	behindProxy := fs.Bool("behind-proxy", false, "listen on plain HTTP beyond loopback: a reverse proxy in front terminates TLS")
+	oidcIssuer := fs.String("oidc-issuer", "", "turn on sign-in through this OpenID Connect provider; its client secret comes from NEPFLEET_OIDC_CLIENT_SECRET")
+	oidcClient := fs.String("oidc-client-id", "", "this server's client ID at the provider")
+	oidcRedirect := fs.String("oidc-redirect-url", "", "this server's public /api/v1/auth/oidc/callback URL")
+	oidcAllow := fs.String("oidc-allow", "", "comma separated: who may sign in, as verified emails, sub:<subject> or group:<name>; each can do everything")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var oidcConfig *api.OIDC
+	if *oidcIssuer != "" {
+		oidcConfig = &api.OIDC{Issuer: *oidcIssuer, ClientID: *oidcClient, ClientSecret: os.Getenv("NEPFLEET_OIDC_CLIENT_SECRET"),
+			RedirectURL: *oidcRedirect, Allow: splitCSV(*oidcAllow)}
+		// Not for child processes: stacks are rendered and run from here.
+		_ = os.Unsetenv("NEPFLEET_OIDC_CLIENT_SECRET")
+		if err := oidcConfig.CheckOIDC(); err != nil {
+			return fmt.Errorf("--oidc-issuer: %w", err)
+		}
+		// A session could read but not change anything, and there'd be nowhere to return to.
+		if strings.TrimSpace(*origins) == "" && *rpID == "" {
+			return errors.New("--oidc-issuer needs --allowed-origins: where the web UI runs")
+		}
 	}
 	tlsConfig, err := serveTLS(*tlsCert, *tlsKey, *tlsDomain, *stateDir)
 	if err != nil {
@@ -309,6 +327,12 @@ func serve(args []string, stderr io.Writer) error {
 	accounts, err := serveAccounts(*rpID, *rpOrigins, *stateDir, stderr)
 	if err != nil {
 		return err
+	}
+	if oidcConfig != nil {
+		if accounts == nil {
+			accounts = &api.Accounts{Users: &auth.UserStore{Dir: filepath.Join(*stateDir, "api")}, Sessions: &auth.Sessions{}}
+		}
+		accounts.OIDC = oidcConfig
 	}
 	// A stop signal does not cancel an apply: stopped halfway, a stack stays
 	// half updated. Only a second signal does.

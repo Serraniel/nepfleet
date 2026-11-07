@@ -29,6 +29,9 @@ type User struct {
 	Credentials []webauthn.Credential `json:"credentials"`
 	TOTP        *TOTP                 `json:"totp,omitempty"`
 	Created     time.Time             `json:"created"`
+	// External users exist through an identity provider, which decides if they
+	// may come in: a passkey or code of their own would get around that.
+	External bool `json:"external,omitempty"`
 }
 
 // WebAuthnID and the rest make a User what the passkey library works with.
@@ -148,6 +151,47 @@ func (s *UserStore) Add(u *User, firstOnly bool) error {
 		return errors.New("that name exists")
 	}
 	return s.save(append(all, *u))
+}
+
+// EnsureExternal returns the user an identity provider vouches for, creating them
+// the first time. The ID says who someone is; a name that's taken gets a number,
+// so nobody signs in as someone else who happens to share it.
+func (s *UserStore) EnsureExternal(id []byte, name string) (*User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	all, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if subtle.ConstantTimeCompare(all[i].ID, id) == 1 {
+			return &all[i], nil
+		}
+	}
+	taken := func(n string) bool {
+		return slices.ContainsFunc(all, func(u User) bool { return u.Name == n })
+	}
+	unique := name
+	for n := 2; taken(unique); n++ {
+		suffix := fmt.Sprintf("-%d", n)
+		base := []rune(name)
+		// Room for the number: names have a maximum length.
+		base = base[:min(len(base), 63-len(suffix))]
+		unique = string(base) + suffix
+	}
+	if !ValidUserName(unique) {
+		return nil, fmt.Errorf("%q can't be a user name", unique)
+	}
+	u := User{ID: id, Name: unique, Created: time.Now().UTC().Truncate(time.Second), External: true}
+	if err := s.save(append(all, u)); err != nil {
+		return nil, err
+	}
+	return &u, nil
 }
 
 // AddCredential gives a user another passkey.
