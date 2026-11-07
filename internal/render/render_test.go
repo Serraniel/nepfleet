@@ -361,3 +361,42 @@ func TestWithStorage(t *testing.T) {
 		t.Error("an unknown storage must fail")
 	}
 }
+
+func TestAccessPortMode(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    labels:\n      caddy: ${DOMAIN}\n      caddy.reverse_proxy: \"{{upstreams 80}}\"\n      homepage.href: ${NEPFLEET_URL}\n    environment: {URL: \"${NEPFLEET_URL}\"}\n")
+	tpl := &template.Template{Dir: dir, Spec: template.Spec{Compose: "compose.yaml",
+		Inputs: []template.Input{{Name: "DOMAIN", Type: "hostname", Required: true}},
+		Web:    &template.Web{Service: "web", Port: 80}}}
+	f := &fleet.Fleet{}
+	s := &fleet.Stack{}
+	s.Metadata.Name = "app"
+	s.Spec.Target = "nas"
+	s.Spec.Access = &fleet.Access{Mode: "port", Port: 8060}
+	host := &fleet.Host{}
+	host.Spec.Address = "nas.local"
+	out, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Host: host})
+	must(t, err)
+	c := string(out.Files[ComposeFile])
+	if strings.Contains(c, "caddy") || !strings.Contains(c, `"8060:80"`) || !strings.Contains(c, "homepage.href") {
+		t.Errorf("compose:\n%s", c)
+	}
+	env := EnvValues(out.Files[EnvFile])
+	if env["NEPFLEET_URL"] != "http://nas.local:8060" || env["DOMAIN"] != "nas.local" {
+		t.Errorf("env = %v", env)
+	}
+	// Domain mode: Caddy stays, the URL is the domain.
+	s.Spec.Access = nil
+	s.Spec.Values = fleet.Literals(map[string]string{"DOMAIN": "app.example.org"})
+	out, err = Render(Input{Fleet: f, Stack: s, Template: tpl, Host: host})
+	must(t, err)
+	if !strings.Contains(string(out.Files[ComposeFile]), "caddy:") || EnvValues(out.Files[EnvFile])["NEPFLEET_URL"] != "https://app.example.org" {
+		t.Errorf("domain mode:\n%s", out.Files[ComposeFile])
+	}
+	// Without spec.web, port mode cannot work.
+	tpl.Spec.Web = nil
+	s.Spec.Access = &fleet.Access{Mode: "port", Port: 8060}
+	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Host: host}); err == nil {
+		t.Error("port mode without spec.web must fail")
+	}
+}

@@ -68,6 +68,15 @@ spec:
 
 An empty value for an `enum`, `bool`, `int`, `hostname`, `url`, `email` or `gpu` input means unset: the default applies, or a required input is reported as missing. For `string`, `text`, `path`, `device` and `secret`, an empty value clears an optional default.
 
+## Web UI
+
+A template with a web UI names its service and port, so a stack can also be published on a LAN port instead of through Caddy (see access modes in [the fleet repository](fleet-repo.md#hosts-and-access-modes)):
+
+```yaml
+spec:
+  web: {service: jellyfin, port: 8096}
+```
+
 ## Hardware
 
 Devices and GPUs are inputs like any other, so the wizard can offer what the host has and a template still works without them:
@@ -93,6 +102,7 @@ Inside the compose file and `files/`, you can use the following variables:
   - `NEPFLEET_STACK`: the stack name.
   - `NEPFLEET_INGRESS_NETWORK`: the external network Caddy listens on.
   - `TZ`.
+  - `NEPFLEET_URL`: where users reach the stack's web UI. It's `https://<DOMAIN>`, or `http://<host>:<port>` for a stack in access mode port. Use it for links (Homepage, Kuma) and for app settings such as a base URL.
   - `NEPFLEET_AGE_RECIPIENTS`: the fleet's age public keys, comma separated. Encrypt backups to these, and the fleet key can read them.
   - `NEPFLEET_NO_BACKUP_VOLUMES`: a regular expression alternation of the Docker volume names (`<stack>_<volume>`) that templates of stacks on the same host mark `backup: false`, such as caches and models. It's `$^` (matches nothing) when there are none, so `/backup/volumes/(${NEPFLEET_NO_BACKUP_VOLUMES})/` is a safe exclude. It's only computed for templates that use it.
 

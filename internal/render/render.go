@@ -7,6 +7,7 @@ package render
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/mail"
 	"net/url"
 	"os"
@@ -39,6 +40,8 @@ type Input struct {
 	// stacks on the same host mark backup: false (caches, models), for
 	// ${NEPFLEET_NO_BACKUP_VOLUMES}.
 	NoBackupVolumes []string
+	// Host is the stack's target host (address for port access).
+	Host *fleet.Host
 	// StoragePasswords are the passwords of fleet.yaml spec.storage entries
 	// (from fleet.secret.yaml), by storage name.
 	StoragePasswords map[string]string
@@ -96,6 +99,9 @@ func Render(in Input) (*Output, error) {
 			out.Secret[k] = true
 		}
 	} else {
+		if portMode(in.Stack) {
+			in.Stack = withHostDomain(in)
+		}
 		if err := values(in, env, out); err != nil {
 			return nil, err
 		}
@@ -118,6 +124,10 @@ func Render(in Input) (*Output, error) {
 		if compose, err = WithHardware(compose, in.Template.Spec.Hardware, env, in.Stack.Spec.Mode, in.RenderGID); err != nil {
 			return nil, fmt.Errorf("compose file: %w", err)
 		}
+	}
+	env["NEPFLEET_URL"] = stackURL(in, env)
+	if compose, err = WithAccess(compose, in.Template, in.Stack); err != nil {
+		return nil, fmt.Errorf("compose file: %w", err)
 	}
 	if compose, err = WithStorage(compose, in.Fleet, in.Stack, in.StoragePasswords, env, out); err != nil {
 		return nil, fmt.Errorf("compose file: %w", err)
@@ -168,6 +178,34 @@ func noBackupPattern(names []string) string {
 	}
 	sort.Strings(quoted)
 	return strings.Join(quoted, "|")
+}
+
+// withHostDomain fills DOMAIN with the host's address for a stack on a LAN
+// port, so templates that require a domain still render; their web UI is
+// reached at ${NEPFLEET_URL}.
+func withHostDomain(in Input) *fleet.Stack {
+	if in.Template == nil {
+		return in.Stack
+	}
+	if _, set := in.Stack.Spec.Values["DOMAIN"]; set {
+		return in.Stack
+	}
+	for _, inp := range in.Template.Spec.Inputs {
+		if inp.Name == "DOMAIN" {
+			s := *in.Stack
+			s.Spec.Values = maps.Clone(in.Stack.Spec.Values)
+			if s.Spec.Values == nil {
+				s.Spec.Values = map[string]fleet.Value{}
+			}
+			addr := s.Spec.Target
+			if in.Host != nil && in.Host.Spec.Address != "" {
+				addr = in.Host.Spec.Address
+			}
+			s.Spec.Values["DOMAIN"] = fleet.Lit(addr)
+			return &s
+		}
+	}
+	return in.Stack
 }
 
 // values validates stack values against the template's inputs and fills env.

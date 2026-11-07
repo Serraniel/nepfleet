@@ -25,7 +25,7 @@ import (
 const APIVersion = "nepfleet/v1alpha1"
 
 // Builtins are variables NepFleet always provides to a compose file.
-var Builtins = []string{"NEPFLEET_STACK", "NEPFLEET_INGRESS_NETWORK", "TZ", "NEPFLEET_AGE_RECIPIENTS", "NEPFLEET_NO_BACKUP_VOLUMES"}
+var Builtins = []string{"NEPFLEET_STACK", "NEPFLEET_INGRESS_NETWORK", "TZ", "NEPFLEET_AGE_RECIPIENTS", "NEPFLEET_NO_BACKUP_VOLUMES", "NEPFLEET_URL"}
 
 // Template is the parsed template.yaml.
 type Template struct {
@@ -64,6 +64,15 @@ type Spec struct {
 	// Hardware maps device and gpu inputs to services; NepFleet adds them
 	// to the rendered compose file only when the input has a value.
 	Hardware []Hardware `yaml:"hardware"`
+	// Web is the service and port of the template's web UI, so a stack can
+	// publish it on a LAN port instead of through Caddy (access mode port).
+	Web *Web `yaml:"web"`
+}
+
+// Web is a template's web UI.
+type Web struct {
+	Service string `yaml:"service" schema:"required"`
+	Port    int    `yaml:"port" schema:"required"`
 }
 
 // Hardware connects one device or gpu input to services.
@@ -365,6 +374,14 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		return []error{fmt.Errorf("%s: no services", t.Spec.Compose)}
 	}
 	var errs []error
+	if w := t.Spec.Web; w != nil {
+		if _, ok := doc.Services[w.Service]; !ok {
+			errs = append(errs, fmt.Errorf("spec.web: service %q is not in %s", w.Service, t.Spec.Compose))
+		}
+		if w.Port < 1 || w.Port > 65535 {
+			errs = append(errs, fmt.Errorf("spec.web: port %d is not a port", w.Port))
+		}
+	}
 	for i, h := range t.Spec.Hardware {
 		for _, name := range h.Services {
 			if _, ok := doc.Services[name]; !ok {

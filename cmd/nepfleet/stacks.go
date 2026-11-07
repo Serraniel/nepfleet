@@ -218,8 +218,15 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
+	host, err := e.fleet.LoadHost(e.targetHost(s.Spec.Target))
+	if err != nil {
+		return nil, err
+	}
+	if err := e.checkAccessPort(s); err != nil {
+		return nil, err
+	}
 	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret,
-		NoBackupVolumes: noBackup, StoragePasswords: storagePw, RenderGID: doctor.RenderGID("/")})
+		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -261,6 +268,46 @@ func (e *env) storagePasswords(s *fleet.Stack) (map[string]string, error) {
 		out[k] = sec[e.fleet.Spec.Storage[k].PasswordSecret]
 	}
 	return out, nil
+}
+
+// targetHost is the host a target names ("local" is this host).
+func (e *env) targetHost(target string) string {
+	if target == "local" {
+		return e.host
+	}
+	return target
+}
+
+// checkAccessPort refuses a LAN port that another stack on the same host
+// already uses.
+func (e *env) checkAccessPort(s *fleet.Stack) error {
+	a := s.Spec.Access
+	if a == nil || a.Mode != "port" {
+		return nil
+	}
+	used, err := e.fleet.AccessPorts(s.Spec.Target)
+	if err != nil {
+		return err
+	}
+	if s.Spec.Target == "local" || s.Spec.Target == e.host {
+		other := e.host
+		if s.Spec.Target == e.host {
+			other = "local"
+		}
+		more, err := e.fleet.AccessPorts(other)
+		if err != nil {
+			return err
+		}
+		for p, names := range more {
+			used[p] = append(used[p], names...)
+		}
+	}
+	for _, n := range used[a.Port] {
+		if n != s.Metadata.Name {
+			return fmt.Errorf("%s: port %d is already used by %s on %s", s.Metadata.Name, a.Port, n, s.Spec.Target)
+		}
+	}
+	return nil
 }
 
 // usesBuiltin reports whether a template's compose file or files use ${name}.

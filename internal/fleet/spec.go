@@ -177,6 +177,9 @@ type StackSpec struct {
 	Updates string           `yaml:"updates" schema:"enum=off|notify|auto;default=notify"` // off | notify | auto
 	// Logging overrides the fleet's default log settings for this stack.
 	Logging *Logging `yaml:"logging"`
+	// Access says how the stack's web UI is reached: through Caddy on its
+	// domain (default) or on a port of the host on the LAN.
+	Access *Access `yaml:"access"`
 	// Egress: hosts the containers must not reach (known telemetry by
 	// default, see TelemetryHosts).
 	// Volumes puts compose volumes on network storage from fleet.yaml
@@ -188,6 +191,15 @@ type StackSpec struct {
 	Snapshot string `yaml:"snapshot" schema:"enum=auto|off;default=auto"`
 	// SnapshotExclude lists mount paths in the containers never copied.
 	SnapshotExclude []string `yaml:"snapshotExclude"`
+}
+
+// Access is a stack's access mode.
+type Access struct {
+	// Mode: domain (Caddy, as the template's labels say) or port (a host
+	// port on the LAN, no Caddy).
+	Mode string `yaml:"mode" schema:"enum=domain|port;default=domain"`
+	// Port is the host port in mode port; nepfleet new picks a free one.
+	Port int `yaml:"port"`
 }
 
 // Logging is a compose logging section applied to services without one.
@@ -473,6 +485,19 @@ func loadStack(dir string) (*Stack, error) {
 	}
 	if err := checkEgress(s.Spec.Egress); err != nil {
 		bad("spec.egress: %v", err)
+	}
+	if a := s.Spec.Access; a != nil {
+		if a.Mode == "" {
+			a.Mode = "domain"
+		}
+		switch {
+		case a.Mode != "domain" && a.Mode != "port":
+			bad("spec.access.mode must be domain or port")
+		case a.Mode == "port" && (a.Port < 1024 || a.Port > 65535):
+			bad("spec.access.port must be between 1024 and 65535")
+		case a.Mode == "domain" && a.Port != 0:
+			bad("spec.access.port is only for mode port")
+		}
 	}
 	if s.Spec.Mode == "" {
 		s.Spec.Mode = "compose"
