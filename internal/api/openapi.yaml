@@ -546,6 +546,17 @@ components:
             properties:
               name: { type: string }
               url: { type: string }
+        uses:
+          type: array
+          description: "Values it takes from other stacks: names only, never values. Stacks this token doesn't cover are left out."
+          items:
+            type: object
+            required: [key, from]
+            properties:
+              key: { type: string }
+              from: { type: string }
+              value: { type: string }
+              secret: { type: string }
     HistoryEntry:
       type: object
       required: [commit, date, author, subject]

@@ -8,6 +8,19 @@ import (
 	"github.com/Serraniel/nepfleet/internal/fleet"
 )
 
+func TestStackUses(t *testing.T) {
+	s := &fleet.Stack{}
+	s.Spec.Values = map[string]fleet.Value{
+		"Z_KEY": {From: "jellyfin", Secret: "API_KEY"},
+		"A_URL": {From: "ollama", Value: "URL"},
+		"PLAIN": fleet.Lit("not a reference, and possibly private"),
+	}
+	got := stackUses(s)
+	if len(got) != 2 || got[0].Key != "A_URL" || got[0].Value != "URL" || got[1].From != "jellyfin" || got[1].Secret != "API_KEY" {
+		t.Errorf("%+v", got)
+	}
+}
+
 func TestStackLinks(t *testing.T) {
 	f := &fleet.Fleet{Dir: t.TempDir()}
 	f.Spec.UptimeKuma = []fleet.KumaInstance{{Name: "home", URL: "https://kuma.example.test/"}}
