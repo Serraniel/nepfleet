@@ -29,6 +29,7 @@ type templateMatch struct {
 	Same map[string][2]string
 	// OnlyStack and OnlyTemplate are images on one side only.
 	OnlyStack, OnlyTemplate []string
+	compose                 []byte
 }
 
 // cmdTemplateMatch: nepfleet template match <stack> — tells whether a
@@ -40,12 +41,13 @@ func cmdTemplateMatch(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	src := fs.String("source", "official", "template source from fleet.yaml")
+	withDiff := fs.Bool("diff", false, "also show how services with the same image differ: environment names (never values), ports and volumes")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 {
-		return errors.New("usage: nepfleet template match <stack> [--source NAME]")
+		return errors.New("usage: nepfleet template match <stack> [--source NAME] [--diff]")
 	}
 	e, err := c.open()
 	if err != nil {
@@ -86,7 +88,7 @@ func cmdTemplateMatch(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 		if m, ok := matchImages(stackImages, imageTags(tplRaw)); ok {
-			m.Template = t
+			m.Template, m.compose = t, tplRaw
 			matches = append(matches, m)
 		}
 	}
@@ -97,6 +99,9 @@ func cmdTemplateMatch(args []string, stdout, stderr io.Writer) error {
 	sort.SliceStable(matches, func(i, j int) bool { return len(matches[i].Same) > len(matches[j].Same) })
 	for _, m := range matches {
 		printMatch(stdout, s.Metadata.Name, *src, m)
+		if *withDiff {
+			diffCompose(stdout, raw, m.compose)
+		}
 	}
 	return nil
 }
