@@ -59,6 +59,8 @@ nepfleet control --http 127.0.0.1:7481 --allowed-origins http://localhost:5173
 nepfleet control token     # paste this into the UI once
 ```
 
+`nepfleet control http 127.0.0.1:7481 --allowed-origins …` turns the port on in a running daemon without touching its tunnels. Either way it is remembered, and origins add up. Only the socket can change these rules, so a page holding the token can't add its own origin.
+
 Any web page you open can send requests to a local port, and this one reaches all your fleets, so:
 
 - **Token:** every request needs the token in `<control dir>/http.token`, which a web page can't read.

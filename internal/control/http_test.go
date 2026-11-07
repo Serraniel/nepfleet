@@ -91,3 +91,69 @@ func TestGuard(t *testing.T) {
 		}
 	}
 }
+
+func TestEnableHTTP(t *testing.T) {
+	dir := t.TempDir()
+	s := &Server{Dir: dir}
+	if err := s.Load(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.stopHTTP()
+	h := s.SocketHandler()
+	post := func(handler http.Handler, body string) int {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/http", strings.NewReader(body)))
+		return rec.Code
+	}
+	for body, want := range map[string]int{
+		`{"addr":"0.0.0.0:17492","origins":[]}`:                          400,
+		`{"addr":"127.0.0.1:17492","origins":["*"]}`:                     400,
+		`{"addr":"127.0.0.1:17492","origins":["tauri://evil"]}`:          400,
+		`{"addr":"127.0.0.1:17492","origins":["tauri://localhost"]}`:     204,
+		`{"addr":"127.0.0.1:17492","origins":["http://localhost:5173"]}`: 204,
+	} {
+		if got := post(h, body); got != want {
+			t.Errorf("%s: %d, want %d", body, got, want)
+		}
+	}
+	// A page holding the token must not reach this: only the socket has it.
+	if got := post(s.Handler(), `{"addr":"127.0.0.1:17492","origins":["https://evil.example"]}`); got == 204 {
+		t.Error("the HTTP port must not change its own rules")
+	}
+	c, err := s.loadHTTPConfig()
+	if err != nil || c == nil || c.Addr != "127.0.0.1:17492" {
+		t.Fatalf("saved: %+v %v", c, err)
+	}
+	fi, err := os.Stat(filepath.Join(dir, "http.json"))
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
+		t.Errorf("http.json: %v %v", fi, err)
+	}
+	token, err := LoadHTTPToken(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// It really listens, and comes back after a restart.
+	get := func() int {
+		req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:17492/v1/info", nil) //nolint:noctx // a test
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := http.DefaultClient.Do(req) //nolint:gosec // a test's own port
+		if err != nil {
+			return 0
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	if got := get(); got != 200 {
+		t.Errorf("port: %d", got)
+	}
+	s.stopHTTP()
+	s2 := &Server{Dir: dir}
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	s2.startSavedHTTP()
+	defer s2.stopHTTP()
+	if got := get(); got != 200 {
+		t.Errorf("after a restart: %d", got)
+	}
+}
