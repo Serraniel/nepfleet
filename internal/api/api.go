@@ -11,11 +11,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/Serraniel/nepfleet/internal/auth"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -215,6 +217,17 @@ func writeErr(w http.ResponseWriter, err error) bool {
 		http.Error(w, "the stack cannot be read; see the server log", http.StatusInternalServerError)
 	}
 	return true
+}
+
+// CheckOrigin accepts an exact origin (scheme, host, optional port), which is
+// all a browser sends. "*" and anything with a path would silently match
+// nothing, or too much.
+func CheckOrigin(o string) error {
+	u, err := url.Parse(o)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%q is not an exact origin such as https://ui.example.org", o)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

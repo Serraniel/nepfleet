@@ -276,6 +276,9 @@ func serve(args []string, stderr io.Writer) error {
 	var allowed []string
 	for _, o := range strings.Split(*origins, ",") {
 		if o = strings.TrimSpace(o); o != "" {
+			if err := api.CheckOrigin(o); err != nil {
+				return fmt.Errorf("--allowed-origins: %w", err)
+			}
 			allowed = append(allowed, o)
 		}
 	}
