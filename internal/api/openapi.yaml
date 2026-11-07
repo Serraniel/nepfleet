@@ -220,6 +220,19 @@ paths:
             application/json:
               schema: { type: object }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /metrics:
+    get:
+      tags: [server]
+      operationId: metrics
+      summary: Prometheus metrics
+      description: Needs the read scope, filtered like the rest, since stack names aren't for anyone who reaches the port.
+      responses:
+        "200":
+          description: Prometheus' text format
+          content:
+            text/plain:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/events/stream:
     get:
       tags: [server]

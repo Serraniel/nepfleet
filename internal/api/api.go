@@ -168,6 +168,7 @@ func Handler(o Options) http.Handler {
 		}
 		writeJSON(w, c)
 	}))
+	mux.HandleFunc("GET /metrics", requireAuth(o, l, auth.ScopeRead, serveMetrics(o)))
 	mux.HandleFunc("GET /api/v1/events/stream", requireAuth(o, l, auth.ScopeRead, streamEvents(o)))
 	mux.HandleFunc("GET /api/v1/events", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		if o.Events == nil {
