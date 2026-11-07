@@ -6,6 +6,7 @@ require (
 	github.com/Serraniel/neptide v0.0.0-20261106171331-568cddde89a5
 	github.com/nicholas-fedor/shoutrrr v0.23.0
 	go.yaml.in/yaml/v3 v3.0.6
+	golang.org/x/crypto v0.58.0
 	golang.org/x/term v0.47.0
 )
 
@@ -15,7 +16,6 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect

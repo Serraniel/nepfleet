@@ -4,12 +4,21 @@ package api
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -176,5 +185,97 @@ func TestStackEndpoints(t *testing.T) {
 	}
 	if rec := get("", "/api/v1/stacks/web/history"); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no token: %d", rec.Code)
+	}
+}
+
+func TestCheckListen(t *testing.T) {
+	for _, c := range []struct {
+		addr      string
+		tls, prox bool
+		ok        bool
+	}{
+		{"127.0.0.1:7480", false, false, true},
+		{"[::1]:7480", false, false, true},
+		{"localhost:7480", false, false, true},
+		{":7480", false, false, false},
+		{"0.0.0.0:7480", false, false, false},
+		{"192.168.1.2:7480", false, false, false},
+		{"nas.local:7480", false, false, false},
+		{":7480", true, false, true},
+		{":7480", false, true, true},
+	} {
+		if err := CheckListen(c.addr, c.tls, c.prox); (err == nil) != c.ok {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+}
+
+func writeCert(t *testing.T, certFile, keyFile, cn string, mod time.Time) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: cn}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for f, b := range map[string][]byte{
+		certFile: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		keyFile:  pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}),
+	} {
+		if err := os.WriteFile(f, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(f, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCertReloader(t *testing.T) {
+	dir := t.TempDir()
+	cf, kf := filepath.Join(dir, "c.pem"), filepath.Join(dir, "k.pem")
+	now := time.Now()
+	writeCert(t, cf, kf, "one", now.Add(-time.Hour))
+	r := &CertReloader{CertFile: cf, KeyFile: kf}
+	if err := r.Load(); err != nil {
+		t.Fatal(err)
+	}
+	name := func() string {
+		t.Helper()
+		c, err := r.GetCertificate(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x, err := x509.ParseCertificate(c.Certificate[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return x.Subject.CommonName
+	}
+	if got := name(); got != "one" {
+		t.Errorf("first: %s", got)
+	}
+	writeCert(t, cf, kf, "two", now)
+	r.checked = time.Time{}
+	if got := name(); got != "two" {
+		t.Errorf("after renewal: %s", got)
+	}
+	// A broken renewal keeps the last good pair.
+	if err := os.WriteFile(kf, []byte("broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.checked = time.Time{}
+	if got := name(); got != "two" {
+		t.Errorf("after a broken renewal: %s", got)
+	}
+	if err := (&CertReloader{CertFile: filepath.Join(dir, "none"), KeyFile: kf}).Load(); err == nil {
+		t.Error("a missing file must fail at start")
 	}
 }
