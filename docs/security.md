@@ -22,7 +22,7 @@ Before it can be public, it needs:
 | CORS allowlist with exact origins; `*` is rejected at start | Done |
 | Lockout after failed authentication | Done for tokens; sign-in endpoints will need it too |
 | Passkeys with TOTP as a fallback, or OIDC ([#33](https://github.com/Serraniel/nepfleet/issues/33), [#34](https://github.com/Serraniel/nepfleet/issues/34)) | Not yet |
-| Every state change recorded as a commit by the authenticated person ([#37](https://github.com/Serraniel/nepfleet/issues/37)) | Not yet: applies are in the server log |
+| Every state change recorded as a commit by the authenticated person ([#37](https://github.com/Serraniel/nepfleet/issues/37)) | Partly: rollbacks and what applies write are commits, authored by the token's name, not yet a person |
 | The server refusing to start publicly without the above | Not yet: there is no "public" mode to refuse |
 
 ## API tokens
@@ -35,7 +35,7 @@ nepfleet token list
 nepfleet token revoke <id>
 ```
 
-- **Scopes:** `read` (stacks, plans, history, templates), `apply` (also apply), `admin` (reserved for tokens and settings over the API). Each includes the ones before it, and `--stack` limits a token to some stacks. An `admin` token can't be limited to stacks.
+- **Scopes:** `read` (stacks, plans, history, templates), `apply` (also apply and roll back), `admin` (reserved for tokens and settings over the API). Each includes the ones before it, and `--stack` limits a token to some stacks. An `admin` token can't be limited to stacks.
 - **Expiry:** every token has one.
 - **Storage:** tokens look like `nft_…`, so secret scanners can find leaked ones. Only an HMAC of each token is stored, in `<state>/api/tokens.json`, with a key kept next to it (`token.key`). Both files are owner-only. A copy of `tokens.json` without `token.key` (a partial backup, a leak) doesn't let anyone test guesses; anyone who can read both can, so keep the state directory private. A damaged `token.key` is never replaced on its own, as that would silently invalidate every token.
 - **Requests:** `Authorization: Bearer nft_…`. Missing, unknown and expired tokens get the same `401`.
@@ -62,7 +62,7 @@ Reviewed against the code on 2026-11-07. It covers what exists: one server on on
 **Known gaps to accept or fix:**
 
 - **Token files and the key sit together:** whoever reads the state directory can test token guesses and read the fleet's plans. It is the same trust as the server's own user.
-- **Applying doesn't commit yet:** the server log is what records who applied, and it can be edited by whoever runs the server ([#37](https://github.com/Serraniel/nepfleet/issues/37)).
+- **An apply with nothing to record makes no commit:** the server log is what records who applied, and it can be edited by whoever runs the server. Commits name the token, and the person comes with sign-in ([#37](https://github.com/Serraniel/nepfleet/issues/37)).
 - **Commit authenticity:** NepFleet applies what is in the working tree, and doesn't verify commit signatures of the fleet repository.
 - **Images:** they are pinned by digest once applied, but signatures aren't verified before updating.
 

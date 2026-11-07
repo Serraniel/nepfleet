@@ -16,6 +16,7 @@ Requests carry an [API token](security.md#api-tokens): `Authorization: Bearer nf
 | `GET /api/v1/templates` | read | per template source of the fleet: its commit and its catalogue (the `index.json` format); templates that don't validate are listed as `invalid` and not offered |
 | `GET /api/v1/stacks/{name}/plan` | read | what `apply` would change (the `nepfleet plan --json` format) and its `id`; secrets are masked |
 | `POST /api/v1/stacks/{name}/apply` | apply | starts applying the reviewed plan: `{"plan": "<id>", "confirmDestructive": false}` → `202` with a job |
+| `POST /api/v1/stacks/{name}/rollback` | apply | starts rolling back to a commit from the stack's history: `{"commit": "<full ID>", "confirmDestructive": false}` → `202` with a job |
 | `GET /api/v1/events?after=0&limit=100` | read | notification events newer than an ID, oldest first (at most 500); a token limited to stacks sees only those, and no host-wide events |
 | `GET /api/v1/jobs/{id}` | read | a job's state (`running`, `succeeded`, `failed`), error and log |
 | `GET /api/v1/stacks/{name}/history?n=20` | read | the last `n` commits (at most 200) that touched the stack, newest first; `applied` marks the revision running now |
@@ -53,4 +54,13 @@ With TLS on, the server allows TLS 1.2 and newer and sends HSTS.
 - **Jobs:** the last 50 are kept in memory.
 - **Server log:** every apply records the token's name and ID there.
 
-Rolling back over the API comes with commits authored by the person who asks ([#37](https://github.com/Serraniel/nepfleet/issues/37)).
+## Rolling back
+
+`POST …/rollback` takes a full commit ID from `GET …/history`; other commits get `409`. The job restores the stack's directory, plans it, commits, and applies.
+
+- **Nothing half done:** if the plan has destructive changes you didn't confirm, or anything else fails before the commit, the directory goes back as it was. The stack's directory must have no uncommitted changes.
+- **After the commit:** if the apply itself fails, the commit stays, and the job says so. Roll back again, or fix it forward.
+
+## Commits
+
+Changes over the API are commits in the fleet repository, authored by the token's name (`ci <ci@tokens.nepfleet.invalid>`). This covers rollbacks, and what an apply writes: `lock.yaml` and generated secrets. git's own identity stays the committer, and signing follows git's config, so a server set up to sign needs its key available, or the commit fails. A failed commit after an apply only warns in the job's log; the files are there to commit by hand.

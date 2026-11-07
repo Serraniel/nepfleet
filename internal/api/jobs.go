@@ -19,13 +19,14 @@ var (
 	ErrBusy         = errors.New("another apply is running on this backend; try again when it is done")
 	ErrPlanChanged  = errors.New("the plan changed since you reviewed it; review the new plan and apply that")
 	ErrNeedsConfirm = errors.New("the plan has destructive changes; confirm them to apply")
+	ErrNotInHistory = errors.New("that commit is not in this stack's history")
 )
 
 // Job is an apply running or done in the background.
 type Job struct {
 	ID       string    `json:"id"`
 	Stack    string    `json:"stack"`
-	Kind     string    `json:"kind"`  // apply
+	Kind     string    `json:"kind"`  // apply, rollback
 	State    string    `json:"state"` // running, succeeded, failed
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished,omitzero"`

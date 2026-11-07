@@ -71,6 +71,9 @@ type Options struct {
 	// apply to run in the background. Errors: ErrNotFound, ErrBusy,
 	// ErrPlanChanged, ErrNeedsConfirm.
 	StartApply func(ctx context.Context, stack, planID string, confirmDestructive bool, by string) (func(log io.Writer) error, error)
+	// StartRollback returns a rollback to a commit of the stack's own history,
+	// to run in the background.
+	StartRollback func(ctx context.Context, stack, commit string, confirmDestructive bool, by string) (func(log io.Writer) error, error)
 	// Templates is the catalogue of every template source of the fleet.
 	Templates func(ctx context.Context) (any, error)
 	// Events returns events newer than the ID, at most limit, as far as allow
@@ -192,6 +195,36 @@ func Handler(o Options) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, job)
 	})))
+	mux.HandleFunc("POST /api/v1/stacks/{name}/rollback", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
+		if o.StartRollback == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		var req struct {
+			Commit             string `json:"commit"`
+			ConfirmDestructive bool   `json:"confirmDestructive"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil || !fullCommit.MatchString(req.Commit) {
+			http.Error(w, `send {"commit": "<full commit ID from the history>"}`, http.StatusBadRequest)
+			return
+		}
+		t, _ := TokenFrom(r.Context())
+		run, err := o.StartRollback(r.Context(), name, req.Commit, req.ConfirmDestructive, t.Name)
+		switch {
+		case errors.Is(err, ErrBusy), errors.Is(err, ErrNotInHistory):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case writeErr(w, err):
+			return
+		}
+		log.Printf("api: %s rolls %s back to %s (token %s)", t.Name, name, req.Commit, t.ID)
+		job := js.start("rollback", name, t.Name, func(l *jobLog) error { return run(l) })
+		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, job)
+	})))
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireToken(o.Tokens, l, o.TrustedProxies, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
 		t, _ := TokenFrom(r.Context())
@@ -223,6 +256,9 @@ func Handler(o Options) http.Handler {
 	})))
 	return secure(cors(o.AllowedOrigins, mux))
 }
+
+// fullCommit is a whole commit ID: never a ref or an option for git.
+var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // stackName mirrors fleet's rule for stack names.
 var stackName = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
