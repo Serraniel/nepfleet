@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/Serraniel/nepfleet/internal/control"
+	"github.com/Serraniel/nepfleet/internal/remote"
+)
+
+// controlDir holds the daemon's socket, state and log, private to the user.
+func controlDir() string {
+	return envOr("NEPFLEET_CONTROL_DIR", filepath.Join(defaultState(), "control"))
+}
+
+func controlSocket() string { return filepath.Join(controlDir(), "control.sock") }
+
+// cmdControl: nepfleet control [status] — the local daemon.
+func cmdControl(args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "status" {
+		var info struct {
+			Version string    `json:"version"`
+			PID     int       `json:"pid"`
+			Started time.Time `json:"started"`
+		}
+		if err := controlCall(context.Background(), http.MethodGet, "/v1/info", nil, &info); err != nil {
+			return errors.New("the control daemon is not running; start it with nepfleet control")
+		}
+		fmt.Fprintf(stdout, "running: version %s, pid %d, since %s\n", info.Version, info.PID, info.Started.Local().Format(time.RFC1123))
+		return nil
+	}
+	if len(args) > 0 {
+		return errors.New("usage: nepfleet control [status]")
+	}
+	l, err := control.Listen(controlSocket())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = l.Close() }()
+	s := &control.Server{Dir: controlDir(), Version: version, Probe: func(ctx context.Context, t remote.Target) (*remote.Report, error) {
+		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		return remote.Probe(ctx, remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}.Run, t)
+	}}
+	if err := s.Load(); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
+	return s.Serve(ctx, l)
+}
+
+func controlClient() *http.Client {
+	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", controlSocket())
+	}}}
+}
+
+// controlCall sends one request to the daemon.
+func controlCall(ctx context.Context, method, path string, body, out any) error {
+	var rd io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rd = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, "http://control"+path, rd) //nolint:gosec // always the local socket, see controlClient
+	if err != nil {
+		return err
+	}
+	res, err := controlClient().Do(req) //nolint:gosec // always the local socket: the client dials nothing else
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode >= 300 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&e)
+		return errors.New(e.Error)
+	}
+	if out == nil || res.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	return json.NewDecoder(res.Body).Decode(out)
+}
+
+// ensureControl starts the daemon if it isn't running. It keeps running after
+// this command ends, with its output in a log file.
+func ensureControl(ctx context.Context) error {
+	if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
+		return nil
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	dir := controlDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	logFile, err := os.OpenFile(filepath.Join(dir, "control.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // the daemon's own directory
+	if err != nil {
+		return err
+	}
+	defer func() { _ = logFile.Close() }()
+	cmd := exec.Command(self, "control") //nolint:gosec,noctx // this binary; it must outlive this command
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting the control daemon: %w", err)
+	}
+	_ = cmd.Process.Release()
+	for range 50 {
+		if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("the control daemon did not start; see %s", logFile.Name())
+}
+
+func printRemotes(stdout io.Writer, all []control.Remote) {
+	if len(all) == 0 {
+		fmt.Fprintln(stdout, "no remotes yet; add one with nepfleet remote add ssh://user@host")
+		return
+	}
+	for _, r := range all {
+		fmt.Fprintf(stdout, "%-20s %s\n", r.Name, r.Address)
+		if r.Error != "" {
+			fmt.Fprintf(stdout, "  ⚠ last check failed: %s\n", r.Error)
+		}
+		if r.Next != "" {
+			fmt.Fprintf(stdout, "  %s\n", r.Next)
+		}
+	}
+}
+
+// cmdRemoteManage handles the remote subcommands that go through the daemon.
+func cmdRemoteManage(sub string, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("remote "+sub, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	name := fs.String("name", "", "name of the remote (default: its host)")
+	asJSON := fs.Bool("json", false, "print the result as JSON")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if err := ensureControl(ctx); err != nil {
+		return err
+	}
+	switch sub {
+	case "list":
+		var all []control.Remote
+		if err := controlCall(ctx, http.MethodGet, "/v1/remotes", nil, &all); err != nil {
+			return err
+		}
+		if *asJSON {
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(all)
+		}
+		printRemotes(stdout, all)
+		return nil
+	case "add":
+		if len(pos) != 1 {
+			return errors.New("usage: nepfleet remote add ssh://[user@]host[:port] [--name NAME]")
+		}
+		var r control.Remote
+		if err := controlCall(ctx, http.MethodPost, "/v1/remotes", map[string]string{"name": *name, "address": pos[0]}, &r); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "added %s\n", r.Name)
+		printReport(stdout, r.Report)
+		return nil
+	}
+	if len(pos) != 1 {
+		return fmt.Errorf("usage: nepfleet remote %s <name>", sub)
+	}
+	path := "/v1/remotes/" + url.PathEscape(pos[0])
+	if sub == "remove" {
+		if err := controlCall(ctx, http.MethodDelete, path, nil, nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "removed %s\n", pos[0])
+		return nil
+	}
+	var r control.Remote
+	if err := controlCall(ctx, http.MethodPost, path+"/refresh", nil, &r); err != nil {
+		return err
+	}
+	if r.Error != "" {
+		return errors.New(r.Error)
+	}
+	printReport(stdout, r.Report)
+	return nil
+}
