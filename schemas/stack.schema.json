@@ -70,6 +70,20 @@
           "additionalProperties": false,
           "description": "Egress limits what a stack's containers reach on the internet.",
           "properties": {
+            "allow": {
+              "description": "Allow lists host names or addresses (or CIDR ranges) containers may reach in mode enforce. Both lists count.",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
             "block": {
               "description": "Block lists more host names to resolve to 0.0.0.0.",
               "items": {
@@ -87,6 +101,15 @@
             "blockTelemetry": {
               "description": "BlockTelemetry resolves the known telemetry hosts (TelemetryHosts) to 0.0.0.0 in every service; on unless set to false.",
               "type": "boolean"
+            },
+            "mode": {
+              "description": "Mode is off (the default) or enforce: containers reach only private networks and what is allowed. A stack's mode replaces the fleet's.",
+              "enum": [
+                "",
+                "off",
+                "enforce"
+              ],
+              "type": "string"
             }
           },
           "type": [

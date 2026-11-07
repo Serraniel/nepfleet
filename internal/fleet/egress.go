@@ -38,7 +38,7 @@ type Egress struct {
 	Block []string `yaml:"block"`
 	// Mode is off (the default) or enforce: containers reach only private
 	// networks and what is allowed. A stack's mode replaces the fleet's.
-	Mode string `yaml:"mode"`
+	Mode string `yaml:"mode" schema:"enum=off|enforce"`
 	// Allow lists host names or addresses (or CIDR ranges) containers may
 	// reach in mode enforce. Both lists count.
 	Allow []string `yaml:"allow"`
