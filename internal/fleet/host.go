@@ -198,6 +198,11 @@ func (f *Fleet) AccessPorts(targets ...string) (map[int][]string, error) {
 // FreePort is the lowest port of a host's range no stack on it uses.
 // targets are the names stacks use for the host (see AccessPorts).
 func (f *Fleet) FreePort(host string, targets ...string) (int, error) {
+	return f.FreePortExcept(host, func(int) bool { return false }, targets...)
+}
+
+// FreePortExcept is FreePort, also skipping ports taken says are in use.
+func (f *Fleet) FreePortExcept(host string, taken func(int) bool, targets ...string) (int, error) {
 	h, err := f.LoadHost(host)
 	if err != nil {
 		return 0, err
@@ -208,7 +213,7 @@ func (f *Fleet) FreePort(host string, targets ...string) (int, error) {
 	}
 	r := h.PortRange()
 	for p := r.From; p <= r.To; p++ {
-		if len(used[p]) == 0 {
+		if len(used[p]) == 0 && !taken(p) {
 			return p, nil
 		}
 	}
