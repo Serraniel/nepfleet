@@ -105,6 +105,8 @@ func Render(in Input) (*Output, error) {
 		if err := values(in, env, out); err != nil {
 			return nil, err
 		}
+		// Before the files are substituted: they may use it too.
+		env["NEPFLEET_URL"] = stackURL(in, env)
 		compose, err = os.ReadFile(filepath.Join(in.Template.Dir, in.Template.Spec.Compose))
 		if err != nil {
 			return nil, err
@@ -125,7 +127,9 @@ func Render(in Input) (*Output, error) {
 			return nil, fmt.Errorf("compose file: %w", err)
 		}
 	}
-	env["NEPFLEET_URL"] = stackURL(in, env)
+	if in.Template == nil {
+		env["NEPFLEET_URL"] = stackURL(in, env)
+	}
 	if compose, err = WithAccess(compose, in.Template, in.Stack); err != nil {
 		return nil, fmt.Errorf("compose file: %w", err)
 	}

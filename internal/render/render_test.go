@@ -365,7 +365,8 @@ func TestWithStorage(t *testing.T) {
 func TestAccessPortMode(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    labels:\n      caddy: ${DOMAIN}\n      caddy.reverse_proxy: \"{{upstreams 80}}\"\n      homepage.href: ${NEPFLEET_URL}\n    environment: {URL: \"${NEPFLEET_URL}\"}\n")
-	tpl := &template.Template{Dir: dir, Spec: template.Spec{Compose: "compose.yaml",
+	write(t, filepath.Join(dir, "app.conf"), "base_url = ${NEPFLEET_URL}\n")
+	tpl := &template.Template{Dir: dir, Spec: template.Spec{Compose: "compose.yaml", Files: []template.File{{Src: "app.conf", Dest: "app.conf"}},
 		Inputs: []template.Input{{Name: "DOMAIN", Type: "hostname", Required: true}},
 		Web:    &template.Web{Service: "web", Port: 80}}}
 	f := &fleet.Fleet{}
@@ -384,6 +385,9 @@ func TestAccessPortMode(t *testing.T) {
 	env := EnvValues(out.Files[EnvFile])
 	if env["NEPFLEET_URL"] != "http://nas.local:8060" || env["DOMAIN"] != "nas.local" {
 		t.Errorf("env = %v", env)
+	}
+	if string(out.Files["app.conf"]) != "base_url = http://nas.local:8060\n" {
+		t.Errorf("template files get NEPFLEET_URL too: %q", out.Files["app.conf"])
 	}
 	// Domain mode: Caddy stays, the URL is the domain.
 	s.Spec.Access = nil
