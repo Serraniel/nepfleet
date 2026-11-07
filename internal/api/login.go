@@ -35,6 +35,7 @@ type Accounts struct {
 
 	mu         sync.Mutex
 	ceremonies map[string]ceremony
+	totpFails  map[string]totpFails
 }
 
 // NewWebAuthn sets up passkeys for one site. rpID is its domain; origins are
@@ -48,6 +49,7 @@ const (
 	kindSetup   = "setup"
 	kindLogin   = "login"
 	kindPasskey = "passkey"
+	kindTOTP    = "totp"
 )
 
 // ceremony is a passkey exchange between its two requests.
@@ -56,6 +58,7 @@ type ceremony struct {
 	addr    string
 	data    webauthn.SessionData
 	user    *auth.User // registering
+	secret  string     // a new authenticator's, until a code proves it
 	started time.Time
 	expires time.Time
 }
@@ -252,8 +255,9 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 	}
 	mux.HandleFunc("GET /api/v1/auth/status", func(w http.ResponseWriter, r *http.Request) {
 		t, ok := a.sessionToken(r)
-		writeJSON(w, map[string]any{"setupNeeded": a.setupNeeded(), "signedIn": ok, "name": t.Name})
+		writeJSON(w, map[string]any{"setupNeeded": a.setupNeeded(), "signedIn": ok, "name": t.Name, "totp": ok && a.totpOn(r)})
 	})
+	a.totpRoutes(mux, guarded)
 	mux.HandleFunc("POST /api/v1/auth/setup/begin", guarded(func(w http.ResponseWriter, r *http.Request, addr string) error {
 		var req struct {
 			SetupToken string `json:"setupToken"`

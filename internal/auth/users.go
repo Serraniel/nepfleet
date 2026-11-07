@@ -22,11 +22,12 @@ import (
 	"github.com/Serraniel/nepfleet/internal/flock"
 )
 
-// User is a person who signs in with passkeys.
+// User is a person who signs in with passkeys, or codes as a fallback.
 type User struct {
 	ID          []byte                `json:"id"`
 	Name        string                `json:"name"`
 	Credentials []webauthn.Credential `json:"credentials"`
+	TOTP        *TOTP                 `json:"totp,omitempty"`
 	Created     time.Time             `json:"created"`
 }
 
@@ -42,8 +43,8 @@ func (u *User) WebAuthnDisplayName() string { return u.Name }
 // WebAuthnCredentials are the user's passkeys.
 func (u *User) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
 
-// UserStore keeps users in <dir>/users.json, owner-only. It holds public keys,
-// no secrets, but who may sign in is worth protecting all the same.
+// UserStore keeps users in <dir>/users.json, owner-only. It holds public keys, and
+// the secrets of users who turned on sign-in codes.
 type UserStore struct {
 	Dir string
 	mu  sync.Mutex
