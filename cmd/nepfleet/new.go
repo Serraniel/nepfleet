@@ -44,6 +44,8 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	c.register(fs)
 	source := fs.String("source", "official", "template source from fleet.yaml")
 	target := fs.String("target", "local", "spec.target of the new stack")
+	access := fs.String("access", "domain", "how the web UI is reached: domain (Caddy) or port (a LAN port of the host)")
+	port := fs.Int("port", 0, "with --access port: the host port (default: the lowest free one in the host's range)")
 	set := setFlags{}
 	fs.Var(set, "set", "input value KEY=VALUE (repeatable); missing inputs are asked for. Prefer the prompt for secrets: --set ends up in shell history")
 	pos, err := parseInterspersed(fs, args)
@@ -93,11 +95,38 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("a stack named %s already exists", name)
 	}
 
+	if *access != "domain" && *access != "port" {
+		return errors.New("--access is domain or port")
+	}
+	if *access == "port" {
+		if tpl.Spec.Web == nil {
+			return fmt.Errorf("%s declares no web UI (spec.web), so it can only run behind Caddy", tpl.Metadata.Name)
+		}
+		if *port == 0 {
+			if *port, err = e.fleet.FreePort(e.targetHost(*target), e.targetNames(*target)...); err != nil {
+				return err
+			}
+		} else {
+			h, err := e.fleet.LoadHost(e.targetHost(*target))
+			if err != nil {
+				return err
+			}
+			if r := h.PortRange(); *port < r.From || *port > r.To {
+				return fmt.Errorf("--port %d is outside %s's range %d-%d (hosts/%s.yaml spec.ports)", *port, *target, r.From, r.To, e.targetHost(*target))
+			}
+			if err := e.portFree(*target, *port, name); err != nil {
+				return err
+			}
+		}
+	}
 	interactive := term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // file descriptors fit in int
 	in := bufio.NewReader(os.Stdin)
 	fmt.Fprintf(stdout, "%s: %s\n\n", tpl.Metadata.Title, tpl.Metadata.Description)
 	values, secretVals := map[string]string{}, map[string]string{}
 	for _, inp := range tpl.Spec.Inputs {
+		if *access == "port" && inp.Name == "DOMAIN" {
+			continue // reached on the LAN port; NepFleet fills DOMAIN with the host's address
+		}
 		v, given := set[inp.Name]
 		if given && v != "" {
 			if err := checkValue(e.fleet, inp, v); err != nil {
@@ -143,6 +172,9 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	if len(values) > 0 {
 		stack["spec"].(map[string]any)["values"] = values
 	}
+	if *access == "port" {
+		stack["spec"].(map[string]any)["access"] = map[string]any{"mode": "port", "port": *port}
+	}
 	raw, err := yaml.Marshal(stack)
 	if err != nil {
 		return err
@@ -164,13 +196,22 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	// Validate now, so a typo surfaces here and not at apply time.
 	s, err := e.fleet.LoadStack(name)
 	if err == nil {
-		_, err = render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: secretVals})
+		var host *fleet.Host
+		if *access == "port" {
+			if host, err = e.fleet.LoadHost(e.targetHost(*target)); err != nil {
+				return err
+			}
+		}
+		_, err = render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: secretVals, Host: host})
 	}
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("the values do not render (nothing was written): %w", err)
 	}
 	fmt.Fprintf(stdout, "\nwrote %s\n", relTo(e.fleet.Dir, dir))
+	if *access == "port" {
+		fmt.Fprintf(stdout, "reached on port %d of %s\n", *port, e.targetHost(*target))
+	}
 	if len(secretVals) > 0 {
 		fmt.Fprintf(stdout, "secrets stored encrypted in %s\n", filepath.Join(relTo(e.fleet.Dir, dir), fleet.SecretsFile))
 	}

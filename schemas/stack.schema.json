@@ -32,6 +32,30 @@
       "additionalProperties": false,
       "description": "StackSpec says where and how a stack runs.",
       "properties": {
+        "access": {
+          "additionalProperties": false,
+          "description": "Access says how the stack's web UI is reached: through Caddy on its domain (default) or on a port of the host on the LAN.",
+          "properties": {
+            "mode": {
+              "default": "domain",
+              "description": "Mode: domain (Caddy, as the template's labels say) or port (a host port on the LAN, no Caddy).",
+              "enum": [
+                "",
+                "domain",
+                "port"
+              ],
+              "type": "string"
+            },
+            "port": {
+              "description": "Port is the host port in mode port; nepfleet new picks a free one.",
+              "type": "integer"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "apply": {
           "default": "manual",
           "description": "manual | auto",

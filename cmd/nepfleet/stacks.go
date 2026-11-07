@@ -218,8 +218,17 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
+	var host *fleet.Host
+	if s.Spec.Access != nil && s.Spec.Access.Mode == "port" {
+		if host, err = e.fleet.LoadHost(e.targetHost(s.Spec.Target)); err != nil {
+			return nil, err
+		}
+		if err := e.checkAccessPort(s); err != nil {
+			return nil, err
+		}
+	}
 	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret,
-		NoBackupVolumes: noBackup, StoragePasswords: storagePw, RenderGID: doctor.RenderGID("/")})
+		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -261,6 +270,46 @@ func (e *env) storagePasswords(s *fleet.Stack) (map[string]string, error) {
 		out[k] = sec[e.fleet.Spec.Storage[k].PasswordSecret]
 	}
 	return out, nil
+}
+
+// targetHost is the host a target names ("local" is this host).
+func (e *env) targetHost(target string) string {
+	if target == "local" {
+		return e.host
+	}
+	return target
+}
+
+// targetNames are the targets that mean the same host as target: on the
+// host itself, "local" and its name.
+func (e *env) targetNames(target string) []string {
+	if strings.EqualFold(target, "local") || strings.EqualFold(target, e.host) {
+		return []string{"local", e.host}
+	}
+	return []string{target}
+}
+
+// checkAccessPort refuses a LAN port that another stack on the same host
+// already uses, or one outside the host's range.
+func (e *env) checkAccessPort(s *fleet.Stack) error {
+	a := s.Spec.Access
+	if a == nil || a.Mode != "port" {
+		return nil
+	}
+	return e.portFree(s.Spec.Target, a.Port, s.Metadata.Name)
+}
+
+func (e *env) portFree(target string, port int, self string) error {
+	used, err := e.fleet.AccessPorts(e.targetNames(target)...)
+	if err != nil {
+		return err
+	}
+	for _, n := range used[port] {
+		if n != self {
+			return fmt.Errorf("port %d is already used by %s on %s", port, n, target)
+		}
+	}
+	return nil
 }
 
 // usesBuiltin reports whether a template's compose file or files use ${name}.
