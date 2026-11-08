@@ -359,7 +359,14 @@ type session struct {
 	userID  []byte
 	name    string
 	expires time.Time
+	// verified is when the person last proved it's them: signing in, or
+	// verifying with a passkey since.
+	verified time.Time
 }
+
+// ReverifyWindow is how long a proof counts for actions that grant lasting
+// access, such as adding a passkey: a stolen session alone can't do them.
+const ReverifyWindow = 5 * time.Minute
 
 func (s *Sessions) now() time.Time {
 	if s.Now != nil {
@@ -386,8 +393,29 @@ func (s *Sessions) Create(u *User) (string, error) {
 			delete(s.all, k)
 		}
 	}
-	s.all[sha256.Sum256([]byte(id))] = session{userID: u.ID, name: u.Name, expires: now.Add(SessionLifetime)}
+	s.all[sha256.Sum256([]byte(id))] = session{userID: u.ID, name: u.Name, expires: now.Add(SessionLifetime), verified: now}
 	return id, nil
+}
+
+// Verified records that the session's person proved it's them just now.
+func (s *Sessions) Verified(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := sha256.Sum256([]byte(id))
+	if v, ok := s.all[k]; ok {
+		v.verified = s.now()
+		s.all[k] = v
+	}
+}
+
+// RecentlyVerified reports whether the session's person proved it's them
+// within ReverifyWindow.
+func (s *Sessions) RecentlyVerified(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.all[sha256.Sum256([]byte(id))]
+	now := s.now()
+	return ok && now.Before(v.expires) && now.Sub(v.verified) < ReverifyWindow
 }
 
 // Check returns the user a session belongs to.

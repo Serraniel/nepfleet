@@ -474,3 +474,51 @@ func TestClonedPasskeyStaysLocked(t *testing.T) {
 		t.Errorf("not locked: %+v", users)
 	}
 }
+
+// Adding a passkey needs a recent proof: a stolen session alone can't become
+// lasting access.
+func TestAddingPasskeyNeedsRecentVerification(t *testing.T) {
+	l := newLoginHarness(t)
+	now := time.Now()
+	l.a.Sessions.Now = func() time.Time { return now }
+	session := l.setup()
+	now = now.Add(auth.ReverifyWindow + time.Minute)
+	rec := l.do(http.MethodPost, "/api/v1/auth/passkeys/begin", "", session, testOrigin)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) {
+		t.Fatalf("an old sign-in must verify first: %d %s", rec.Code, rec.Body)
+	}
+	// Verify with the passkey the person has.
+	rec = l.do(http.MethodPost, "/api/v1/auth/verify/begin", "", session, testOrigin)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify begin: %d %s", rec.Code, rec.Body)
+	}
+	var out struct {
+		Ceremony string          `json:"ceremony"`
+		Options  json.RawMessage `json:"options"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := virtualwebauthn.ParseAssertionOptions(string(out.Options))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := virtualwebauthn.CreateAssertionResponse(l.rp, l.key, l.cred, *opts)
+	if rec := l.do(http.MethodPost, "/api/v1/auth/verify/finish?ceremony="+out.Ceremony, resp, "someone-else", testOrigin); rec.Code == http.StatusNoContent {
+		t.Error("another session must not finish this verification")
+	}
+	rec = l.do(http.MethodPost, "/api/v1/auth/verify/begin", "", session, testOrigin)
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	opts, _ = virtualwebauthn.ParseAssertionOptions(string(out.Options))
+	resp = virtualwebauthn.CreateAssertionResponse(l.rp, l.key, l.cred, *opts)
+	if rec := l.do(http.MethodPost, "/api/v1/auth/verify/finish?ceremony="+out.Ceremony, resp, session, testOrigin); rec.Code != http.StatusNoContent {
+		t.Fatalf("verify finish: %d %s", rec.Code, rec.Body)
+	}
+	if rec := l.do(http.MethodPost, "/api/v1/auth/passkeys/begin", "", session, testOrigin); rec.Code != http.StatusOK {
+		t.Errorf("verified just now: %d %s", rec.Code, rec.Body)
+	}
+	now = now.Add(auth.ReverifyWindow)
+	if rec := l.do(http.MethodPost, "/api/v1/auth/passkeys/begin", "", session, testOrigin); rec.Code != http.StatusForbidden {
+		t.Errorf("a proof counts for a while, not forever: %d", rec.Code)
+	}
+}
