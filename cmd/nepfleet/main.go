@@ -5,6 +5,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -387,6 +388,27 @@ func serve(args []string, stderr io.Writer) error {
 		},
 		Alert:       func(_ context.Context, a api.Alert) error { return sendAlert(c, stderr, a) },
 		Maintenance: func(ctx context.Context) ([]api.KumaMaintenance, error) { return fleetMaintenance(ctx, c) },
+		Egress: func(ctx context.Context, stack string) (*api.StackEgress, error) {
+			if !apiMu.TryLock() {
+				return nil, api.ErrBusy
+			}
+			defer apiMu.Unlock()
+			out, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
+				ctx, cancel := context.WithTimeout(ctx, time.Minute)
+				defer cancel()
+				mode, r, found, err := e.stackEgress(ctx, s)
+				if err != nil {
+					return nil, err
+				}
+				nonNil := func(v []string) []string { return append([]string{}, v...) }
+				return &api.StackEgress{Mode: cmp.Or(mode, fleet.EgressOff), Sidecars: found,
+					Hosts: nonNil(r.Hosts), Addresses: nonNil(r.Addresses), LookedUp: nonNil(r.LookedUp)}, nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			return out.(*api.StackEgress), nil
+		},
 		Updates: func(ctx context.Context, stack string) ([]api.ImageUpdate, error) {
 			if !apiMu.TryLock() {
 				return nil, api.ErrBusy

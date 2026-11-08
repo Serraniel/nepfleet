@@ -106,24 +106,19 @@ func cmdEgress(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	mode, allow := fleet.EffectiveEgress(e.fleet, s)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	mode, r, found, err := e.stackEgress(ctx, s)
 	if mode != fleet.EgressLog && mode != fleet.EgressEnforce {
 		fmt.Fprintf(stderr, "note: %s's egress mode is %s; log records connections, and enforce what it refuses\n", s.Metadata.Name, mode)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	logs, found, err := sidecarLogs(ctx, s.Metadata.Name, "")
 	if err != nil {
 		return err
 	}
 	if found == 0 {
 		return fmt.Errorf("%s has no egress sidecars on this host: set spec.egress.mode: log, apply it, and let it run for a while", s.Metadata.Name)
 	}
-	known := slices.Clone(allow)
-	if p, err := e.prepare(s); err == nil && p.tpl != nil {
-		known = render.EgressAllow(known, p.tpl, render.EnvValues(p.out.Files[render.EnvFile]))
-	}
-	printSuggestion(stdout, s.Metadata.Name, egress.Parse(logs).Without(known), mode == fleet.EgressEnforce)
+	printSuggestion(stdout, s.Metadata.Name, r, mode == fleet.EgressEnforce)
 	return nil
 }
 
@@ -213,4 +208,20 @@ func watchDenials(ctx context.Context, c common, n *notify.Notifier, stdout io.W
 			}
 		}
 	}
+}
+
+// stackEgress is what a stack's egress sidecars on this host recorded (mode log)
+// or refused (mode enforce), less what's already allowed. found is how many
+// sidecars there are.
+func (e *env) stackEgress(ctx context.Context, s *fleet.Stack) (mode string, r egress.Report, found int, err error) {
+	mode, allow := fleet.EffectiveEgress(e.fleet, s)
+	logs, found, err := sidecarLogs(ctx, s.Metadata.Name, "")
+	if err != nil || found == 0 {
+		return mode, egress.Report{}, found, err
+	}
+	known := slices.Clone(allow)
+	if p, err := e.prepare(s); err == nil && p.tpl != nil {
+		known = render.EgressAllow(known, p.tpl, render.EnvValues(p.out.Files[render.EnvFile]))
+	}
+	return mode, egress.Parse(logs).Without(known), found, nil
 }
