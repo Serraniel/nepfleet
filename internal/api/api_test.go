@@ -146,7 +146,7 @@ func TestStackEndpoints(t *testing.T) {
 	}
 	webOnly, _, _ := store.Create("web", auth.ScopeRead, []string{"web"}, time.Hour)
 	h := Handler(Options{Tokens: store,
-		Plan: func(_ context.Context, s string) (any, error) {
+		Plan: func(_ context.Context, s string, _ bool) (any, error) {
 			switch s {
 			case "web", "db":
 				return map[string]string{"stack": s}, nil
@@ -291,7 +291,7 @@ func TestApplyJobs(t *testing.T) {
 	dbOnly, _, _ := store.Create("db", auth.ScopeRead, []string{"db"}, time.Hour)
 	done := make(chan struct{})
 	h := Handler(Options{Tokens: store,
-		StartApply: func(_ context.Context, s, plan string, confirm bool, by string) (func(io.Writer) error, error) {
+		StartApply: func(_ context.Context, s, plan string, confirm, _ bool, by string) (func(io.Writer) error, error) {
 			switch {
 			case s != "web":
 				return nil, ErrNotFound

@@ -30,7 +30,7 @@ func FuzzRequests(f *testing.F) {
 		f.Fatal(err)
 	}
 	started := atomic.Int64{}
-	start := func(_ context.Context, _, id string, _ bool, _ string) (func(io.Writer) error, error) {
+	start := func(_ context.Context, _, id string, _, _ bool, _ string) (func(io.Writer) error, error) {
 		if id == "" {
 			f.Error("started with an empty ID")
 		}
@@ -39,11 +39,13 @@ func FuzzRequests(f *testing.F) {
 	}
 	h := Handler(Options{
 		Tokens: tokens, AllowedOrigins: []string{testOrigin},
-		Accounts:      &Accounts{Users: &auth.UserStore{Dir: f.TempDir()}, Sessions: &auth.Sessions{}, WebAuthn: w, SetupToken: setupToken},
-		StartApply:    start,
-		StartRollback: start,
-		Plan:          func(context.Context, string) (any, error) { return map[string]string{}, nil },
-		Stacks:        func() ([]StackInfo, error) { return nil, nil },
+		Accounts:   &Accounts{Users: &auth.UserStore{Dir: f.TempDir()}, Sessions: &auth.Sessions{}, WebAuthn: w, SetupToken: setupToken},
+		StartApply: start,
+		StartRollback: func(ctx context.Context, s, id string, c bool, by string) (func(io.Writer) error, error) {
+			return start(ctx, s, id, c, false, by)
+		},
+		Plan:   func(context.Context, string, bool) (any, error) { return map[string]string{}, nil },
+		Stacks: func() ([]StackInfo, error) { return nil, nil },
 		History: func(_ context.Context, _ string, n int) ([]HistoryEntry, error) {
 			if n < 1 || n > 200 {
 				f.Errorf("history of %d commits", n)

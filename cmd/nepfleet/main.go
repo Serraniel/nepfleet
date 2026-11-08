@@ -362,13 +362,13 @@ func serve(args []string, stderr io.Writer) error {
 		TrustedProxies: trustedNets,
 		Accounts:       accounts,
 		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
-		Plan: func(_ context.Context, stack string) (any, error) {
+		Plan: func(ctx context.Context, stack string, updateLock bool) (any, error) {
 			if !apiMu.TryLock() {
 				return nil, api.ErrBusy
 			}
 			defer apiMu.Unlock()
 			return withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
-				p, err := e.prepare(s)
+				p, err := e.prepareAPI(ctx, s, updateLock)
 				if err != nil {
 					return nil, err
 				}
@@ -403,8 +403,8 @@ func serve(args []string, stderr io.Writer) error {
 		StartRollback: func(_ context.Context, stack, commit string, confirm bool, by string) (func(io.Writer) error, error) {
 			return startRollback(applyCtx, c, stack, commit, confirm, by)
 		},
-		StartApply: func(_ context.Context, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
-			return startApply(applyCtx, c, stack, planID, confirm, by)
+		StartApply: func(_ context.Context, stack, planID string, confirm, updateLock bool, by string) (func(io.Writer) error, error) {
+			return startApply(applyCtx, c, stack, planID, confirm, updateLock, by)
 		},
 		History: func(_ context.Context, stack string, n int) ([]api.HistoryEntry, error) {
 			h, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) { return e.history(s, n) })
@@ -537,7 +537,7 @@ func checkReviewed(p *deploy.Plan, planID string, confirm bool) error {
 // returns the apply to run as a job. The job checks again, on the very plan
 // it applies: the repository can change in between (a pull, the CLI). The API
 // lock is held until the job ends; ctx ends only when serve is told to abort.
-func startApply(ctx context.Context, c common, stack, planID string, confirm bool, by string) (func(io.Writer) error, error) {
+func startApply(ctx context.Context, c common, stack, planID string, confirm, updateLock bool, by string) (func(io.Writer) error, error) {
 	if !apiMu.TryLock() {
 		return nil, api.ErrBusy
 	}
@@ -548,7 +548,7 @@ func startApply(ctx context.Context, c common, stack, planID string, confirm boo
 		}
 	}()
 	if _, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
-		p, err := e.prepare(s)
+		p, err := e.prepareAPI(ctx, s, updateLock)
 		if err != nil {
 			return nil, err
 		}
@@ -560,7 +560,7 @@ func startApply(ctx context.Context, c common, stack, planID string, confirm boo
 	return func(log io.Writer) error {
 		defer apiMu.Unlock()
 		fmt.Fprintf(log, "apply %s, requested by %s over the API\n", stack, by)
-		o := applyOptions{yes: true, wait: applyWait, check: func(p *deploy.Plan) error { return checkReviewed(p, planID, confirm) }}
+		o := applyOptions{yes: true, wait: applyWait, updateLock: updateLock, check: func(p *deploy.Plan) error { return checkReviewed(p, planID, confirm) }}
 		if confirm {
 			o.confirm = []string{stack} // checked above: only what the client saw
 		}
@@ -777,4 +777,19 @@ func stackLinks(f *fleet.Fleet, all []*fleet.Stack, s *fleet.Stack) []api.StackL
 		links = append(links, api.StackLink{Name: "Monitors in " + k.Name, URL: strings.TrimRight(k.URL, "/") + "/dashboard"})
 	}
 	return links
+}
+
+// prepareAPI plans a stack as the API shows it: with updateLock, as apply
+// --update-lock would (the template source's current commit, and image tags
+// resolved to their current digests), so the reviewed plan is what applies.
+func (e *env) prepareAPI(ctx context.Context, s *fleet.Stack, updateLock bool) (*prepared, error) {
+	e.updateLock = updateLock
+	p, err := e.prepare(s)
+	if err != nil || !updateLock {
+		return p, err
+	}
+	if _, err := e.previewUpdate(ctx, p, io.Discard); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
