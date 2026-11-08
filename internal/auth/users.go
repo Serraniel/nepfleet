@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,14 @@ type User struct {
 	// External users exist through an identity provider, which decides if they
 	// may come in: a passkey or code of their own would get around that.
 	External bool `json:"external,omitempty"`
+	// Locked are IDs of passkeys that may have been copied: their signature
+	// count went backwards once. They stay refused until removed.
+	Locked [][]byte `json:"locked,omitempty"`
+}
+
+// IsLocked reports a passkey refused for good.
+func (u *User) IsLocked(credID []byte) bool {
+	return slices.ContainsFunc(u.Locked, func(id []byte) bool { return subtle.ConstantTimeCompare(id, credID) == 1 })
 }
 
 // WebAuthnID and the rest make a User what the passkey library works with.
@@ -233,6 +242,65 @@ func (s *UserStore) UpdateCredential(id []byte, c webauthn.Credential) error {
 			}
 		}
 	})
+}
+
+// LockCredential refuses a passkey from now on: a copy may be in use.
+func (s *UserStore) LockCredential(id, credID []byte) error {
+	return s.update(id, func(u *User) {
+		if !u.IsLocked(credID) {
+			u.Locked = append(u.Locked, slices.Clone(credID))
+		}
+	})
+}
+
+// CredentialName is how a passkey is named to people: the start of its ID.
+func CredentialName(credID []byte) string {
+	s := base64.RawURLEncoding.EncodeToString(credID)
+	return s[:min(len(s), 10)]
+}
+
+// RemoveCredential removes one of a user's passkeys, named by the start of its
+// ID (CredentialName). The last way to sign in can't be removed: remove the
+// user instead.
+func (s *UserStore) RemoveCredential(name, prefix string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	all, err := s.load()
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(all, func(u User) bool { return u.Name == name })
+	if i < 0 {
+		return fmt.Errorf("no user %q", name)
+	}
+	u := &all[i]
+	if prefix == "" {
+		return errors.New("name the passkey by the start of its ID")
+	}
+	match := -1
+	for j, c := range u.Credentials {
+		if strings.HasPrefix(base64.RawURLEncoding.EncodeToString(c.ID), prefix) {
+			if match >= 0 {
+				return fmt.Errorf("%q fits more than one passkey; give more of the ID", prefix)
+			}
+			match = j
+		}
+	}
+	if match < 0 {
+		return fmt.Errorf("%s has no passkey %q", name, prefix)
+	}
+	if len(u.Credentials) == 1 && u.TOTP == nil {
+		return fmt.Errorf("it's the last way %s signs in; remove the user instead, or add another passkey first", name)
+	}
+	gone := u.Credentials[match].ID
+	u.Credentials = slices.Delete(u.Credentials, match, match+1)
+	u.Locked = slices.DeleteFunc(u.Locked, func(id []byte) bool { return subtle.ConstantTimeCompare(id, gone) == 1 })
+	return s.save(all)
 }
 
 func (s *UserStore) update(id []byte, change func(*User)) error {

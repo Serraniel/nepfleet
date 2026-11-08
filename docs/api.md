@@ -49,7 +49,8 @@ People sign in with passkeys. Turn them on with `serve --passkey-domain fleet.ex
 - **Same site:** the UI and the API must be on the same site (`ui.example.org` and `api.example.org` are), or the browser won't send the cookie. Changes also need an allowed `Origin`.
 - **A person can do everything,** on every stack, and is named as the author of commits. Tokens stay for programs. A request with a bearer token ignores any cookie.
 - **Removing a user** ends their sessions at once.
-- **Lost a passkey:** on the server, `nepfleet user remove NAME` and restart. With no users left, a new setup token is printed.
+- **Lost a passkey:** on the server, `nepfleet user passkeys NAME` lists a person's passkeys by the start of their ID, and `nepfleet user remove-passkey NAME ID` removes one. The last way someone signs in can't be removed; `nepfleet user remove NAME` removes the person, and with no users left, a restart prints a new setup token.
+- **A copied passkey:** if a passkey's signature count ever goes backwards, a copy of it may be in use. It's locked for good: sign-ins with it are refused, even once a count is ahead again, and an alert goes to the fleet's notification channels. Remove it with `remove-passkey`, then add a new one. Synced passkeys (iCloud, Google, password managers) always count zero, so this only applies to security keys.
 - **Lockout:** failed sign-ins count towards the same lockout as tokens. As with tokens, a real passkey gets through from a locked-out address; guessing the setup token doesn't.
 - **PIN or biometric:** passkeys must verify the user, as they are the only factor. A security key without a PIN is refused.
 - **Codes are weaker than passkeys:** they can be phished, a code alone signs in as that person, and the secret is stored in `users.json` (owner-only). Passkeys alone are safer, so only turn codes on if you need them.

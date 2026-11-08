@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -441,5 +442,35 @@ func TestNames(t *testing.T) {
 		if auth.ValidUserName(name) != ok {
 			t.Errorf("%q", name)
 		}
+	}
+}
+
+// A passkey whose count goes backwards stays refused, even once a copy's count
+// is ahead again, and the fleet hears about it.
+func TestClonedPasskeyStaysLocked(t *testing.T) {
+	l := newLoginHarness(t)
+	var alerts []Alert
+	l.a.Alert = func(_ context.Context, a Alert) error { alerts = append(alerts, a); return nil }
+	l.setup()
+	login := func(counter uint32) int {
+		l.cred.Counter = counter
+		id, resp := l.assertion()
+		return l.do(http.MethodPost, "/api/v1/auth/login/finish?ceremony="+id, resp, "", testOrigin).Code
+	}
+	if code := login(5); code != http.StatusNoContent {
+		t.Fatalf("first sign-in: %d", code)
+	}
+	if code := login(3); code == http.StatusNoContent {
+		t.Fatal("a count that went backwards must be refused")
+	}
+	if len(alerts) != 1 || alerts[0].Rule != "passkey locked" || !strings.Contains(alerts[0].Detail, "Ada") {
+		t.Errorf("alerts: %+v", alerts)
+	}
+	if code := login(6); code == http.StatusNoContent {
+		t.Error("the copy got in once its count was ahead again")
+	}
+	users, _ := l.a.Users.List()
+	if len(users) != 1 || len(users[0].Locked) != 1 || !users[0].IsLocked(users[0].Credentials[0].ID) {
+		t.Errorf("not locked: %+v", users)
 	}
 }
