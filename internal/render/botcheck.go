@@ -10,7 +10,6 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
 
@@ -23,25 +22,30 @@ const anubisPort = "8923"
 // AnubisPolicyFile is the rendered policy, next to the compose file.
 const AnubisPolicyFile = "anubis-policy.yaml"
 
-// anubisPolicy allows the stack's own paths first, then Anubis's own rules
-// (known bad bots denied, good crawlers and well-known paths allowed), and
-// checks everything that looks like a browser. No DNS blocklist lookups:
-// they would tell a third party who visits.
-func anubisPolicy(b *fleet.BotCheck) []byte {
+// AnubisKey holds Anubis's signing key in the stack's secrets: with the same key
+// after a restart, visitors who passed keep their pass.
+const AnubisKey = "NEPFLEET_ANUBIS_KEY"
+
+// anubisPolicy allows the template's and the stack's paths first, then Anubis's
+// own rules (known bad bots denied, good crawlers and well-known paths
+// allowed), and checks everything that looks like a browser. No DNS blocklist
+// lookups: they would tell a third party who visits.
+func anubisPolicy(allow []string, difficulty int) []byte {
 	var s strings.Builder
-	s.WriteString("# Rendered by NepFleet from the stack's spec.botCheck.\nbots:\n")
-	for i, p := range b.Allow {
+	s.WriteString("# Rendered by NepFleet from spec.botCheck.\nbots:\n")
+	for i, p := range allow {
 		fmt.Fprintf(&s, "  - name: nepfleet-allow-%d\n    path_regex: %s\n    action: ALLOW\n", i+1, strconv.Quote(p))
 	}
 	s.WriteString("  - import: (data)/meta/default-config.yaml\n")
-	fmt.Fprintf(&s, "  - name: nepfleet-browsers\n    user_agent_regex: \"Mozilla|Opera\"\n    action: CHALLENGE\n    challenge:\n      algorithm: fast\n      difficulty: %d\n", b.Difficulty)
+	fmt.Fprintf(&s, "  - name: nepfleet-browsers\n    user_agent_regex: \"Mozilla|Opera\"\n    action: CHALLENGE\n    challenge:\n      algorithm: fast\n      difficulty: %d\n", difficulty)
 	s.WriteString("dnsbl: false\n")
 	return []byte(s.String())
 }
 
 // WithBotCheck puts Anubis between Caddy and the template's web service: Caddy's
 // labels move to Anubis, which forwards what passes to the service.
-func WithBotCheck(compose []byte, t *template.Template, s *fleet.Stack, out *Output) ([]byte, error) {
+func WithBotCheck(compose []byte, in Input, env map[string]string, out *Output) ([]byte, error) {
+	t, s := in.Template, in.Stack
 	b := s.Spec.BotCheck
 	if b == nil || !b.Enabled {
 		return compose, nil
@@ -53,7 +57,24 @@ func WithBotCheck(compose []byte, t *template.Template, s *fleet.Stack, out *Out
 		return nil, fmt.Errorf("spec.botCheck: needs access mode domain; in mode port, Caddy isn't in front")
 	case t == nil || t.Spec.Web == nil:
 		return nil, fmt.Errorf("spec.botCheck: needs a template that declares its web UI (spec.web)")
+	case t.Spec.BotCheck != nil && t.Spec.BotCheck.Supported != nil && !*t.Spec.BotCheck.Supported:
+		return nil, fmt.Errorf("spec.botCheck: template %s says a check would break it", t.Metadata.Name)
 	}
+	var allow []string
+	if t.Spec.BotCheck != nil {
+		allow = append(allow, t.Spec.BotCheck.Allow...)
+	}
+	allow = append(allow, b.Allow...)
+	key, ok := in.Secrets[AnubisKey]
+	if !ok {
+		var err error
+		if key, err = (template.Generate{Name: AnubisKey, Kind: "secret", Length: 64, Encoding: "hex"}).Value(); err != nil {
+			return nil, err
+		}
+		out.Generated[AnubisKey] = key
+	}
+	env[AnubisKey] = key
+	out.Secret[AnubisKey] = true
 	var doc yaml.Node
 	if err := yaml.Unmarshal(compose, &doc); err != nil {
 		return nil, err
@@ -90,12 +111,13 @@ func WithBotCheck(compose []byte, t *template.Template, s *fleet.Stack, out *Out
 	side := &yaml.Node{Kind: yaml.MappingNode}
 	mapSet(side, "image", str(anubisImage))
 	mapSet(side, "restart", str("unless-stopped"))
-	env := &yaml.Node{Kind: yaml.MappingNode}
-	mapSet(env, "BIND", str(":"+anubisPort))
-	mapSet(env, "TARGET", str("http://"+web+":"+strconv.Itoa(t.Spec.Web.Port)))
-	mapSet(env, "POLICY_FNAME", str("/data/cfg/"+AnubisPolicyFile))
-	mapSet(env, "SERVE_ROBOTS_TXT", str("false"))
-	mapSet(side, "environment", env)
+	senv := &yaml.Node{Kind: yaml.MappingNode}
+	mapSet(senv, "BIND", str(":"+anubisPort))
+	mapSet(senv, "TARGET", str("http://"+web+":"+strconv.Itoa(t.Spec.Web.Port)))
+	mapSet(senv, "POLICY_FNAME", str("/data/cfg/"+AnubisPolicyFile))
+	mapSet(senv, "SERVE_ROBOTS_TXT", str("false"))
+	mapSet(senv, "ED25519_PRIVATE_KEY_HEX", str("${"+AnubisKey+"}"))
+	mapSet(side, "environment", senv)
 	mapSet(side, "volumes", seq("./"+AnubisPolicyFile+":/data/cfg/"+AnubisPolicyFile+":ro"))
 	mapSet(side, "read_only", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
 	mapSet(side, "tmpfs", seq("/tmp"))
@@ -108,7 +130,7 @@ func WithBotCheck(compose []byte, t *template.Template, s *fleet.Stack, out *Out
 	}
 	mapSet(side, "labels", caddy)
 	services.Content = append(services.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, side)
-	out.Files[AnubisPolicyFile] = anubisPolicy(b)
+	out.Files[AnubisPolicyFile] = anubisPolicy(allow, b.Difficulty)
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

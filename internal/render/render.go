@@ -140,7 +140,7 @@ func Render(in Input) (*Output, error) {
 	if compose, err = WithAccess(compose, in.Template, in.Stack); err != nil {
 		return nil, fmt.Errorf("compose file: %w", err)
 	}
-	if compose, err = WithBotCheck(compose, in.Template, in.Stack, out); err != nil {
+	if compose, err = WithBotCheck(compose, in, env, out); err != nil {
 		return nil, fmt.Errorf("compose file: %w", err)
 	}
 	if compose, err = WithStorage(compose, in.Fleet, in.Stack, in.StoragePasswords, env, out); err != nil {

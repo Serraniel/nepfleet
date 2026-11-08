@@ -133,3 +133,43 @@ func TestBotCheckSequenceLabels(t *testing.T) {
 		t.Errorf("compose:\n%s", c)
 	}
 }
+
+func TestBotCheckTemplatePathsAndKey(t *testing.T) {
+	tpl, s := botCheckSetup(t, botCheckCompose)
+	tpl.Spec.BotCheck = &template.BotCheck{Allow: []string{"^/_matrix/"}}
+	out, err := Render(Input{Fleet: &fleet.Fleet{}, Stack: s, Template: tpl})
+	must(t, err)
+	policy := string(out.Files[AnubisPolicyFile])
+	if !strings.Contains(policy, `"^/_matrix/"`) || !strings.Contains(policy, `"^/api/"`) || strings.Index(policy, "_matrix") > strings.Index(policy, "/api/") {
+		t.Errorf("the template's paths, then the stack's:\n%s", policy)
+	}
+	key := out.Generated[AnubisKey]
+	if len(key) != 64 || EnvValues(out.Files[EnvFile])[AnubisKey] != key || !out.Secret[AnubisKey] {
+		t.Errorf("a new key must be generated, in the env file and masked: %q", key)
+	}
+	if !strings.Contains(string(out.Files[ComposeFile]), "${"+AnubisKey+"}") {
+		t.Errorf("Anubis must get the key:\n%s", out.Files[ComposeFile])
+	}
+	// Kept: the same key after the first apply.
+	out, err = Render(Input{Fleet: &fleet.Fleet{}, Stack: s, Template: tpl, Secrets: map[string]string{AnubisKey: key}})
+	must(t, err)
+	if _, again := out.Generated[AnubisKey]; again || EnvValues(out.Files[EnvFile])[AnubisKey] != key {
+		t.Error("a stored key must be reused, not replaced")
+	}
+	// Off: no key.
+	s.Spec.BotCheck.Enabled = false
+	out, err = Render(Input{Fleet: &fleet.Fleet{}, Stack: s, Template: tpl})
+	must(t, err)
+	if _, ok := out.Generated[AnubisKey]; ok {
+		t.Error("no key without the check")
+	}
+}
+
+func TestBotCheckUnsupportedTemplate(t *testing.T) {
+	tpl, s := botCheckSetup(t, botCheckCompose)
+	no := false
+	tpl.Spec.BotCheck = &template.BotCheck{Supported: &no}
+	if _, err := Render(Input{Fleet: &fleet.Fleet{}, Stack: s, Template: tpl}); err == nil || !strings.Contains(err.Error(), "would break") {
+		t.Errorf("%v", err)
+	}
+}

@@ -210,6 +210,24 @@ func TestHardwareValidation(t *testing.T) {
 	}
 }
 
+func TestBotCheckValidation(t *testing.T) {
+	tpl, err := Load("testdata/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl.Spec.Web = &Web{Service: "web", Port: 80}
+	tpl.Spec.BotCheck = &BotCheck{Allow: []string{"^/api/", `^/\.well-known/`}}
+	if err := tpl.Validate(); err != nil {
+		t.Fatalf("valid botCheck rejected: %v", err)
+	}
+	tpl.Spec.BotCheck.Allow = []string{"(unclosed", ""}
+	tpl.Spec.Web = nil
+	err = tpl.Validate()
+	if err == nil || strings.Count(err.Error(), "not a regular expression") != 2 || !strings.Contains(err.Error(), "needs spec.web") {
+		t.Errorf("want both pattern errors and the missing web UI, got %v", err)
+	}
+}
+
 func TestMetricsLabels(t *testing.T) {
 	for name, c := range map[string]struct {
 		supports, labels, want string
