@@ -285,3 +285,21 @@ func replaceIn(t *testing.T, path, old, repl string) {
 		t.Fatal(err)
 	}
 }
+
+func TestBotCheckOwnServiceValidation(t *testing.T) {
+	tpl, err := Load("testdata/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl.Spec.Web = nil
+	tpl.Spec.BotCheck = &BotCheck{Service: "web", Port: 80}
+	if err := tpl.Validate(); err != nil {
+		t.Fatalf("its own service: %v", err)
+	}
+	for _, b := range []BotCheck{{Service: "web"}, {Port: 80}, {Service: "nope", Port: 80}, {Service: "web", Port: 70000}, {}} {
+		tpl.Spec.BotCheck = &b
+		if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), "spec.botCheck") {
+			t.Errorf("%+v: %v", b, err)
+		}
+	}
+}

@@ -55,8 +55,8 @@ func WithBotCheck(compose []byte, in Input, env map[string]string, out *Output) 
 		return nil, fmt.Errorf("spec.botCheck: not supported for swarm stacks yet")
 	case portMode(s):
 		return nil, fmt.Errorf("spec.botCheck: needs access mode domain; in mode port, Caddy isn't in front")
-	case t == nil || t.Spec.Web == nil:
-		return nil, fmt.Errorf("spec.botCheck: needs a template that declares its web UI (spec.web)")
+	case t == nil || func() bool { svc, _ := t.BotCheckTarget(); return svc == "" }():
+		return nil, fmt.Errorf("spec.botCheck: needs a template that declares its web UI (spec.web or botCheck.service)")
 	case t.Spec.BotCheck != nil && t.Spec.BotCheck.Supported != nil && !*t.Spec.BotCheck.Supported:
 		return nil, fmt.Errorf("spec.botCheck: template %s says a check would break it", t.Metadata.Name)
 	}
@@ -83,7 +83,7 @@ func WithBotCheck(compose []byte, in Input, env map[string]string, out *Output) 
 		return nil, fmt.Errorf("empty compose file")
 	}
 	services := mapGet(doc.Content[0], "services")
-	web := t.Spec.Web.Service
+	web, webPort := t.BotCheckTarget()
 	svc := mapGet(services, web)
 	if svc == nil || svc.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("spec.botCheck: the web service %s is not in the compose file", web)
@@ -103,7 +103,7 @@ func WithBotCheck(compose []byte, in Input, env map[string]string, out *Output) 
 	if moved == nil {
 		return nil, fmt.Errorf("spec.botCheck: service %s has no Caddy labels to put Anubis behind", web)
 	}
-	caddy, err := anubisLabels(moved, t.Spec.Web.Port)
+	caddy, err := anubisLabels(moved, webPort)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func WithBotCheck(compose []byte, in Input, env map[string]string, out *Output) 
 	mapSet(side, "restart", str("unless-stopped"))
 	senv := &yaml.Node{Kind: yaml.MappingNode}
 	mapSet(senv, "BIND", str(":"+anubisPort))
-	mapSet(senv, "TARGET", str("http://"+web+":"+strconv.Itoa(t.Spec.Web.Port)))
+	mapSet(senv, "TARGET", str("http://"+web+":"+strconv.Itoa(webPort)))
 	mapSet(senv, "POLICY_FNAME", str("/data/cfg/"+AnubisPolicyFile))
 	mapSet(senv, "SERVE_ROBOTS_TXT", str("false"))
 	mapSet(senv, "ED25519_PRIVATE_KEY_HEX", str("${"+AnubisKey+"}"))

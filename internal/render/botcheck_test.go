@@ -173,3 +173,17 @@ func TestBotCheckUnsupportedTemplate(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+// A template without spec.web (its UI mustn't be on a LAN port) names the
+// service in botCheck.
+func TestBotCheckOwnService(t *testing.T) {
+	tpl, s := botCheckSetup(t, botCheckCompose)
+	tpl.Spec.Web = nil
+	tpl.Spec.BotCheck = &template.BotCheck{Service: "web", Port: 80, Allow: []string{"^/inbox"}}
+	out, err := Render(Input{Fleet: &fleet.Fleet{}, Stack: s, Template: tpl})
+	must(t, err)
+	c := string(out.Files[ComposeFile])
+	if !strings.Contains(c, "web-anubis") || !strings.Contains(c, `"http://web:80"`) || !strings.Contains(string(out.Files[AnubisPolicyFile]), "^/inbox") {
+		t.Errorf("compose:\n%s", c)
+	}
+}

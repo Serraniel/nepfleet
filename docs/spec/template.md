@@ -104,6 +104,7 @@ spec:
 ```
 
 - **What belongs here:** paths for mobile and desktop apps, APIs, federation, WebDAV, git over HTTPS, and webhooks from other services.
+- **`service` and `port`** name what Anubis goes in front of, for a template without `spec.web`: an app that mustn't be offered on a LAN port, because it needs its HTTPS domain (Mastodon, Vaultwarden). By default it's `spec.web`.
 - **`supported: false`** refuses the check, for apps it would break however the paths are set, such as an API without a web page.
 - Paths are Go regular expressions, matched against the request path.
 
