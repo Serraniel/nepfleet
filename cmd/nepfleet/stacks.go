@@ -418,6 +418,9 @@ func (e *env) finishPlan(pr *prepared) {
 		p.UseSnapshots()
 	}
 	e.addMaintenanceStep(pr)
+	if mode, _ := fleet.EffectiveEgress(e.fleet, pr.stack); mode != fleet.EgressOff {
+		p.Egress = mode
+	}
 }
 
 func printPlan(w io.Writer, p *deploy.Plan) {
@@ -430,6 +433,12 @@ func printPlan(w io.Writer, p *deploy.Plan) {
 		state = "new"
 	}
 	fmt.Fprintf(w, "\n%s (%s, %s)\n", p.Stack, state, p.Mode)
+	switch p.Egress {
+	case fleet.EgressEnforce:
+		fmt.Fprintln(w, "  egress: enforce, outbound traffic only to what's allowed (refusals: nepfleet egress suggest)")
+	case fleet.EgressLog:
+		fmt.Fprintln(w, "  egress: log, outbound traffic recorded for nepfleet egress suggest")
+	}
 	if p.TemplateFrom != "" {
 		fmt.Fprintf(w, "  template %s → %s\n", p.TemplateFrom, p.Template)
 	}

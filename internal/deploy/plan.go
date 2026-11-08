@@ -63,6 +63,9 @@ type Plan struct {
 	// TemplateFrom the pinned one it moves away from (--update-lock).
 	Template     string `json:"template,omitempty"`
 	TemplateFrom string `json:"templateFrom,omitempty"`
+	// Egress is the stack's egress mode when it isn't off (log or enforce), so a
+	// review shows that its containers' outbound traffic is filtered or recorded.
+	Egress string `json:"egress,omitempty"`
 }
 
 // Empty reports whether nothing would change.

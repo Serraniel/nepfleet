@@ -661,4 +661,8 @@ components:
         migrationError:
           type: string
           description: Why this upgrade is refused.
+        egress:
+          type: string
+          enum: [log, enforce]
+          description: The stack's egress mode, when it isn't off.
       additionalProperties: true
