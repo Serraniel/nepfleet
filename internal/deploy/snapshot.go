@@ -100,7 +100,8 @@ func (d *DataSafety) take(ctx context.Context, stack string) (*guard, error) {
 	fail := func(err error) (*guard, error) {
 		rctx := context.WithoutCancel(ctx)
 		g.discard(rctx)
-		return nil, errors.Join(fmt.Errorf("snapshot before apply (nothing changed; free space, exclude large volumes with snapshot: false / snapshotExclude, or apply --no-snapshot to go ahead without data rollback): %w", err), g.startAgain(rctx))
+		// The cause first: a cut-off message must still say what went wrong.
+		return nil, errors.Join(fmt.Errorf("snapshot before apply: %w (nothing changed; if it's space, free some or exclude large volumes with snapshot: false / snapshotExclude; apply --no-snapshot goes ahead without data rollback)", err), g.startAgain(rctx))
 	}
 	for _, c := range cts {
 		if c.State == "running" || c.State == "paused" || c.State == "restarting" {
