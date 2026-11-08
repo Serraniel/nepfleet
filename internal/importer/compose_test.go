@@ -163,3 +163,30 @@ type failRunner struct{}
 func (failRunner) Run(context.Context, string, ...string) ([]byte, error) {
 	return nil, os.ErrPermission
 }
+
+// A Portainer stack is staged in a temporary folder, but --copy-config names the
+// folder as the host has it: the rewrite comes first, so the two meet.
+func TestCopyConfigAfterRewrite(t *testing.T) {
+	root := t.TempDir()
+	staged := filepath.Join(root, "staged")
+	real := filepath.Join(root, "portainer", "compose", "7")
+	writeTree(t, filepath.Join(real, "config"), map[string]string{"settings.yaml": "title: Home\n"})
+	if err := os.MkdirAll(staged, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "name: web\nservices:\n  web:\n    image: nginx\n    volumes:\n      - type: bind\n        source: " + filepath.Join(staged, "config") + "\n        target: /app/config\n"
+	f := &fleet.Fleet{Dir: filepath.Join(root, "fleet")}
+	res, err := ImportCompose(context.Background(), fakeRunner{config: cfg}, f, secrets.Memory{},
+		Project{Name: "web", ConfigFiles: []string{filepath.Join(staged, "docker-compose.yml")}, WorkingDir: staged},
+		Options{Target: "local", Source: "Portainer stack web (id 7)", RewriteDir: [2]string{staged, real}, CopyConfig: []string{filepath.Join(real, "config")}, NoAdopt: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(res.Dir, "compose.yaml"))
+	if !strings.Contains(string(raw), "./config/config") || strings.Contains(string(raw), staged) {
+		t.Errorf("compose.yaml:\n%s", raw)
+	}
+	if got, err := os.ReadFile(filepath.Join(res.Dir, "files", "config", "config", "settings.yaml")); err != nil || string(got) != "title: Home\n" {
+		t.Errorf("copied file: %q %v", got, err)
+	}
+}
