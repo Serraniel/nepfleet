@@ -169,8 +169,8 @@ func (failRunner) Run(context.Context, string, ...string) ([]byte, error) {
 func TestCopyConfigAfterRewrite(t *testing.T) {
 	root := t.TempDir()
 	staged := filepath.Join(root, "staged")
-	real := filepath.Join(root, "portainer", "compose", "7")
-	writeTree(t, filepath.Join(real, "config"), map[string]string{"settings.yaml": "title: Home\n"})
+	onHost := filepath.Join(root, "portainer", "compose", "7")
+	writeTree(t, filepath.Join(onHost, "config"), map[string]string{"settings.yaml": "title: Home\n"})
 	if err := os.MkdirAll(staged, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestCopyConfigAfterRewrite(t *testing.T) {
 	f := &fleet.Fleet{Dir: filepath.Join(root, "fleet")}
 	res, err := ImportCompose(context.Background(), fakeRunner{config: cfg}, f, secrets.Memory{},
 		Project{Name: "web", ConfigFiles: []string{filepath.Join(staged, "docker-compose.yml")}, WorkingDir: staged},
-		Options{Target: "local", Source: "Portainer stack web (id 7)", RewriteDir: [2]string{staged, real}, CopyConfig: []string{filepath.Join(real, "config")}, NoAdopt: true})
+		Options{Target: "local", Source: "Portainer stack web (id 7)", RewriteDir: [2]string{staged, onHost}, CopyConfig: []string{filepath.Join(onHost, "config")}, NoAdopt: true})
 	if err != nil {
 		t.Fatal(err)
 	}
