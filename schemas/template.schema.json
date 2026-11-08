@@ -98,6 +98,17 @@
                 "null"
               ]
             },
+            "port": {
+              "type": "integer"
+            },
+            "service": {
+              "description": "Service and Port name what Anubis goes in front of, for templates without spec.web (whose UI mustn't be offered on a LAN port, such as an app that needs its HTTPS domain). Default: spec.web.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
             "supported": {
               "description": "Supported: false refuses the check, for apps it would break.",
               "type": "boolean"

@@ -81,6 +81,23 @@ type BotCheck struct {
 	Allow []string `yaml:"allow"`
 	// Supported: false refuses the check, for apps it would break.
 	Supported *bool `yaml:"supported"`
+	// Service and Port name what Anubis goes in front of, for templates
+	// without spec.web (whose UI mustn't be offered on a LAN port, such as an
+	// app that needs its HTTPS domain). Default: spec.web.
+	Service string `yaml:"service"`
+	Port    int    `yaml:"port"`
+}
+
+// BotCheckTarget is the service and port Anubis goes in front of: the template's
+// own botCheck.service, else its web UI. Empty when it has neither.
+func (t *Template) BotCheckTarget() (string, int) {
+	if b := t.Spec.BotCheck; b != nil && b.Service != "" {
+		return b.Service, b.Port
+	}
+	if t.Spec.Web != nil {
+		return t.Spec.Web.Service, t.Spec.Web.Port
+	}
+	return "", 0
 }
 
 // Web is a template's web UI.
@@ -406,8 +423,15 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		}
 	}
 	if b := t.Spec.BotCheck; b != nil {
-		if t.Spec.Web == nil {
-			errs = append(errs, errors.New("spec.botCheck: needs spec.web, the service Anubis goes in front of"))
+		switch svc, port := t.BotCheckTarget(); {
+		case (b.Service == "") != (b.Port == 0):
+			errs = append(errs, errors.New("spec.botCheck: service and port go together"))
+		case svc == "":
+			errs = append(errs, errors.New("spec.botCheck: needs spec.web or botCheck.service and port, what Anubis goes in front of"))
+		case !hasService(doc.Services, svc):
+			errs = append(errs, fmt.Errorf("spec.botCheck: service %q is not in %s", svc, t.Spec.Compose))
+		case port < 1 || port > 65535:
+			errs = append(errs, fmt.Errorf("spec.botCheck: port %d is not a port", port))
 		}
 		for _, p := range b.Allow {
 			if _, err := regexp.Compile(p); err != nil || p == "" {
@@ -649,4 +673,9 @@ var deviceRe = regexp.MustCompile(`^/dev/[A-Za-z0-9._+@/-]+$`)
 // ValidDevice reports a clean device path under /dev.
 func ValidDevice(p string) bool {
 	return deviceRe.MatchString(p) && p == filepath.Clean(p)
+}
+
+func hasService[V any](services map[string]V, name string) bool {
+	_, ok := services[name]
+	return ok
 }
