@@ -185,6 +185,24 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: Another operation runs; try again }
+  /api/v1/maintenance:
+    get:
+      tags: [server]
+      operationId: maintenance
+      summary: The maintenance windows of the fleet's Uptime Kuma instances
+      description: >-
+        One entry per instance in fleet.yaml, with its windows, or the error
+        reading them. Fleet-wide: a token limited to stacks gets 403.
+      responses:
+        "200":
+          description: One entry per Kuma
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/KumaMaintenance" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The token is limited to stacks }
   /api/v1/alerts:
     post:
       tags: [server]
@@ -668,6 +686,27 @@ components:
         error: { type: string }
         log: { type: string }
         by: { type: string }
+    KumaMaintenance:
+      type: object
+      required: [kuma, windows]
+      properties:
+        kuma: { type: string, description: Its name in fleet.yaml }
+        error: { type: string }
+        windows:
+          type: array
+          items: { $ref: "#/components/schemas/MaintenanceWindow" }
+    MaintenanceWindow:
+      type: object
+      required: [id, title, strategy, active, status]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: string }
+        strategy: { type: string, description: "manual, single, recurring-… or cron" }
+        active: { type: boolean }
+        status: { type: string, description: "under-maintenance, scheduled, ended, inactive or unknown" }
+        start: { type: string, description: Its next or current slot's start, as Kuma reports it }
+        end: { type: string }
     ImageUpdate:
       type: object
       required: [stack, image, track, current]
