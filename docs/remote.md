@@ -11,6 +11,15 @@ It reports the system and architecture, your user's rights, Docker and Compose, 
 
 - **Read-only:** a fixed script goes over SSH's stdin and nothing is installed or written. The only thing it starts is `sudo -n true`, to learn whether sudo needs a password.
 - **Your SSH setup:** it uses the system `ssh`, with your keys, agent and config. NepFleet never asks for a password.
+- **Keys with a passphrase** must be in your SSH agent, as `ssh` runs without prompting: the control daemon and the desktop app reconnect in the background, with nobody to type it. On Arch, for example:
+
+  ```sh
+  systemctl --user enable --now ssh-agent
+  echo 'SSH_AUTH_SOCK=${XDG_RUNTIME_DIR}/ssh-agent.socket' > ~/.config/environment.d/ssh-agent.conf   # for graphical apps, after a fresh login
+  ssh-add      # the passphrase, once per login
+  ```
+
+  KDE's KWallet and GNOME Keyring run an agent too. `ssh-add -l` lists what yours holds.
 - **Host keys:** an unknown or changed host key is refused, never accepted. Connect once with `ssh` and check the fingerprint.
 - **Remote output is untrusted:** only known fields are read, and control characters are removed before anything is shown.
 

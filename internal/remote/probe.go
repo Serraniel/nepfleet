@@ -125,7 +125,8 @@ func sshError(t Target, stderr string, err error) error {
 	case strings.Contains(stderr, "Host key verification failed"), strings.Contains(stderr, "No ED25519 host key"), strings.Contains(stderr, "host key is not known"):
 		return fmt.Errorf("%s: its host key is not known or has changed. Connect once with ssh and check the fingerprint: NepFleet never accepts a key on its own", t)
 	case strings.Contains(stderr, "Permission denied"):
-		return fmt.Errorf("%s: SSH refused the login; NepFleet uses your SSH keys or agent and never asks for a password", t)
+		// The usual cause: a key with a passphrase, which ssh can't ask for here.
+		return fmt.Errorf("%s: SSH refused the login. NepFleet uses your SSH keys without prompting, so a key with a passphrase must be in your SSH agent: run ssh-add (check with ssh-add -l), then try again. It never asks for a password", t)
 	case stderr != "":
 		return fmt.Errorf("%s: %s", t, stderr)
 	}
