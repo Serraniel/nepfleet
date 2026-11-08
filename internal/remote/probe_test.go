@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"slices"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -124,5 +125,12 @@ func TestMintedToken(t *testing.T) {
 	}
 	if err := s.RevokeToken(context.Background(), Target{Host: "x"}, "1; rm"); err == nil {
 		t.Error("an ID must be checked before it reaches a shell")
+	}
+}
+
+func TestSSHErrorNamesTheAgent(t *testing.T) {
+	err := sshError(Target{Host: "vps"}, "user@vps: Permission denied (publickey).", errors.New("exit status 255"))
+	if err == nil || !strings.Contains(err.Error(), "ssh-add") || !strings.Contains(err.Error(), "passphrase") {
+		t.Errorf("%v", err)
 	}
 }
