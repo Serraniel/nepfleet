@@ -4,10 +4,10 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"runtime"
 	"slices"
-	"errors"
 	"strings"
 	"testing"
 )
