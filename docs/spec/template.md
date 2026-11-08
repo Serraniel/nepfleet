@@ -92,6 +92,21 @@ spec:
   web: {service: jellyfin, port: 8096}
 ```
 
+### Behind Anubis
+
+A stack can put Anubis in front of the web UI (`botCheck`, see [the fleet repository](fleet-repo.md#checking-visitors-anubis)). Visitors in a browser then solve a check, which the app's own clients can't. List the paths those use, so they skip it:
+
+```yaml
+spec:
+  web: {service: synapse, port: 8008}
+  botCheck:
+    allow: ["^/_matrix/", "^/_synapse/client/", "^/\\.well-known/matrix/"]
+```
+
+- **What belongs here:** paths for mobile and desktop apps, APIs, federation, WebDAV, git over HTTPS, and webhooks from other services.
+- **`supported: false`** refuses the check, for apps it would break however the paths are set, such as an API without a web page.
+- Paths are Go regular expressions, matched against the request path.
+
 ## Hardware
 
 Devices and GPUs are inputs like any other, so the wizard can offer what the host has and a template still works without them:

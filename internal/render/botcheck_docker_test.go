@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/template"
 )
 
 // The rendered policy must load in the real Anubis, check a browser, and let an
@@ -21,7 +21,7 @@ func TestBotCheckRealAnubis(t *testing.T) {
 	}
 	dir := t.TempDir()
 	policy := filepath.Join(dir, AnubisPolicyFile)
-	must(t, os.WriteFile(policy, anubisPolicy(&fleet.BotCheck{Allow: []string{"^/api/"}, Difficulty: 4}), 0o644)) //nolint:gosec // read by the container's user
+	must(t, os.WriteFile(policy, anubisPolicy([]string{"^/api/"}, 4), 0o644)) //nolint:gosec // read by the container's user
 	name := "nepfleet-test-anubis-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
 	docker := func(args ...string) (string, error) {
 		out, err := exec.Command("docker", args...).CombinedOutput() //nolint:gosec,noctx // test
@@ -40,7 +40,10 @@ func TestBotCheckRealAnubis(t *testing.T) {
 		"nginx:alpine", "sh", "-c", "d=/usr/share/nginx/html; mkdir -p $d/api && echo app > $d/index.html && echo api > $d/api/x && exec nginx -g 'daemon off;'"); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
+	key, err := (template.Generate{Name: AnubisKey, Kind: "secret", Length: 64, Encoding: "hex"}).Value()
+	must(t, err)
 	if out, err := docker("run", "-d", "--name", name+"-anubis", "--network", name, "--read-only", "--tmpfs", "/tmp",
+		"-e", "ED25519_PRIVATE_KEY_HEX="+key,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
 		"-e", "BIND=:8923", "-e", "TARGET=http://web:80", "-e", "POLICY_FNAME=/data/cfg/"+AnubisPolicyFile,
 		"-v", policy+":/data/cfg/"+AnubisPolicyFile+":ro", anubisImage); err != nil {

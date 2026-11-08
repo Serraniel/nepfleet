@@ -69,6 +69,18 @@ type Spec struct {
 	// Web is the service and port of the template's web UI, so a stack can
 	// publish it on a LAN port instead of through Caddy (access mode port).
 	Web *Web `yaml:"web"`
+	// BotCheck says how the web UI works behind Anubis, when a stack turns
+	// on spec.botCheck.
+	BotCheck *BotCheck `yaml:"botCheck"`
+}
+
+// BotCheck is what a template knows about putting Anubis in front of it.
+type BotCheck struct {
+	// Allow lists regular expressions of paths that must skip the check:
+	// what the app's own clients, APIs and federation use.
+	Allow []string `yaml:"allow"`
+	// Supported: false refuses the check, for apps it would break.
+	Supported *bool `yaml:"supported"`
 }
 
 // Web is a template's web UI.
@@ -391,6 +403,16 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 		}
 		if w.Port < 1 || w.Port > 65535 {
 			errs = append(errs, fmt.Errorf("spec.web: port %d is not a port", w.Port))
+		}
+	}
+	if b := t.Spec.BotCheck; b != nil {
+		if t.Spec.Web == nil {
+			errs = append(errs, errors.New("spec.botCheck: needs spec.web, the service Anubis goes in front of"))
+		}
+		for _, p := range b.Allow {
+			if _, err := regexp.Compile(p); err != nil || p == "" {
+				errs = append(errs, fmt.Errorf("spec.botCheck.allow: %q is not a regular expression", p))
+			}
 		}
 	}
 	for i, h := range t.Spec.Hardware {

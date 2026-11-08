@@ -80,6 +80,34 @@
       "additionalProperties": false,
       "description": "Spec is what NepFleet needs to install, update and migrate the stack.",
       "properties": {
+        "botCheck": {
+          "additionalProperties": false,
+          "description": "BotCheck says how the web UI works behind Anubis, when a stack turns on spec.botCheck.",
+          "properties": {
+            "allow": {
+              "description": "Allow lists regular expressions of paths that must skip the check: what the app's own clients, APIs and federation use.",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "supported": {
+              "description": "Supported: false refuses the check, for apps it would break.",
+              "type": "boolean"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "compose": {
           "minLength": 1,
           "type": "string"
