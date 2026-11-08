@@ -43,6 +43,8 @@ Sent today: `apply.succeeded`, `apply.failed`, `apply.rolled_back`, `update.avai
 | `container.crashed` / `container.crash_loop` (3 crashes in 10 minutes) | warning / error |
 | `container.oom` / `container.unhealthy` | error / warning |
 | `security.login_failed_repeatedly` / `security.token_created` | warning / info |
+| `egress.denied` (`watch`: a stack in egress mode enforce was refused connections) | warning |
+| `alert.<source>` (from another tool, e.g. Dozzle) | warning |
 
 Discord, Slack, Teams, ntfy and Telegram receive the title and a colour or priority for the severity. The message ends with the stack and host. For applies, it also lists what changed (`changed compose.yaml, changed image nginx:1.29`, …). With `notifications.uiURL` set, for example `uiURL: https://nepfleet.example.org`, messages about a stack link to `<uiURL>/stacks/<name>`. Signed webhooks get the link as `url`.
 
@@ -98,6 +100,8 @@ Every event is also recorded on the host, in `<state>/events/events.jsonl`, whet
 - **Not crashes:** stops that were asked for, by `docker stop`, an apply or a restart (a kill event first, or exit codes 0 and 143).
 - **No floods:** each kind of problem is sent at most once per container per 30 minutes.
 - **How to run it:** as a service next to Docker, for example a systemd unit or the NepFleet container. Run it on every host whose containers you want watched.
+
+- **Refused connections:** every 10 minutes, `watch` also reads the logs of stacks in egress mode `enforce`, and reports what they were refused, by name where it saw the lookup (`egress.denied`). The title is the same each time, so dedup holds back repeats until the window passes. `nepfleet egress suggest <stack>` lists everything.
 
 Uptime alerts stay in Uptime Kuma, which has its own notification integrations. NepFleet does not duplicate them.
 

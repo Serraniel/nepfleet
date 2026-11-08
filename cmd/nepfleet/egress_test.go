@@ -50,3 +50,19 @@ func TestEgressCheck(t *testing.T) {
 		t.Errorf("%+v", c)
 	}
 }
+
+func TestDenialEvent(t *testing.T) {
+	if _, ok := denialEvent("web", egress.Report{LookedUp: []string{"x.example"}}); ok {
+		t.Error("nothing refused, nothing to say")
+	}
+	ev, ok := denialEvent("web", egress.Report{Hosts: []string{"a.example", "b.example", "c.example", "d.example", "e.example", "f.example"}, Addresses: []string{"203.0.113.9"}})
+	if !ok || ev.Name != "egress.denied" || ev.Stack != "web" || ev.Title != "web was refused outbound connections" ||
+		!strings.Contains(ev.Message, "a.example, b.example") || !strings.Contains(ev.Message, "and 2 more") || strings.Contains(ev.Message, "f.example") ||
+		!strings.Contains(ev.Message, "egress suggest web") {
+		t.Errorf("%+v", ev)
+	}
+	other, _ := denialEvent("web", egress.Report{Hosts: []string{"z.example"}})
+	if other.Title != ev.Title {
+		t.Error("the same title each time, for dedup")
+	}
+}

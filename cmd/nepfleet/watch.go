@@ -148,6 +148,8 @@ func cmdWatch(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("docker events: %w", err)
 	}
 	fmt.Fprintf(stderr, "watching containers on %s\n", e.host)
+	// Refused outbound connections of stacks in egress mode enforce.
+	go watchDenials(ctx, c, n, stdout)
 	if n != nil {
 		// The digest goes out when quiet hours end, even if nothing else happens.
 		go func() {
