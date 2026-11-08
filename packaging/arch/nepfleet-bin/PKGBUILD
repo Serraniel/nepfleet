@@ -1,0 +1,34 @@
+# Maintainer: Serraniel
+# The NepFleet CLI from a GitHub release. Until it's on the AUR:
+#   cd packaging/arch/nepfleet-bin && makepkg -si
+pkgname=nepfleet-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Self-hosted fleet manager for Docker Compose and Swarm stacks, from a git repository"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Serraniel/nepfleet"
+license=('AGPL-3.0-or-later')
+depends=('git' 'openssh')
+optdepends=('docker: run stacks on this machine'
+            'docker-compose: run stacks on this machine'
+            'sops: secrets, when not run in its container'
+            'age: secrets, when not run in its container'
+            'syft: sbom --contents for images without an SBOM attestation')
+provides=('nepfleet')
+conflicts=('nepfleet')
+# The release binary as published: its checksum is what was signed.
+options=('!strip' '!debug')
+source=("LICENSE-${pkgver}::https://raw.githubusercontent.com/Serraniel/nepfleet/v${pkgver}/LICENSE")
+source_x86_64=("nepfleet-${pkgver}-amd64::${url}/releases/download/v${pkgver}/nepfleet_${pkgver}_linux_amd64")
+source_aarch64=("nepfleet-${pkgver}-arm64::${url}/releases/download/v${pkgver}/nepfleet_${pkgver}_linux_arm64")
+# From the release's SHA256SUMS, whose signature is SHA256SUMS.sigstore.json.
+sha256sums=('8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef')
+sha256sums_x86_64=('100436fd5716a6b8f568cb047f7ec6ce3275c8feba8fbb91906d47b6bc38c918')
+sha256sums_aarch64=('89956a70bf7d8d6264b347a3ecaa51267e64e6639aafc8e77a02849abb9daa76')
+
+package() {
+  local bin=nepfleet-${pkgver}-amd64
+  [[ $CARCH == aarch64 ]] && bin=nepfleet-${pkgver}-arm64
+  install -Dm755 "$srcdir/$bin" "$pkgdir/usr/bin/nepfleet"
+  install -Dm644 "$srcdir/LICENSE-${pkgver}" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
