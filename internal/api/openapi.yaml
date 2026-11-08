@@ -411,10 +411,39 @@ paths:
       tags: [signing-in]
       operationId: passkeyBegin
       summary: Start adding a passkey
+      description: >-
+        Needs a recent proof that it's still the person: a sign-in or a
+        verification within 5 minutes. Otherwise it answers 403 with
+        `{"verify": true}`; verify with auth/verify, then ask again.
       security:
         - session: []
       responses:
         "200": { $ref: "#/components/responses/Ceremony" }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { description: "The origin isn't allowed, or `{\"verify\": true}`: verify first" }
+  /api/v1/auth/verify/begin:
+    post:
+      tags: [signing-in]
+      operationId: verifyBegin
+      summary: Start proving it's still you, with one of your passkeys
+      security:
+        - session: []
+      responses:
+        "200": { $ref: "#/components/responses/Ceremony" }
+        "401": { $ref: "#/components/responses/SignInFailed" }
+        "403": { $ref: "#/components/responses/OriginNotAllowed" }
+  /api/v1/auth/verify/finish:
+    post:
+      tags: [signing-in]
+      operationId: verifyFinish
+      summary: Finish proving it's you; counts for 5 minutes
+      security:
+        - session: []
+      parameters:
+        - { $ref: "#/components/parameters/Ceremony" }
+      requestBody: { $ref: "#/components/requestBodies/Credential" }
+      responses:
+        "204": { description: Verified }
         "401": { $ref: "#/components/responses/SignInFailed" }
         "403": { $ref: "#/components/responses/OriginNotAllowed" }
   /api/v1/auth/passkeys/finish:

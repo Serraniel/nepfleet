@@ -58,6 +58,7 @@ const (
 	kindLogin   = "login"
 	kindPasskey = "passkey"
 	kindTOTP    = "totp"
+	kindVerify  = "verify"
 )
 
 // ceremony is a passkey exchange between its two requests.
@@ -178,6 +179,27 @@ func (a *Accounts) setCookie(w http.ResponseWriter, value string, maxAge int) {
 		// Browsers accept Secure on localhost too, so it's always on.
 		Secure: true,
 	})
+}
+
+// usedPasskey accepts a passkey that just signed or verified, or refuses it: a
+// locked one always, and one whose count went backwards, which it locks for good,
+// as otherwise the copy gets in once its count is ahead again.
+func (a *Accounts) usedPasskey(ctx context.Context, user *auth.User, cred *webauthn.Credential) error {
+	if user.IsLocked(cred.ID) {
+		return errors.New("passkey locked: it may have been copied; remove it with nepfleet user remove-passkey")
+	}
+	if cred.Authenticator.CloneWarning {
+		if err := a.Users.LockCredential(user.ID, cred.ID); err != nil {
+			log.Printf("api: locking a passkey of %q: %v", user.Name, err)
+		}
+		log.Printf("api: passkey %s of %q locked: its signature count went backwards", auth.CredentialName(cred.ID), user.Name)
+		if a.Alert != nil {
+			_ = a.Alert(ctx, Alert{Source: "nepfleet", Rule: "passkey locked",
+				Detail: fmt.Sprintf("A passkey of %s (%s) signed in with a signature count that went backwards, so a copy of it may be in use. It's locked: sign-ins with it are refused until it's removed with nepfleet user remove-passkey.", user.Name, auth.CredentialName(cred.ID))})
+		}
+		return errors.New("passkey signature count went backwards: it may have been copied, and is locked")
+	}
+	return a.Users.UpdateCredential(user.ID, *cred)
 }
 
 func (a *Accounts) signIn(w http.ResponseWriter, u *auth.User) error {
@@ -369,23 +391,7 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		if err != nil {
 			return err
 		}
-		if user.IsLocked(cred.ID) {
-			return errors.New("passkey locked: it may have been copied; remove it with nepfleet user remove-passkey")
-		}
-		if cred.Authenticator.CloneWarning {
-			// Locked for good: otherwise the copy gets in as soon as its count is
-			// ahead again.
-			if err := a.Users.LockCredential(user.ID, cred.ID); err != nil {
-				log.Printf("api: locking a passkey of %q: %v", user.Name, err)
-			}
-			log.Printf("api: passkey %s of %q locked: its signature count went backwards", auth.CredentialName(cred.ID), user.Name)
-			if a.Alert != nil {
-				_ = a.Alert(r.Context(), Alert{Source: "nepfleet", Rule: "passkey locked",
-					Detail: fmt.Sprintf("A passkey of %s (%s) signed in with a signature count that went backwards, so a copy of it may be in use. It's locked: sign-ins with it are refused until it's removed with nepfleet user remove-passkey.", user.Name, auth.CredentialName(cred.ID))})
-			}
-			return errors.New("passkey signature count went backwards: it may have been copied, and is locked")
-		}
-		if err := a.Users.UpdateCredential(user.ID, *cred); err != nil {
+		if err := a.usedPasskey(r.Context(), user, cred); err != nil {
 			return err
 		}
 		log.Printf("api: %q signed in", user.Name)
@@ -412,6 +418,13 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		if u.External {
 			return errors.New("people from an identity provider sign in there")
 		}
+		if !a.Sessions.RecentlyVerified(c.Value) {
+			// Not a failure: the UI verifies with a passkey (auth/verify) and asks again.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"verify":true,"message":"confirm it's you with a passkey you have, then try again"}` + "\n"))
+			return nil
+		}
 		exclude := make([]protocol.CredentialDescriptor, 0, len(u.Credentials))
 		for _, cr := range u.Credentials {
 			exclude = append(exclude, cr.Descriptor())
@@ -425,6 +438,63 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 			return err
 		}
 		writeJSON(w, map[string]any{"ceremony": id, "options": options})
+		return nil
+	}))
+	// Proving it's still them, with one of their own passkeys, before what
+	// grants lasting access.
+	mux.HandleFunc("POST /api/v1/auth/verify/begin", guarded(func(w http.ResponseWriter, r *http.Request, addr string) error {
+		c, err := r.Cookie(SessionCookie)
+		if err != nil {
+			return err
+		}
+		uid, _, ok := a.Sessions.Check(c.Value)
+		if !ok {
+			return errors.New("not signed in")
+		}
+		u, err := a.Users.ByID(uid)
+		if err != nil {
+			return err
+		}
+		if len(u.Credentials) == 0 {
+			return errors.New("no passkey to verify with; sign in again")
+		}
+		options, data, err := a.WebAuthn.BeginLogin(u, webauthn.WithUserVerification(protocol.VerificationRequired))
+		if err != nil {
+			return err
+		}
+		id, err := a.store(ceremony{kind: kindVerify, addr: addr, data: *data, user: u})
+		if err != nil {
+			return err
+		}
+		writeJSON(w, map[string]any{"ceremony": id, "options": options})
+		return nil
+	}))
+	mux.HandleFunc("POST /api/v1/auth/verify/finish", guarded(func(w http.ResponseWriter, r *http.Request, _ string) error {
+		s, err := r.Cookie(SessionCookie)
+		if err != nil {
+			return err
+		}
+		uid, _, ok := a.Sessions.Check(s.Value)
+		if !ok {
+			return errors.New("not signed in")
+		}
+		c, ok := a.take(r.URL.Query().Get("ceremony"), kindVerify)
+		if !ok || c.user == nil || subtle.ConstantTimeCompare(c.user.ID, uid) != 1 {
+			return errors.New("unknown ceremony")
+		}
+		u, err := a.Users.ByID(uid) // fresh: locks since the ceremony began count
+		if err != nil {
+			return err
+		}
+		cred, err := a.WebAuthn.FinishLogin(u, c.data, r)
+		if err != nil {
+			return err
+		}
+		if err := a.usedPasskey(r.Context(), u, cred); err != nil {
+			return err
+		}
+		a.Sessions.Verified(s.Value)
+		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}))
 	mux.HandleFunc("POST /api/v1/auth/passkeys/finish", guarded(func(w http.ResponseWriter, r *http.Request, _ string) error {

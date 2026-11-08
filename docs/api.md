@@ -39,6 +39,7 @@ People sign in with passkeys. Turn them on with `serve --passkey-domain fleet.ex
 1. **First user:** with no users yet, the server prints a one-time setup token to its log. `POST /api/v1/auth/setup/begin` takes it with a name, and `…/setup/finish?ceremony=ID` registers the passkey and signs in.
 2. **Signing in:** `POST /api/v1/auth/login/begin`, then `…/login/finish?ceremony=ID`. It asks for no name, so it doesn't reveal who has an account.
 3. **More devices:** `POST /api/v1/auth/passkeys/begin` and `…/finish`, signed in. Register a second one: a lost passkey is otherwise only recovered on the server.
+   - **Proving it's still you:** adding a passkey needs a sign-in or a verification within the last 5 minutes, so a stolen session alone can't become lasting access. Otherwise `…/passkeys/begin` answers `403` with `{"verify": true}`: verify with `POST /api/v1/auth/verify/begin` and `…/verify/finish`, using a passkey you already have, then ask again.
 4. **`GET /api/v1/auth/status`** says whether setup is needed and who is signed in. **`POST /api/v1/auth/logout`** signs out.
 5. **Codes as a fallback,** for when no passkey is at hand (TOTP, optional per user):
    - **Turning on:** signed in, `POST /api/v1/auth/totp/begin` returns a secret and an `otpauth://` URL for an authenticator app. `…/totp/finish?ceremony=ID` with `{"code"}` proves it works and turns it on.
