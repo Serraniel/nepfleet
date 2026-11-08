@@ -16,11 +16,13 @@ import (
 	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/egress"
 	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/notify"
 	"github.com/Serraniel/nepfleet/internal/render"
 )
 
-// sidecarLogs reads what a stack's egress sidecars have logged on this host.
-func sidecarLogs(ctx context.Context, stack string) (string, int, error) {
+// sidecarLogs reads what a stack's egress sidecars have logged on this host,
+// since a duration ago (e.g. 10m) or everything.
+func sidecarLogs(ctx context.Context, stack, since string) (string, int, error) {
 	out, err := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", `{{.Names}}|{{.Label "com.docker.compose.service"}}`, //nolint:gosec // a stack's checked name, as one argument
 		"--filter", "label=com.docker.compose.project="+stack).Output()
 	if err != nil {
@@ -35,7 +37,11 @@ func sidecarLogs(ctx context.Context, stack string) (string, int, error) {
 		}
 		found++
 		// tcpdump's lines arrive on stdout, and its notes on stderr.
-		logs, err := exec.CommandContext(ctx, "docker", "logs", name).CombinedOutput() //nolint:gosec // a name Docker gave
+		args := []string{"logs", name}
+		if since != "" {
+			args = append(args, "--since", since)
+		}
+		logs, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput() //nolint:gosec // a name Docker gave
 		if err != nil {
 			return "", found, fmt.Errorf("docker logs %s: %w", name, err)
 		}
@@ -106,7 +112,7 @@ func cmdEgress(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	logs, found, err := sidecarLogs(ctx, s.Metadata.Name)
+	logs, found, err := sidecarLogs(ctx, s.Metadata.Name, "")
 	if err != nil {
 		return err
 	}
@@ -148,4 +154,63 @@ func egressCheck(f *fleet.Fleet, stacks []*fleet.Stack) (doctor.Check, bool) {
 		c.Fix = "nepfleet egress suggest <stack> turns what was recorded into an allow list, for mode enforce"
 	}
 	return c, true
+}
+
+// denialWindow is how often watch looks for refused connections, and how far
+// back: each look covers what happened since the last.
+const denialWindow = 10 * time.Minute
+
+// denialEvent says what a stack in mode enforce was refused lately. Its title is
+// the same each time, so dedup holds back repeats while the list isn't fixed.
+func denialEvent(stack string, r egress.Report) (notify.Event, bool) {
+	refused := append(slices.Clone(r.Hosts), r.Addresses...)
+	if len(refused) == 0 {
+		return notify.Event{}, false
+	}
+	shown := refused
+	more := ""
+	if len(shown) > 5 {
+		shown, more = shown[:5], fmt.Sprintf(" and %d more", len(refused)-5)
+	}
+	return notify.Event{Name: "egress.denied", Severity: notify.Warning, Stack: stack,
+		Title: stack + " was refused outbound connections",
+		Message: fmt.Sprintf("Refused in the last %s: %s%s. If it needs them, allow them in stacks/%s/stack.yaml; nepfleet egress suggest %s lists them all.",
+			denialWindow, strings.Join(shown, ", "), more, stack, stack)}, true
+}
+
+// watchDenials reports, every denialWindow, what the stacks in mode enforce on
+// this host were refused. The fleet is read again each time, as it changes.
+func watchDenials(ctx context.Context, c common, n *notify.Notifier, stdout io.Writer) {
+	tick := time.NewTicker(denialWindow)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		e, err := c.open()
+		if err != nil {
+			fmt.Fprintf(stdout, "⚠ egress denials: %v\n", err)
+			continue
+		}
+		stacks, err := e.stacks(nil)
+		if err != nil {
+			fmt.Fprintf(stdout, "⚠ egress denials: %v\n", err)
+			continue
+		}
+		for _, s := range stacks {
+			if mode, _ := fleet.EffectiveEgress(e.fleet, s); mode != fleet.EgressEnforce {
+				continue
+			}
+			logs, found, err := sidecarLogs(ctx, s.Metadata.Name, denialWindow.String())
+			if err != nil || found == 0 {
+				continue
+			}
+			if ev, ok := denialEvent(s.Metadata.Name, egress.Parse(logs)); ok {
+				fmt.Fprintf(stdout, "%s %s: %s\n", time.Now().Format(time.RFC3339), ev.Name, ev.Title)
+				e.emit(n, stdout, ev)
+			}
+		}
+	}
 }
