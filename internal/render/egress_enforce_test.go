@@ -3,6 +3,7 @@
 package render
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -252,6 +253,18 @@ func TestEgressInDocker(t *testing.T) {
 		check("a peer by its service name", true, "peer", "8080")
 	}
 	verify()
+	// The refusal is in the sidecar's log, for nepfleet egress suggest.
+	var logs []byte
+	for range 10 {
+		logs, _ = dc("logs", "--no-log-prefix", "app-egress")
+		if bytes.Contains(logs, []byte("> 9.9.9.9.443")) {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if !bytes.Contains(logs, []byte("> 9.9.9.9.443")) {
+		t.Errorf("the denial isn't logged:\n%s", logs)
+	}
 	if o, err := dc("restart", "app"); err != nil {
 		t.Fatalf("%s: %v", o, err)
 	}
