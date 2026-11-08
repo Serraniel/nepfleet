@@ -386,6 +386,20 @@ func serve(args []string, stderr io.Writer) error {
 			return eventStore(*stateDir).After(after, limit, func(e events.Event) bool { return allow(e.Stack) })
 		},
 		Alert: func(_ context.Context, a api.Alert) error { return sendAlert(c, stderr, a) },
+		Updates: func(ctx context.Context, stack string) ([]api.ImageUpdate, error) {
+			if !apiMu.TryLock() {
+				return nil, api.ErrBusy
+			}
+			defer apiMu.Unlock()
+			u, err := withStack(c, stack, func(e *env, s *fleet.Stack) (any, error) {
+				e.resolverOnce()
+				return e.stackUpdates(ctx, s)
+			})
+			if err != nil {
+				return nil, err
+			}
+			return u.([]api.ImageUpdate), nil
+		},
 		StartRollback: func(_ context.Context, stack, commit string, confirm bool, by string) (func(io.Writer) error, error) {
 			return startRollback(applyCtx, c, stack, commit, confirm, by)
 		},

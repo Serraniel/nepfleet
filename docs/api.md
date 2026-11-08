@@ -18,6 +18,7 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `GET /api/v1/stacks` | read | the stacks the token covers |
 | `GET /api/v1/templates` | read | per template source of the fleet: its commit and its catalogue (the `index.json` format); templates that don't validate are listed as `invalid` and not offered |
 | `GET /api/v1/stacks/{name}/plan` | read | what `apply` would change (the `nepfleet plan --json` format) and its `id`; secrets are masked |
+| `GET /api/v1/stacks/{name}/updates` | read | what the registries have for the stack's images, as `nepfleet updates --json`: newer tags in and beyond each track, and tags rebuilt since `lock.yaml` pinned them; it asks the registries, so it takes a while |
 | `POST /api/v1/stacks/{name}/apply` | apply | starts applying the reviewed plan: `{"plan": "<id>", "confirmDestructive": false}` → `202` with a job |
 | `POST /api/v1/stacks/{name}/rollback` | apply | starts rolling back to a commit from the stack's history: `{"commit": "<full ID>", "confirmDestructive": false}` → `202` with a job |
 | `GET /api/v1/events?after=0&limit=100` | read | notification events newer than an ID, oldest first (at most 500); a token limited to stacks sees only those, and no host-wide events |
