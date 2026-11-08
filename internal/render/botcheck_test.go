@@ -75,8 +75,8 @@ func TestBotCheck(t *testing.T) {
 	}
 	policy := string(out.Files[AnubisPolicyFile])
 	var parsed struct {
-		Bots []map[string]any `yaml:"bots"`
-		DNSBL *bool           `yaml:"dnsbl"`
+		Bots  []map[string]any `yaml:"bots"`
+		DNSBL *bool            `yaml:"dnsbl"`
 	}
 	must(t, yaml.Unmarshal(out.Files[AnubisPolicyFile], &parsed))
 	if len(parsed.Bots) != 3 || parsed.Bots[0]["path_regex"] != "^/api/" || parsed.Bots[0]["action"] != "ALLOW" ||
