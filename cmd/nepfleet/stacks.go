@@ -1400,6 +1400,8 @@ func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
 	encryptAll := fs.Bool("encrypt-all", false, "store every env value encrypted, not only secret-looking names")
 	endpoint := fs.Int("endpoint", 0, "Portainer environment (endpoint) ID of this host; required when stacks of several environments are listed")
 	caFile := fs.String("ca-file", "", "CA certificate for Portainer's TLS certificate (its default one is self-signed)")
+	var copyConfig multiFlag
+	fs.Var(&copyConfig, "copy-config", "a bind-mounted config file or folder to version with the stack, as the host sees it (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1474,7 +1476,7 @@ func cmdImportPortainer(args []string, stdout, stderr io.Writer) error {
 			errs = append(errs, fmt.Errorf("%s: %w", s.Name, err))
 			continue
 		}
-		if err := e.importPortainerStack(ctx, stdout, pt, s, importer.Options{Target: *target, EncryptAll: *encryptAll}, c.host); err != nil {
+		if err := e.importPortainerStack(ctx, stdout, pt, s, importer.Options{Target: *target, EncryptAll: *encryptAll, CopyConfig: copyConfig}, c.host); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -1501,7 +1503,7 @@ func (e *env) importPortainerStack(ctx context.Context, stdout io.Writer, pt imp
 	if err != nil {
 		return fmt.Errorf("%s: %w", s.Name, err)
 	}
-	so.Target, so.EncryptAll = o.Target, o.EncryptAll
+	so.Target, so.EncryptAll, so.CopyConfig = o.Target, o.EncryptAll, o.CopyConfig
 	// Adopt only what runs here: otherwise the plan would claim the stack is
 	// deployed on this host.
 	if so.Mode != "swarm" {
@@ -1517,6 +1519,10 @@ func (e *env) importPortainerStack(ctx context.Context, stdout io.Writer, pt imp
 			so.NoAdopt = true
 			warnings = append(warnings, "no compose project of this name runs on this host, so it was not adopted: check --endpoint and the target before applying")
 		}
+	}
+	if len(o.CopyConfig) > 0 {
+		so.NoAdopt = true
+		warnings = append(warnings, "its mounts moved into the fleet repository, so the running containers don't match yet: the next `nepfleet apply "+s.Name+"` recreates them, as a first deploy with no automatic rollback; the old folders stay where they are")
 	}
 	return e.importOne(ctx, stdout, p, so, host, warnings)
 }

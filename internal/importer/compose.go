@@ -211,6 +211,12 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 		res.Warnings = append(res.Warnings, fmt.Sprintf("service %s had %s written into the compose file; it is now stored encrypted as ${%s}", m.service, m.key, name))
 	}
 
+	// The real project directory before anything looks at paths: --copy-config
+	// names the folders as they are on the host.
+	if from, to := o.RewriteDir[0], o.RewriteDir[1]; from != "" {
+		cfg = []byte(strings.ReplaceAll(string(cfg), from, to))
+	}
+
 	configSecrets := map[string]string{}
 	configFiles := map[string][]byte{}
 	if len(o.CopyConfig) > 0 {
@@ -249,9 +255,6 @@ func ImportCompose(ctx context.Context, r deploy.Runner, f *fleet.Fleet, store s
 
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
-	}
-	if from, to := o.RewriteDir[0], o.RewriteDir[1]; from != "" {
-		cfg = []byte(strings.ReplaceAll(string(cfg), from, to))
 	}
 	source := o.Source
 	if source == "" {

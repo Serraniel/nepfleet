@@ -113,7 +113,7 @@ nepfleet import compose homepage --copy-config /home/me/docker/homepage
 - **What stays out:** binary files, links, and folders over the limits of [config files](spec/fleet-repo.md).
 - **What changes:** the mount does, so the stack isn't adopted. The next apply recreates its containers, as a first deploy with no automatic rollback. The old folder stays where it is.
 - **Apps that write there:** each apply overwrites their changes, so the import warns about mounts that aren't read-only. Leave out folders the app keeps changing.
-- `import portainer` doesn't offer this yet.
+- **`import portainer` takes `--copy-config` too.** Name the folder as the host sees it: relative mounts of a Portainer stack start at the path Portainer gave the daemon, such as `/data/compose/7/config`.
 
 Stacks Portainer manages keep their compose files in Portainer's data volume, out of reach for `import compose`; `import portainer` reads them and their environment through the Portainer API instead, exactly as Portainer passed them to compose. Create an access token in Portainer (My account → Access tokens) and pass it as `PORTAINER_TOKEN` or at the prompt, never as a flag. With several Portainer environments, pass `--endpoint` with this host's (the listing shows them); only stacks running here are adopted. Relative bind mounts keep the host path Portainer gave the daemon (`/data/compose/<id>/…`), so they keep their data. Stacks with additional compose files or deployed from git are refused; create those in the fleet by hand from their files. Portainer's default certificate is self-signed: pass it with `--ca-file`. Afterwards leave those stacks alone in Portainer, since deleting one there removes its containers.
 
