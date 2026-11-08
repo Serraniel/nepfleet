@@ -41,11 +41,11 @@ NepFleet knows which images your stacks run, so it can produce an SBOM of your *
 ```sh
 nepfleet sbom                       # the stacks on this host, as one CycloneDX document
 nepfleet sbom web db --out sboms/   # one <stack>.cdx.json each, plus fleet.cdx.json
-nepfleet sbom --contents            # also what's inside each image, with Syft
+nepfleet sbom --contents            # also what's inside each image
 ```
 
 - **Images are named by digest,** from `lock.yaml`. One without a pinned digest is listed by tag with a warning, as the tag can move.
-- **`--contents`** needs [Syft](https://github.com/anchore/syft) installed, and results are cached by digest. An image it can't read is still listed, and the command reports it and fails.
+- **`--contents`** first reads the SBOM an image's build attached (BuildKit attestations, as Docker Official Images have), for this host's platform, which downloads only the attestation. For images without one, it looks inside with [Syft](https://github.com/anchore/syft), if installed. Results are cached by digest. An image neither can read is still listed, and the command reports it and fails.
 - **It reports what the fleet says should run,** from the rendered stacks and pins, not by asking Docker what's running.
 - **To keep a history,** commit the documents to the fleet repository.
 
@@ -56,9 +56,9 @@ nepfleet sbom --advisories            # what's known about the images' packages
 nepfleet sbom --advisories --notify   # for a timer: sends what's new, once
 ```
 
-- **Looked up at [OSV](https://osv.dev),** which includes GitHub's advisories. It sends package names and versions, and nothing about your hosts, stacks or images. It needs Syft, as `--contents` does.
+- **Looked up at [OSV](https://osv.dev),** which includes GitHub's advisories. It sends package names and versions, and nothing about your hosts, stacks or images. It reads the contents as `--contents` does, so it implies it.
 - **Not knowing isn't clean:** if the lookup fails, the command fails, and images it couldn't look inside are named.
 - **New ones** reach your channels as `security.vulnerable_image`, one message per image. Run it on a schedule.
 - **Expect noise:** a package can be listed without the vulnerable code being reachable, and distribution packages may have fixes that OSV doesn't know about.
 
-Planned: using an image's SBOM attestation before falling back to Syft, and swarm targets.
+Planned: swarm targets.
