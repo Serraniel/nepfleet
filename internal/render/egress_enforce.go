@@ -41,8 +41,15 @@ build() { # command, chain, version
     if [ -n "$$addrs" ]; then echo "$$addrs" > "$$cache"; elif [ -f "$$cache" ]; then addrs="$$(cat "$$cache")"; fi
     for a in $$addrs; do $$1 -A "$$2" -d "$$a" -j ACCEPT || return 1; done
   done
+  # Denials to the log, for nepfleet egress suggest; limited, and optional: a
+  # kernel without NFLOG still enforces.
+  $$1 -A "$$2" -m limit --limit 20/min --limit-burst 40 -j NFLOG --nflog-group 27 2>/dev/null || :
   $$1 -A "$$2" -j REJECT || return 1
 }
+# What was refused, and the names looked up, so a denial can be named (DNS
+# answers on loopback: Docker's resolver rewrites the questions' ports).
+tcpdump -l -n -p -v -i lo -Z root -s 512 'udp and src port 53' 2>/dev/null &
+tcpdump -l -n -p -i nflog:27 -Z root -s 128 2>/dev/null &
 apply() { # command, version
   if $$1 -S NEPFLEET_A >/dev/null 2>&1; then new=NEPFLEET_B; old=NEPFLEET_A; else new=NEPFLEET_A; old=NEPFLEET_B; fi
   build "$$1" "$$new" "$$2" || return 1
@@ -186,7 +193,7 @@ func egressSidecars(compose []byte, allow []string, logOnly bool) ([]byte, error
 		if logOnly {
 			mapSet(side, "cap_add", seq("NET_RAW", "SETUID", "SETGID")) // tcpdump changes its user
 		} else {
-			mapSet(side, "cap_add", seq("NET_ADMIN", "NET_RAW"))
+			mapSet(side, "cap_add", seq("NET_ADMIN", "NET_RAW", "SETUID", "SETGID")) // tcpdump changes its user
 		}
 		mapSet(side, "read_only", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
 		mapSet(side, "tmpfs", seq("/run"))

@@ -298,7 +298,18 @@ nepfleet egress suggest vaultwarden
 - **Limits:** only what happened while it ran, and only as far back as the container's logs go, so log rotation and recreating the stack lose history. A DNS server other than Docker's is seen as an address, not its answers. Run `suggest` on the host where the stack runs.
 - **Turning it on or off** recreates the stack's services, as it moves them to or from the sidecar's network.
 
-Reporting denials is still planned (#127).
+#### What enforce refused
+
+In `mode: enforce`, the sidecar also logs what it refuses, with the names looked up, so `suggest` names them:
+
+```sh
+nepfleet egress suggest vaultwarden   # in mode enforce: what was refused
+```
+
+- **Only refusals:** allowed connections aren't logged in enforce mode, so this is what broke, not everything the stack does.
+- **Rate-limited:** at most 20 refusals a minute are logged, so an app retrying in a loop can't flood the log.
+- **Optional:** it needs the kernel's NFLOG. Without it, rules are enforced as before, and nothing is logged.
+- **Capabilities:** to run `tcpdump`, the sidecar now has `SETUID` and `SETGID` too, as in log mode. The app's own container is unchanged.
 
 ## Checking visitors (Anubis)
 

@@ -44,12 +44,20 @@ func sidecarLogs(ctx context.Context, stack string) (string, int, error) {
 	return b.String(), found, nil
 }
 
-// printSuggestion writes what to review, as YAML to paste where it can.
-func printSuggestion(w io.Writer, stack string, r egress.Report) {
-	if len(r.Hosts)+len(r.Addresses) == 0 {
+// printSuggestion writes what to review, as YAML to paste where it can. In mode
+// enforce, what's logged was refused.
+func printSuggestion(w io.Writer, stack string, r egress.Report, denied bool) {
+	switch {
+	case len(r.Hosts)+len(r.Addresses) == 0 && denied:
+		fmt.Fprintf(w, "# nothing of %s's was refused, as far as the logs go back\n", stack)
+	case len(r.Hosts)+len(r.Addresses) == 0:
 		fmt.Fprintf(w, "# %s connected to nothing that isn't already allowed\n", stack)
-	} else {
-		fmt.Fprintf(w, "# stacks/%s/stack.yaml: review each one; this is what it did, not what it should do\n", stack)
+	default:
+		if denied {
+			fmt.Fprintf(w, "# refused for %s (at most 20 a minute are logged); allow only what it needs, in stacks/%s/stack.yaml:\n", stack, stack)
+		} else {
+			fmt.Fprintf(w, "# stacks/%s/stack.yaml: review each one; this is what it did, not what it should do\n", stack)
+		}
 		fmt.Fprintln(w, "spec:\n  egress:\n    allow:")
 		for _, h := range r.Hosts {
 			fmt.Fprintf(w, "      - %s\n", h)
@@ -58,7 +66,7 @@ func printSuggestion(w io.Writer, stack string, r egress.Report) {
 			fmt.Fprintf(w, "      - %s   # no name seen for this; an address may change\n", a)
 		}
 	}
-	if len(r.LookedUp) > 0 {
+	if len(r.LookedUp) > 0 && !denied {
 		fmt.Fprintln(w, "# looked up, but never connected to, so not suggested:")
 		for _, n := range r.LookedUp {
 			fmt.Fprintf(w, "#   %s\n", n)
@@ -92,8 +100,8 @@ func cmdEgress(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	mode, allow := fleet.EffectiveEgress(e.fleet, s)
-	if mode != fleet.EgressLog {
-		fmt.Fprintf(stderr, "note: %s's egress mode is %s; only log records new connections\n", s.Metadata.Name, mode)
+	if mode != fleet.EgressLog && mode != fleet.EgressEnforce {
+		fmt.Fprintf(stderr, "note: %s's egress mode is %s; log records connections, and enforce what it refuses\n", s.Metadata.Name, mode)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -108,6 +116,6 @@ func cmdEgress(args []string, stdout, stderr io.Writer) error {
 	if p, err := e.prepare(s); err == nil && p.tpl != nil {
 		known = render.EgressAllow(known, p.tpl, render.EnvValues(p.out.Files[render.EnvFile]))
 	}
-	printSuggestion(stdout, s.Metadata.Name, egress.Parse(logs).Without(known))
+	printSuggestion(stdout, s.Metadata.Name, egress.Parse(logs).Without(known), mode == fleet.EgressEnforce)
 	return nil
 }
