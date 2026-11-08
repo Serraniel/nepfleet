@@ -158,6 +158,26 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "The rollback is destructive, or the stack is busy" }
+  /api/v1/alerts:
+    post:
+      tags: [server]
+      operationId: sendAlert
+      summary: Send another tool's alert to the fleet's notification channels
+      description: >-
+        For tools such as Dozzle. Needs a notify or admin token. Alerts are
+        deduplicated like NepFleet's own events: the same rule on the same
+        container once per dedup window. The container's compose project names
+        the stack. Text is cut to fit messages.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Alert" }
+      responses:
+        "202": { description: Recorded, and sent unless deduplicated }
+        "400": { description: Not an alert, or neither a rule nor a detail }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The token's scope isn't notify or admin }
   /api/v1/stacks/{name}/history:
     get:
       tags: [stacks]
@@ -592,6 +612,14 @@ components:
         error: { type: string }
         log: { type: string }
         by: { type: string }
+    Alert:
+      type: object
+      properties:
+        source: { type: string, description: "The tool, e.g. dozzle", maxLength: 120 }
+        rule: { type: string, description: The tool's name for what matched, maxLength: 120 }
+        container: { type: string, description: Where it happened, maxLength: 120 }
+        host: { type: string, description: The Docker host the tool runs on, maxLength: 120 }
+        detail: { type: string, description: "What matched, e.g. the log line", maxLength: 2000 }
     Plan:
       type: object
       description: The `nepfleet plan --json` format, plus its id.

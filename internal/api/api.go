@@ -107,6 +107,9 @@ type Options struct {
 	History func(ctx context.Context, stack string, n int) ([]HistoryEntry, error)
 	// Stacks lists the fleet's stacks.
 	Stacks func() ([]StackInfo, error)
+	// Alert sends an alert from another tool to the fleet's notification
+	// channels, with their dedup and quiet hours.
+	Alert func(ctx context.Context, a Alert) error
 	// AllowedOrigins are the frontends allowed to call this backend from a
 	// browser. Empty means same-origin only. "*" is never accepted.
 	AllowedOrigins []string
@@ -256,6 +259,7 @@ func Handler(o Options) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, job)
 	})))
+	registerAlerts(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
 		t, _ := TokenFrom(r.Context())

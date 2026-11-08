@@ -100,3 +100,22 @@ Every event is also recorded on the host, in `<state>/events/events.jsonl`, whet
 - **How to run it:** as a service next to Docker, for example a systemd unit or the NepFleet container. Run it on every host whose containers you want watched.
 
 Uptime alerts stay in Uptime Kuma, which has its own notification integrations. NepFleet does not duplicate them.
+
+## Alerts from other tools
+
+Tools such as Dozzle find problems NepFleet can't see, like a log line that says `panic`. They send them to `POST /api/v1/alerts` on `nepfleet serve`, and NepFleet records them in the event feed and sends them to the channels, with the same dedup and quiet hours as its own events:
+
+```sh
+nepfleet token create --name dozzle --scope notify --expires 365d
+```
+
+```json
+{"source": "dozzle", "rule": "panic", "container": "web-app-1", "host": "nas", "detail": "panic: runtime error"}
+```
+
+- **A `notify` token** only sends alerts, and reads nothing. Give it to the tool, not a `read` token.
+- **The stack** comes from the container's compose name (`<stack>-<service>-<n>`).
+- **Dedup:** the same rule on the same container is one event, whatever the line says. A flood of matches is one message per dedup window.
+- **Severity:** a warning, so quiet hours don't hold it.
+- **Text** is cut to 120 characters per field and 2000 for the detail, without control characters.
+- **The `dozzle` template** sends its alerts here when given the API's address and the token.

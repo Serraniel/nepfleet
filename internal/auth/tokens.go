@@ -32,7 +32,12 @@ const (
 	ScopeAdmin = "admin" // also manage tokens and settings
 )
 
-var scopeRank = map[string]int{ScopeRead: 0, ScopeApply: 1, ScopeAdmin: 2}
+// ScopeNotify only sends alerts to the fleet's notification channels, for tools
+// such as Dozzle that hold the token in their config. It reads nothing, and
+// only it and admin may send alerts.
+const ScopeNotify = "notify"
+
+var scopeRank = map[string]int{ScopeNotify: -1, ScopeRead: 0, ScopeApply: 1, ScopeAdmin: 2}
 
 // ValidScope reports a known scope.
 func ValidScope(s string) bool { _, ok := scopeRank[s]; return ok }
@@ -54,7 +59,10 @@ type Token struct {
 // Allows reports whether the token may do something needing scope on stack
 // ("" for requests not about one stack).
 func (t Token) Allows(scope, stack string) bool {
-	if scopeRank[t.Scope] < scopeRank[scope] {
+	if scope == ScopeNotify {
+		return t.Scope == ScopeNotify || t.Scope == ScopeAdmin
+	}
+	if r, ok := scopeRank[t.Scope]; !ok || r < scopeRank[scope] {
 		return false
 	}
 	return stack == "" || len(t.Stacks) == 0 || slices.Contains(t.Stacks, stack)
@@ -79,7 +87,10 @@ func (s *Store) now() time.Time {
 // Create makes a token and returns its secret, shown once.
 func (s *Store) Create(name, scope string, stacks []string, ttl time.Duration) (secret string, t Token, err error) {
 	if !ValidScope(scope) {
-		return "", t, fmt.Errorf("scope is %s, %s or %s", ScopeRead, ScopeApply, ScopeAdmin)
+		return "", t, fmt.Errorf("scope is %s, %s, %s or %s", ScopeRead, ScopeApply, ScopeAdmin, ScopeNotify)
+	}
+	if scope == ScopeNotify && len(stacks) > 0 {
+		return "", t, errors.New("a notify token cannot be limited to stacks: it reads none")
 	}
 	if name == "" || strings.ContainsAny(name, "\n\r") {
 		return "", t, errors.New("a token needs a name")

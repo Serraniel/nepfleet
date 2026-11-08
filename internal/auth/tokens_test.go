@@ -85,3 +85,28 @@ func TestTokenKeyAndAdmin(t *testing.T) {
 		t.Error("check with a damaged key must fail")
 	}
 }
+
+func TestNotifyScope(t *testing.T) {
+	notify, read, apply, admin := Token{Scope: ScopeNotify}, Token{Scope: ScopeRead}, Token{Scope: ScopeApply}, Token{Scope: ScopeAdmin}
+	for _, c := range []struct {
+		t     Token
+		scope string
+		want  bool
+	}{
+		{notify, ScopeNotify, true}, {admin, ScopeNotify, true},
+		{read, ScopeNotify, false}, {apply, ScopeNotify, false},
+		{notify, ScopeRead, false}, {notify, ScopeApply, false}, {notify, ScopeAdmin, false},
+		{Token{Scope: "bogus"}, ScopeRead, false},
+	} {
+		if got := c.t.Allows(c.scope, ""); got != c.want {
+			t.Errorf("%s token for %s: %v", c.t.Scope, c.scope, got)
+		}
+	}
+	s := &Store{Dir: t.TempDir()}
+	if _, _, err := s.Create("dozzle", ScopeNotify, []string{"web"}, time.Hour); err == nil {
+		t.Error("a notify token limited to stacks must be refused")
+	}
+	if _, _, err := s.Create("dozzle", ScopeNotify, nil, time.Hour); err != nil {
+		t.Error(err)
+	}
+}
