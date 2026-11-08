@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
 )
@@ -15,7 +16,7 @@ import (
 // cmdUser: nepfleet user list | remove <name> — who may sign in. Runs on the
 // server: access to its state directory is what recovers a lost passkey.
 func cmdUser(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: nepfleet user list | nepfleet user remove NAME [--state DIR]"
+	const usage = "usage: nepfleet user list | remove NAME | passkeys NAME | remove-passkey NAME ID [--state DIR]"
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -52,6 +53,43 @@ func cmdUser(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(stdout, "%s removed, and their sessions ended; if no users are left, restart nepfleet serve for a new setup token\n", pos[0])
+		return nil
+	case "passkeys":
+		if len(pos) != 1 {
+			return errors.New(usage)
+		}
+		all, err := store.List()
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(all, func(u auth.User) bool { return u.Name == pos[0] })
+		if i < 0 {
+			return fmt.Errorf("no user %q", pos[0])
+		}
+		u := all[i]
+		if len(u.Credentials) == 0 {
+			fmt.Fprintf(stdout, "%s has no passkeys\n", u.Name)
+		}
+		for _, c := range u.Credentials {
+			state := ""
+			if u.IsLocked(c.ID) {
+				state = "  LOCKED: may have been copied"
+			}
+			kind := "security key or phone"
+			if c.Flags.BackupEligible {
+				kind = "synced"
+			}
+			fmt.Fprintf(stdout, "%-12s %-22s used %d time(s)%s\n", auth.CredentialName(c.ID), kind, c.Authenticator.SignCount, state)
+		}
+		return nil
+	case "remove-passkey":
+		if len(pos) != 2 {
+			return errors.New(usage)
+		}
+		if err := store.RemoveCredential(pos[0], pos[1]); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "passkey %s of %s removed; sessions signed in with it last until they expire (12 hours) or the server restarts\n", pos[1], pos[0])
 		return nil
 	}
 	return errors.New(usage)

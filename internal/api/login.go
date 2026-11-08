@@ -3,11 +3,13 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -35,6 +37,9 @@ type Accounts struct {
 	// OIDC signs in through an identity provider; nil means none. Without
 	// WebAuthn, it's the only way in.
 	OIDC *OIDC
+	// Alert reports security problems, such as a passkey that may have been
+	// copied, to the fleet's notification channels; nil means only the log.
+	Alert func(ctx context.Context, a Alert) error
 
 	mu         sync.Mutex
 	ceremonies map[string]ceremony
@@ -364,8 +369,21 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		if err != nil {
 			return err
 		}
+		if user.IsLocked(cred.ID) {
+			return errors.New("passkey locked: it may have been copied; remove it with nepfleet user remove-passkey")
+		}
 		if cred.Authenticator.CloneWarning {
-			return errors.New("passkey signature count went backwards: it may have been copied")
+			// Locked for good: otherwise the copy gets in as soon as its count is
+			// ahead again.
+			if err := a.Users.LockCredential(user.ID, cred.ID); err != nil {
+				log.Printf("api: locking a passkey of %q: %v", user.Name, err)
+			}
+			log.Printf("api: passkey %s of %q locked: its signature count went backwards", auth.CredentialName(cred.ID), user.Name)
+			if a.Alert != nil {
+				_ = a.Alert(r.Context(), Alert{Source: "nepfleet", Rule: "passkey locked",
+					Detail: fmt.Sprintf("A passkey of %s (%s) signed in with a signature count that went backwards, so a copy of it may be in use. It's locked: sign-ins with it are refused until it's removed with nepfleet user remove-passkey.", user.Name, auth.CredentialName(cred.ID))})
+			}
+			return errors.New("passkey signature count went backwards: it may have been copied, and is locked")
 		}
 		if err := a.Users.UpdateCredential(user.ID, *cred); err != nil {
 			return err

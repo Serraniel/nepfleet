@@ -348,6 +348,9 @@ func serve(args []string, stderr io.Writer) error {
 		}
 		accounts.OIDC = oidcConfig
 	}
+	if accounts != nil {
+		accounts.Alert = func(_ context.Context, a api.Alert) error { return sendAlert(c, stderr, a) }
+	}
 	// A stop signal does not cancel an apply: stopped halfway, a stack stays
 	// half updated. Only a second signal does.
 	applyCtx, abortApply := context.WithCancel(context.Background())
