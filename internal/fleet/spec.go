@@ -233,11 +233,25 @@ type StackSpec struct {
 	// spec.storage, e.g. media: {storage: nas, path: /movies}.
 	Volumes map[string]VolumeMount `yaml:"volumes"`
 	Egress  *Egress                `yaml:"egress"`
+	// BotCheck puts Anubis in front of the web UI, so browsers solve a small
+	// proof of work before they reach it and scrapers are turned away.
+	BotCheck *BotCheck `yaml:"botCheck"`
 	// Snapshot: auto copies the volumes before an apply that recreates
 	// running services and restores them on rollback; off skips that.
 	Snapshot string `yaml:"snapshot" schema:"enum=auto|off;default=auto"`
 	// SnapshotExclude lists mount paths in the containers never copied.
 	SnapshotExclude []string `yaml:"snapshotExclude"`
+}
+
+// BotCheck is a stack's Anubis settings.
+type BotCheck struct {
+	// Enabled turns the check on.
+	Enabled bool `yaml:"enabled"`
+	// Allow lists regular expressions of paths that skip the check, for what
+	// can't solve one: apps, APIs, federation, WebDAV.
+	Allow []string `yaml:"allow"`
+	// Difficulty is how many leading zeros the proof of work needs.
+	Difficulty int `yaml:"difficulty" schema:"default=4"`
 }
 
 // Access is a stack's access mode.
@@ -538,6 +552,19 @@ func loadStack(dir string) (*Stack, error) {
 	}
 	if err := checkEgress(s.Spec.Egress); err != nil {
 		bad("spec.egress: %v", err)
+	}
+	if b := s.Spec.BotCheck; b != nil {
+		if b.Difficulty == 0 {
+			b.Difficulty = 4
+		}
+		if b.Difficulty < 1 || b.Difficulty > 8 {
+			bad("spec.botCheck.difficulty must be between 1 and 8")
+		}
+		for _, p := range b.Allow {
+			if _, err := regexp.Compile(p); err != nil || p == "" {
+				bad("spec.botCheck.allow: %q is not a regular expression", p)
+			}
+		}
 	}
 	if a := s.Spec.Access; a != nil {
 		if a.Mode == "" {
