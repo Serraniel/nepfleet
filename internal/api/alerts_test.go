@@ -124,3 +124,25 @@ func TestUpdateLockReachesPlanAndApply(t *testing.T) {
 		t.Errorf("plan %v, apply %v", planned, applied)
 	}
 }
+
+func TestMaintenanceEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	all, _, _ := store.Create("all", auth.ScopeRead, nil, time.Hour)
+	web, _, _ := store.Create("web", auth.ScopeRead, []string{"web"}, time.Hour)
+	h := Handler(Options{Tokens: store, Maintenance: func(context.Context) ([]KumaMaintenance, error) {
+		return []KumaMaintenance{{Kuma: "home", Windows: []MaintenanceWindow{{ID: 1, Title: "NepFleet: update of web", Status: "under-maintenance"}}}}, nil
+	}})
+	get := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/maintenance", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get(all); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"under-maintenance"`) {
+		t.Errorf("%d %s", rec.Code, rec.Body)
+	}
+	if rec := get(web); rec.Code != http.StatusForbidden {
+		t.Errorf("a token limited to stacks: %d", rec.Code)
+	}
+}

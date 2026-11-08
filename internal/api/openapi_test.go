@@ -96,12 +96,14 @@ func jsonFields(typ reflect.Type) (all, required []string) {
 func TestOpenAPISchemasMatchTypes(t *testing.T) {
 	schemas := loadOpenAPI(t).Comps.Schemas
 	for name, typ := range map[string]reflect.Type{
-		"Info":         reflect.TypeFor[Info](),
-		"StackInfo":    reflect.TypeFor[StackInfo](),
-		"HistoryEntry": reflect.TypeFor[HistoryEntry](),
-		"Job":          reflect.TypeFor[Job](),
-		"Alert":        reflect.TypeFor[Alert](),
-		"ImageUpdate":  reflect.TypeFor[ImageUpdate](),
+		"Info":              reflect.TypeFor[Info](),
+		"StackInfo":         reflect.TypeFor[StackInfo](),
+		"HistoryEntry":      reflect.TypeFor[HistoryEntry](),
+		"Job":               reflect.TypeFor[Job](),
+		"Alert":             reflect.TypeFor[Alert](),
+		"ImageUpdate":       reflect.TypeFor[ImageUpdate](),
+		"KumaMaintenance":   reflect.TypeFor[KumaMaintenance](),
+		"MaintenanceWindow": reflect.TypeFor[MaintenanceWindow](),
 	} {
 		s, ok := schemas[name]
 		if !ok {

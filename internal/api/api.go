@@ -110,6 +110,9 @@ type Options struct {
 	// Updates is what the registries have for a stack's images: newer tags in
 	// and beyond each track, and tags rebuilt since lock.yaml pinned them.
 	Updates func(ctx context.Context, stack string) ([]ImageUpdate, error)
+	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
+	// instances.
+	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
 	// Alert sends an alert from another tool to the fleet's notification
 	// channels, with their dedup and quiet hours.
 	Alert func(ctx context.Context, a Alert) error
@@ -267,6 +270,7 @@ func Handler(o Options) http.Handler {
 	})))
 	registerAlerts(mux, o, l)
 	registerUpdates(mux, o, l)
+	registerMaintenance(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
 		t, _ := TokenFrom(r.Context())

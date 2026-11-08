@@ -25,6 +25,7 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `GET /metrics` | read | Prometheus metrics: the server, its number of stacks, and when each stack last had each event, such as `apply.rolled_back`. Give Prometheus a read token with `authorization.credentials_file` |
 | `GET /api/v1/events/stream?after=0` | read | the same events live, as server-sent events; reconnect with the last ID (`Last-Event-ID`), as a stream ends after 10 minutes so the token is checked again |
 | `POST /api/v1/alerts` | notify | an alert from another tool, such as Dozzle, to the fleet's notification channels: `{"source", "rule", "container", "host", "detail"}` → `202`; see [notifications](notifications.md#alerts-from-other-tools) |
+| `GET /api/v1/maintenance` | read | the maintenance windows of each Uptime Kuma in `fleet.yaml` (title, status, next slot), or the error reading them; fleet-wide, so a token limited to stacks gets `403` |
 | `GET /api/v1/jobs/{id}` | read | a job's state (`running`, `succeeded`, `failed`), error and log |
 | `GET /api/v1/stacks/{name}/history?n=20` | read | the last `n` commits (at most 200) that touched the stack, newest first; `applied` marks the revision running now |
 
