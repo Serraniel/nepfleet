@@ -25,9 +25,12 @@ var hostNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
 
 // cmdHost: nepfleet host bootstrap <address> — prepares a machine over SSH.
 func cmdHost(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: nepfleet host bootstrap ssh://[user@]host[:port] [--name NAME] [--yes] [--fleet DIR] | nepfleet host apply NAME [ssh://address] [--yes] [--fleet DIR]"
+	const usage = "usage: nepfleet host bootstrap ssh://[user@]host[:port] [--name NAME] [--yes] [--fleet DIR] | nepfleet host install ssh://address [--name NAME] [--yes] [--skip-dir] | nepfleet host apply NAME [ssh://address] [--yes] [--fleet DIR]"
 	if len(args) > 0 && args[0] == "apply" {
 		return cmdHostApply(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "install" {
+		return cmdHostInstall(args[1:], stdout, stderr)
 	}
 	if len(args) == 0 || args[0] != "bootstrap" {
 		return errors.New(usage)
