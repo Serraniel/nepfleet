@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -35,6 +36,43 @@ func syftContents(ctx context.Context, ref string) ([]sbom.Component, error) {
 		return nil, fmt.Errorf("syft: %w", err)
 	}
 	return sbom.ParseComponents(out)
+}
+
+// errNoAttestation: the image's build attached no SBOM for this platform.
+var errNoAttestation = errors.New("no SBOM attestation")
+
+// attestedContents reads the SBOM an image's build attached, for this host's
+// platform. It downloads only the attestation, not the image.
+func attestedContents(ctx context.Context, ref string) ([]sbom.Component, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "buildx", "imagetools", "inspect", ref, "--format", "{{json .SBOM}}").Output() //nolint:gosec // an image reference from the fleet, as one argument
+	if err != nil {
+		return nil, fmt.Errorf("reading attestations: %w", err)
+	}
+	found, ok, err := sbom.ParseAttestation(out, "linux/"+runtime.GOARCH)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errNoAttestation
+	}
+	return found, nil
+}
+
+// imageContents uses what an image's build attested, and looks inside with
+// Syft only where it attested nothing (if Syft is there).
+func imageContents(attested, scan sbom.Contents, haveScanner bool) sbom.Contents {
+	return func(ctx context.Context, ref string) ([]sbom.Component, error) {
+		found, err := attested(ctx, ref)
+		if err == nil {
+			return found, nil
+		}
+		if !haveScanner {
+			return nil, fmt.Errorf("%w, and Syft isn't installed to look inside", err)
+		}
+		return scan(ctx, ref)
+	}
 }
 
 // imagesOf turns a stack's image references and pins into what a document lists.
@@ -141,7 +179,7 @@ func cmdSBOM(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	out := fs.String("out", "", "write one <stack>.cdx.json per stack and fleet.cdx.json here, instead of printing the aggregate")
-	contents := fs.Bool("contents", false, "also list what's inside each image, with Syft (cached by digest)")
+	contents := fs.Bool("contents", false, "also list what's inside each image: from its build's SBOM attestation, else with Syft if installed (cached by digest)")
 	advisories := fs.Bool("advisories", false, "look up known vulnerabilities at osv.dev instead of printing the document; sends package names and versions, and implies --contents")
 	notifyNew := fs.Bool("notify", false, "with --advisories: send new ones to the fleet's notification channels")
 	if err := fs.Parse(args); err != nil {
@@ -160,10 +198,8 @@ func cmdSBOM(args []string, stdout, stderr io.Writer) error {
 	}
 	var look sbom.Contents
 	if *contents {
-		if _, err := exec.LookPath("syft"); err != nil {
-			return fmt.Errorf("--contents needs Syft installed: %w", err)
-		}
-		look = sbom.CachedContents(filepath.Join(e.stateDir, "sbom"), syftContents)
+		_, err := exec.LookPath("syft")
+		look = sbom.CachedContents(filepath.Join(e.stateDir, "sbom"), imageContents(attestedContents, syftContents, err == nil))
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
