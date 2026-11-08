@@ -37,7 +37,7 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 
 ## Signing in
 
-People sign in with passkeys. Turn them on with `serve --passkey-domain fleet.example.org`; `--passkey-origins` lists the web UI's exact origins, by default `https://<domain>`. To try it locally, use `--passkey-domain localhost --passkey-origins http://localhost:PORT`, with the UI's port.
+People sign in with passkeys. Turn them on with `serve --passkey-domain fleet.example.org`; `--passkey-origins` lists the web UI's exact origins, by default `https://<domain>`. To try it locally, use `--passkey-domain localhost --passkey-origins http://localhost:PORT`, with the UI's port. Over plain `http://localhost`, the session cookie is `Secure`, which Chrome and Firefox accept there; Safari is untested and may drop it, so try locally in another browser. Over HTTPS, as in any real setup, all browsers behave the same.
 
 1. **First user:** with no users yet, the server prints a one-time setup token to its log. `POST /api/v1/auth/setup/begin` takes it with a name, and `…/setup/finish?ceremony=ID` registers the passkey and signs in.
 2. **Signing in:** `POST /api/v1/auth/login/begin`, then `…/login/finish?ceremony=ID`. It asks for no name, so it doesn't reveal who has an account.
