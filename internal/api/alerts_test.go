@@ -63,3 +63,31 @@ func TestAlertEndpoint(t *testing.T) {
 		t.Errorf("not cleaned: rule %d, detail %d, %q", len([]rune(a.Rule)), len([]rune(a.Detail)), a.Container)
 	}
 }
+
+func TestUpdatesEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	all, _, _ := store.Create("all", auth.ScopeRead, nil, time.Hour)
+	db, _, _ := store.Create("db", auth.ScopeRead, []string{"db"}, time.Hour)
+	h := Handler(Options{Tokens: store, Updates: func(_ context.Context, stack string) ([]ImageUpdate, error) {
+		if stack == "none" {
+			return nil, nil
+		}
+		return []ImageUpdate{{Stack: stack, Image: "nginx", Track: "minor", Current: "1.28", Next: "1.29"}}, nil
+	}})
+	get := func(token, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get(all, "/api/v1/stacks/web/updates"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"next":"1.29"`) {
+		t.Errorf("%d %s", rec.Code, rec.Body)
+	}
+	if rec := get(all, "/api/v1/stacks/none/updates"); strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Errorf("none: %s", rec.Body)
+	}
+	if rec := get(db, "/api/v1/stacks/web/updates"); rec.Code != http.StatusNotFound {
+		t.Errorf("a token for db must not see web: %d", rec.Code)
+	}
+}

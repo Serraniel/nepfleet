@@ -158,6 +158,28 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "The rollback is destructive, or the stack is busy" }
+  /api/v1/stacks/{name}/updates:
+    get:
+      tags: [stacks]
+      operationId: stackUpdates
+      summary: What the registries have for the stack's images
+      description: >-
+        Newer tags within and beyond each image's track, and tags rebuilt since
+        lock.yaml pinned them, as `nepfleet updates --json`. Asks the
+        registries, so it takes a while. Read-only.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: One entry per image
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ImageUpdate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Another operation runs; try again }
   /api/v1/alerts:
     post:
       tags: [server]
@@ -641,6 +663,18 @@ components:
         error: { type: string }
         log: { type: string }
         by: { type: string }
+    ImageUpdate:
+      type: object
+      required: [stack, image, track, current]
+      properties:
+        stack: { type: string }
+        image: { type: string }
+        track: { type: string, description: "major, minor, patch or digest" }
+        current: { type: string, description: The tag in use }
+        next: { type: string, description: The newest tag the track allows; it comes with a template update }
+        beyond: { type: string, description: A newer tag outside the track }
+        rebuilt: { type: boolean, description: "The tag points at a newer digest than lock.yaml pins; apply --update-lock takes it" }
+        error: { type: string }
     Alert:
       type: object
       properties:

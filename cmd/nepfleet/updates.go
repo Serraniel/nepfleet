@@ -15,26 +15,13 @@ import (
 	"github.com/Serraniel/neptide/pkg/registry"
 	track "github.com/Serraniel/neptide/pkg/version"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/lock"
 )
 
 // imageUpdate is what the registry has for one image of a stack.
-type imageUpdate struct {
-	Stack   string `json:"stack"`
-	Image   string `json:"image"`
-	Track   string `json:"track"`
-	Current string `json:"current"`
-	// Next is the newest tag the track allows; it comes with a template
-	// update (the template pins tags).
-	Next string `json:"next,omitempty"`
-	// Beyond is a newer tag outside the track, for information.
-	Beyond string `json:"beyond,omitempty"`
-	// Rebuilt: the current tag points at a newer digest than lock.yaml
-	// pins; apply --update-lock takes it.
-	Rebuilt bool   `json:"rebuilt,omitempty"`
-	Error   string `json:"error,omitempty"`
-}
+type imageUpdate = api.ImageUpdate
 
 // cmdUpdates reports image updates for the stacks on this host: within each
 // image's track (templates: spec.images; plain stacks follow digests),

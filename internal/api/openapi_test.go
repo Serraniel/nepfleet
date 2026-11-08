@@ -101,6 +101,7 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"HistoryEntry": reflect.TypeFor[HistoryEntry](),
 		"Job":          reflect.TypeFor[Job](),
 		"Alert":        reflect.TypeFor[Alert](),
+		"ImageUpdate":  reflect.TypeFor[ImageUpdate](),
 	} {
 		s, ok := schemas[name]
 		if !ok {
