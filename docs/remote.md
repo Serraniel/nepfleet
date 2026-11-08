@@ -57,6 +57,27 @@ It probes the machine and shows a plan, with every step that runs as root marked
 
 The SSH, firewall and update fixes from the security check come later.
 
+## Installing NepFleet on it
+
+Once Docker runs there, install NepFleet as a container, as [Install](install.md#container) describes, without typing it by hand:
+
+```sh
+nepfleet host install ssh://me@server --name server
+```
+
+It probes the machine and shows a plan, then asks:
+
+1. Create `/srv/nepfleet`, owned by your SSH user. This needs root or passwordless `sudo`. If you created it yourself, pass `--skip-dir`.
+2. Write `compose.yaml`, the one this NepFleet ships, pinned to its own version, and `.env`. The API listens on the machine's loopback only.
+3. Pull the image.
+4. Generate the fleet's age key on the machine. It never leaves it: back it up yourself, as the command says at the end.
+5. Create the fleet repository, encrypting to that key.
+6. Start the API and wait until it's healthy.
+
+- **Refused on purpose:** a machine where NepFleet runs or a fleet repository exists (connect or adopt instead), one without Docker (run `host bootstrap` first), and one that isn't Linux on x86_64 or aarch64.
+- **Running it again** is safe: a key or fleet that's there stays.
+- **Then connect:** `nepfleet remote add` and `nepfleet remote connect`, or the Fleets page of the app.
+
 ## The control daemon
 
 `nepfleet control` is a small service on your own machine that remembers your remotes and will own the connections to them. Clients talk to it, so closing one changes nothing. `nepfleet remote` starts it when it isn't running, and it keeps running afterwards.
