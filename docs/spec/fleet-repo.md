@@ -300,6 +300,25 @@ nepfleet egress suggest vaultwarden
 
 Reporting denials is still planned (#127).
 
+## Checking visitors (Anubis)
+
+A public web UI attracts scrapers and bots. `botCheck` puts [Anubis](https://anubis.techaro.lol) in front of it, so a browser solves a small proof of work before it reaches the app, without a third party like Cloudflare:
+
+```yaml
+spec:
+  botCheck:
+    enabled: true
+    allow: ["^/api/", "^/\\.well-known/"]   # paths that skip the check
+    difficulty: 4                           # leading zeros; the default
+```
+
+- **How it works:** the template's web service (`spec.web`) loses its Caddy labels to a `<service>-anubis` service, which forwards what passes to the service. Caddy passes on the visitor's address. The policy is rendered to `anubis-policy.yaml` next to the compose file.
+- **Who is checked:** whatever looks like a browser. Anubis's own rules deny known bad bots and AI scrapers and let good search engines and well-known paths through. Other clients pass, as they can't solve a check anyway.
+- **What must skip it:** apps, APIs, federation (`/inbox`, `/_matrix`), WebDAV and git over HTTPS can't solve a check. List their paths in `allow`, as Go regular expressions.
+- **Visitors need JavaScript,** and pass for a week (Anubis's cookie). A restart makes them solve it once more.
+- **No lookups elsewhere:** the DNS blocklist is off, so visitors' addresses aren't sent to a third party.
+- **Limits:** compose stacks in access mode `domain`, with one plain route to the web port (`caddy.reverse_proxy: "{{upstreams PORT}}"`). Templates that send paths to other ports or services are refused. Turning it on or off recreates the web service.
+
 ## Rules
 
 - NepFleet commits only what it owns, such as `lock.yaml`, rendered output and imported stacks. Each commit message says why the change was made.

@@ -66,6 +66,39 @@
           ],
           "type": "string"
         },
+        "botCheck": {
+          "additionalProperties": false,
+          "description": "BotCheck puts Anubis in front of the web UI, so browsers solve a small proof of work before they reach it and scrapers are turned away.",
+          "properties": {
+            "allow": {
+              "description": "Allow lists regular expressions of paths that skip the check, for what can't solve one: apps, APIs, federation, WebDAV.",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "difficulty": {
+              "default": "4",
+              "description": "Difficulty is how many leading zeros the proof of work needs.",
+              "type": "integer"
+            },
+            "enabled": {
+              "description": "Enabled turns the check on.",
+              "type": "boolean"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "egress": {
           "additionalProperties": false,
           "description": "Egress limits what a stack's containers reach on the internet.",
