@@ -151,7 +151,7 @@ func TestEgressEndpoint(t *testing.T) {
 	store := &auth.Store{Dir: t.TempDir()}
 	all, _, _ := store.Create("all", auth.ScopeRead, nil, time.Hour)
 	db, _, _ := store.Create("db", auth.ScopeRead, []string{"db"}, time.Hour)
-	h := Handler(Options{Tokens: store, Egress: func(_ context.Context, stack string) (*StackEgress, error) {
+	h := Handler(Options{Tokens: store, Egress: func(context.Context, string) (*StackEgress, error) {
 		return &StackEgress{Mode: "enforce", Sidecars: 1, Hosts: []string{"api.example.org"}, Addresses: []string{}, LookedUp: []string{}}, nil
 	}})
 	get := func(token string) *httptest.ResponseRecorder {
