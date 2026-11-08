@@ -38,6 +38,7 @@ nepfleet token revoke <id>
 ```
 
 - **Scopes:** `read` (stacks, plans, history, templates), `apply` (also apply and roll back), `admin` (reserved for tokens and settings over the API). Each includes the ones before it, and `--stack` limits a token to some stacks. An `admin` token can't be limited to stacks.
+- **`notify`** stands apart: it only sends alerts (`POST /api/v1/alerts`) and reads nothing, for tools such as Dozzle that keep the token in their own config. Only it and `admin` may send alerts.
 - **Expiry:** every token has one.
 - **Storage:** tokens look like `nft_…`, so secret scanners can find leaked ones. Only an HMAC of each token is stored, in `<state>/api/tokens.json`, with a key kept next to it (`token.key`). Both files are owner-only. A copy of `tokens.json` without `token.key` (a partial backup, a leak) doesn't let anyone test guesses; anyone who can read both can, so keep the state directory private. A damaged `token.key` is never replaced on its own, as that would silently invalidate every token.
 - **Requests:** `Authorization: Bearer nft_…`. Missing, unknown and expired tokens get the same `401`.
@@ -56,6 +57,7 @@ Reviewed against the code on 2026-11-07. It covers what exists: one server on on
 | A phishing site | Passkeys are bound to the site's domain, so they don't work on a look-alike. | Nothing specific. |
 | Someone on the network without a token | Every endpoint but `/healthz` and `/api/v1/info` needs one. Tokens have 256 random bits. TLS beyond loopback. Lockout. | `/api/v1/info` shows the server's name and version; `--name` changes the name. |
 | A stolen `read` token | Plans mask secrets. No changes possible. Expiry, and `--stack` limits. | It reads the fleet's structure, images and non-secret values. Revoke it with `nepfleet token revoke`. |
+| A stolen `notify` token | It reads nothing and changes nothing. Alerts are capped in size, and deduplicated like every notification. Expiry. | **It can send false alerts,** or many different ones, to the fleet's channels. Revoke it with `nepfleet token revoke`. |
 | A stolen `apply` token | Only what is in the fleet repository gets applied, and destructive changes need confirming. The server log records each apply. | **It can redeploy, and by timing it, disrupt stacks.** It can't add code, because the API can't edit the repository. Job logs show server paths. |
 | A malicious web page in the browser | Tokens go in a header, never a cookie, so a page can't use them by itself. CORS allows exact origins only. The UI keeps tokens in memory or this tab's session storage. | A script running in the UI's origin could read a token: keep the UI on its own origin. |
 | A malicious template or compose file | Templates are data and run no host commands. Plans show every change before it applies. | **A compose file can mount the host or run privileged, which is root.** Reviewing plans and choosing template sources is the defence: NepFleet doesn't restrict what compose allows. |

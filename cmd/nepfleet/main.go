@@ -382,6 +382,7 @@ func serve(args []string, stderr io.Writer) error {
 		Events: func(after int64, limit int, allow func(string) bool) (any, error) {
 			return eventStore(*stateDir).After(after, limit, func(e events.Event) bool { return allow(e.Stack) })
 		},
+		Alert: func(_ context.Context, a api.Alert) error { return sendAlert(c, stderr, a) },
 		StartRollback: func(_ context.Context, stack, commit string, confirm bool, by string) (func(io.Writer) error, error) {
 			return startRollback(applyCtx, c, stack, commit, confirm, by)
 		},

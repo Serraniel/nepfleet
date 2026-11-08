@@ -22,7 +22,7 @@ func tokenStore(stateDir string) *auth.Store {
 
 // cmdToken: nepfleet token create|list|revoke
 func cmdToken(args []string, stdout, stderr io.Writer) error {
-	usage := errors.New("usage: nepfleet token create --name NAME --scope read|apply|admin [--stack a,b] [--expires 90d] | token list | token revoke <id>")
+	usage := errors.New("usage: nepfleet token create --name NAME --scope read|apply|admin|notify [--stack a,b] [--expires 90d] | token list | token revoke <id>")
 	if len(args) == 0 {
 		return usage
 	}
@@ -31,7 +31,7 @@ func cmdToken(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	name := fs.String("name", "", "what the token is for, e.g. ci or homepage")
-	scope := fs.String("scope", auth.ScopeRead, "read, apply or admin")
+	scope := fs.String("scope", auth.ScopeRead, "read, apply or admin; notify only sends alerts")
 	stacks := fs.String("stack", "", "limit the token to these stacks (comma separated)")
 	expires := fs.String("expires", "90d", "lifetime, e.g. 30d, 12h")
 	pos, err := parseInterspersed(fs, args[1:])
