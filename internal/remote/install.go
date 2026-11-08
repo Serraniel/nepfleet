@@ -46,15 +46,15 @@ const (
 func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, error) {
 	switch {
 	case r.Kernel != "Linux":
-		return nil, fmt.Errorf("NepFleet's container runs on Linux; this is %s", r.Kernel)
+		return nil, fmt.Errorf("this is %s, and NepFleet's container runs on Linux", r.Kernel)
 	case r.Arch != "x86_64" && r.Arch != "aarch64":
-		return nil, fmt.Errorf("NepFleet's image is for x86_64 and aarch64; this is %s", r.Arch)
+		return nil, fmt.Errorf("this is %s, and NepFleet's image is for x86_64 and aarch64", r.Arch)
 	case r.NepFleetRunning || r.NepFleetImage != "":
-		return nil, errors.New("NepFleet already runs here: connect to it with nepfleet remote add")
+		return nil, errors.New("a NepFleet already runs here: connect to it with nepfleet remote add")
 	case r.Fleet != "":
 		return nil, fmt.Errorf("a fleet repository is already here (%s): adopt it instead of installing over it", r.Fleet)
 	case !r.Docker || r.Compose == "":
-		return nil, errors.New("Docker or its Compose plugin is missing: run nepfleet host bootstrap first")
+		return nil, errors.New("no Docker or no Compose plugin here: run nepfleet host bootstrap first")
 	case !r.DockerRunning:
 		return nil, errors.New("this user can't reach Docker: if host bootstrap just added it to the docker group, that counts from the next login, so run this again")
 	case !unixRe.MatchString(r.User):
