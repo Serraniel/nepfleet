@@ -17,9 +17,9 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `GET /api/v1/openapi.yaml` | none | the OpenAPI document |
 | `GET /api/v1/stacks` | read | the stacks the token covers |
 | `GET /api/v1/templates` | read | per template source of the fleet: its commit and its catalogue (the `index.json` format); templates that don't validate are listed as `invalid` and not offered |
-| `GET /api/v1/stacks/{name}/plan` | read | what `apply` would change (the `nepfleet plan --json` format) and its `id`; secrets are masked |
+| `GET /api/v1/stacks/{name}/plan` | read | what `apply` would change (the `nepfleet plan --json` format) and its `id`; secrets are masked; `?updateLock=true` plans taking updates |
 | `GET /api/v1/stacks/{name}/updates` | read | what the registries have for the stack's images, as `nepfleet updates --json`: newer tags in and beyond each track, and tags rebuilt since `lock.yaml` pinned them; it asks the registries, so it takes a while |
-| `POST /api/v1/stacks/{name}/apply` | apply | starts applying the reviewed plan: `{"plan": "<id>", "confirmDestructive": false}` → `202` with a job |
+| `POST /api/v1/stacks/{name}/apply` | apply | starts applying the reviewed plan: `{"plan": "<id>", "confirmDestructive": false, "updateLock": false}` → `202` with a job |
 | `POST /api/v1/stacks/{name}/rollback` | apply | starts rolling back to a commit from the stack's history: `{"commit": "<full ID>", "confirmDestructive": false}` → `202` with a job |
 | `GET /api/v1/events?after=0&limit=100` | read | notification events newer than an ID, oldest first (at most 500); a token limited to stacks sees only those, and no host-wide events |
 | `GET /metrics` | read | Prometheus metrics: the server, its number of stacks, and when each stack last had each event, such as `apply.rolled_back`. Give Prometheus a read token with `authorization.credentials_file` |
@@ -100,6 +100,7 @@ With TLS on, the server allows TLS 1.2 and newer and sends HSTS.
 2. **Send back its `id`:** `POST …/apply` with `{"plan": "<id>"}`.
    - The server plans again and applies only if nothing changed. Otherwise it answers `409`, and you show the new plan.
    - A plan with destructive changes also needs `"confirmDestructive": true`.
+   - **Taking updates:** `GET …/plan?updateLock=true` plans as `apply --update-lock` would, with newer image digests and the template source's current commit. Apply it with `"updateLock": true`. The check is the same, so if a registry moved again in between, you get `409` and a new plan.
 3. **Poll the job:** `GET /api/v1/jobs/{id}` (the `Location` header) until it is no longer `running`. The log is what `nepfleet apply` prints.
 
 - **One operation at a time:** a second apply while one runs gets `409`, and a plan gets `503` with `Retry-After`.

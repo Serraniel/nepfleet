@@ -89,12 +89,12 @@ type Options struct {
 	TrustedProxies []*net.IPNet
 	// Plan is what applying a stack would change (deploy.Plan, secrets
 	// masked).
-	Plan func(ctx context.Context, stack string) (any, error)
+	Plan func(ctx context.Context, stack string, updateLock bool) (any, error)
 	// StartApply checks that the stack's plan still has the ID the client
 	// reviewed (and that destructive changes are confirmed) and returns the
 	// apply to run in the background. Errors: ErrNotFound, ErrBusy,
 	// ErrPlanChanged, ErrNeedsConfirm.
-	StartApply func(ctx context.Context, stack, planID string, confirmDestructive bool, by string) (func(log io.Writer) error, error)
+	StartApply func(ctx context.Context, stack, planID string, confirmDestructive, updateLock bool, by string) (func(log io.Writer) error, error)
 	// StartRollback returns a rollback to a commit of the stack's own history,
 	// to run in the background.
 	StartRollback func(ctx context.Context, stack, commit string, confirmDestructive bool, by string) (func(log io.Writer) error, error)
@@ -157,7 +157,7 @@ func Handler(o Options) http.Handler {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
 		}
-		p, err := o.Plan(r.Context(), name)
+		p, err := o.Plan(r.Context(), name, r.URL.Query().Get("updateLock") == "true")
 		if writeErr(w, err) {
 			return
 		}
@@ -210,6 +210,9 @@ func Handler(o Options) http.Handler {
 		var req struct {
 			Plan               string `json:"plan"`
 			ConfirmDestructive bool   `json:"confirmDestructive"`
+			// UpdateLock applies a plan made with ?updateLock=true: newer digests
+			// and the template source's current commit.
+			UpdateLock bool `json:"updateLock"`
 		}
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 		dec.DisallowUnknownFields()
@@ -218,7 +221,7 @@ func Handler(o Options) http.Handler {
 			return
 		}
 		t, _ := TokenFrom(r.Context())
-		run, err := o.StartApply(r.Context(), name, req.Plan, req.ConfirmDestructive, t.Name)
+		run, err := o.StartApply(r.Context(), name, req.Plan, req.ConfirmDestructive, req.UpdateLock, t.Name)
 		switch {
 		case errors.Is(err, ErrBusy), errors.Is(err, ErrPlanChanged), errors.Is(err, ErrNeedsConfirm):
 			http.Error(w, err.Error(), http.StatusConflict)

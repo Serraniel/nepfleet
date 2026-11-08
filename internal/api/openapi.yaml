@@ -94,6 +94,10 @@ paths:
       description: Needs the read scope. Secrets are masked. The id goes into an apply.
       parameters:
         - { $ref: "#/components/parameters/StackName" }
+        - name: updateLock
+          in: query
+          description: "true: plan as apply --update-lock would, with newer image digests and the template source's current commit. Asks the registries."
+          schema: { type: boolean }
       responses:
         "200":
           description: The plan
@@ -120,6 +124,7 @@ paths:
               properties:
                 plan: { type: string, description: The plan's id }
                 confirmDestructive: { type: boolean }
+                updateLock: { type: boolean, description: "Apply a plan made with ?updateLock=true" }
       responses:
         "202":
           description: The job that applies it

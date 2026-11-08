@@ -4,6 +4,8 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,5 +91,36 @@ func TestUpdatesEndpoint(t *testing.T) {
 	}
 	if rec := get(db, "/api/v1/stacks/web/updates"); rec.Code != http.StatusNotFound {
 		t.Errorf("a token for db must not see web: %d", rec.Code)
+	}
+}
+
+func TestUpdateLockReachesPlanAndApply(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	tok, _, _ := store.Create("ci", auth.ScopeApply, nil, time.Hour)
+	var planned, applied []bool
+	h := Handler(Options{Tokens: store,
+		Plan: func(_ context.Context, _ string, updateLock bool) (any, error) {
+			planned = append(planned, updateLock)
+			return map[string]string{"id": "p1"}, nil
+		},
+		StartApply: func(_ context.Context, _, _ string, _, updateLock bool, _ string) (func(io.Writer) error, error) {
+			applied = append(applied, updateLock)
+			return func(io.Writer) error { return nil }, nil
+		}})
+	do := func(method, path, body string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+tok)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	do(http.MethodGet, "/api/v1/stacks/web/plan", "")
+	do(http.MethodGet, "/api/v1/stacks/web/plan?updateLock=true", "")
+	do(http.MethodPost, "/api/v1/stacks/web/apply", `{"plan":"p1"}`)
+	if code := do(http.MethodPost, "/api/v1/stacks/web/apply", `{"plan":"p1","updateLock":true}`); code != http.StatusAccepted {
+		t.Fatalf("apply: %d", code)
+	}
+	if fmt.Sprint(planned) != "[false true]" || fmt.Sprint(applied) != "[false true]" {
+		t.Errorf("plan %v, apply %v", planned, applied)
 	}
 }
