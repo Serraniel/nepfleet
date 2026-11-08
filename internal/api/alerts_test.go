@@ -146,3 +146,25 @@ func TestMaintenanceEndpoint(t *testing.T) {
 		t.Errorf("a token limited to stacks: %d", rec.Code)
 	}
 }
+
+func TestEgressEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	all, _, _ := store.Create("all", auth.ScopeRead, nil, time.Hour)
+	db, _, _ := store.Create("db", auth.ScopeRead, []string{"db"}, time.Hour)
+	h := Handler(Options{Tokens: store, Egress: func(context.Context, string) (*StackEgress, error) {
+		return &StackEgress{Mode: "enforce", Sidecars: 1, Hosts: []string{"api.example.org"}, Addresses: []string{}, LookedUp: []string{}}, nil
+	}})
+	get := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/stacks/web/egress", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get(all); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"hosts":["api.example.org"]`) || !strings.Contains(rec.Body.String(), `"mode":"enforce"`) {
+		t.Errorf("%d %s", rec.Code, rec.Body)
+	}
+	if rec := get(db); rec.Code != http.StatusNotFound {
+		t.Errorf("a token for db must not see web: %d", rec.Code)
+	}
+}

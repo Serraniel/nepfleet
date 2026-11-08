@@ -185,6 +185,26 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: Another operation runs; try again }
+  /api/v1/stacks/{name}/egress:
+    get:
+      tags: [stacks]
+      operationId: stackEgress
+      summary: What the stack's egress sidecars recorded or refused
+      description: >-
+        As `nepfleet egress suggest`: in mode log, where the stack went; in mode
+        enforce, what was refused. Both less what's already allowed. Reads the
+        sidecars on the server's host.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: The report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StackEgress" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Another operation runs; try again }
   /api/v1/maintenance:
     get:
       tags: [server]
@@ -686,6 +706,15 @@ components:
         error: { type: string }
         log: { type: string }
         by: { type: string }
+    StackEgress:
+      type: object
+      required: [mode, sidecars, hosts, addresses, lookedUp]
+      properties:
+        mode: { type: string, enum: ["off", "log", "enforce"] }
+        sidecars: { type: integer, description: "The stack's egress sidecars on this host; 0 means nothing is recorded" }
+        hosts: { type: array, items: { type: string }, description: Names looked up and then connected to (or refused) }
+        addresses: { type: array, items: { type: string }, description: Addresses with no name seen }
+        lookedUp: { type: array, items: { type: string }, description: Names looked up but never connected to }
     KumaMaintenance:
       type: object
       required: [kuma, windows]
