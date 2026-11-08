@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/egress"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/render"
@@ -118,4 +119,33 @@ func cmdEgress(args []string, stdout, stderr io.Writer) error {
 	}
 	printSuggestion(stdout, s.Metadata.Name, egress.Parse(logs).Without(known), mode == fleet.EgressEnforce)
 	return nil
+}
+
+// egressCheck is doctor's line on which stacks have outbound traffic limited or
+// recorded; false when none do.
+func egressCheck(f *fleet.Fleet, stacks []*fleet.Stack) (doctor.Check, bool) {
+	var enforce, logged []string
+	for _, s := range stacks {
+		switch mode, _ := fleet.EffectiveEgress(f, s); mode {
+		case fleet.EgressEnforce:
+			enforce = append(enforce, s.Metadata.Name)
+		case fleet.EgressLog:
+			logged = append(logged, s.Metadata.Name)
+		}
+	}
+	if len(enforce)+len(logged) == 0 {
+		return doctor.Check{}, false
+	}
+	var parts []string
+	if len(enforce) > 0 {
+		parts = append(parts, "enforced: "+strings.Join(enforce, ", "))
+	}
+	if len(logged) > 0 {
+		parts = append(parts, "recorded: "+strings.Join(logged, ", "))
+	}
+	c := doctor.Check{Name: "Egress", Status: doctor.OK, Detail: strings.Join(parts, "; ")}
+	if len(logged) > 0 {
+		c.Fix = "nepfleet egress suggest <stack> turns what was recorded into an allow list, for mode enforce"
+	}
+	return c, true
 }

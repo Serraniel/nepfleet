@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Serraniel/nepfleet/internal/egress"
+	"github.com/Serraniel/nepfleet/internal/fleet"
 )
 
 func TestPrintSuggestion(t *testing.T) {
@@ -28,5 +29,24 @@ func TestPrintSuggestion(t *testing.T) {
 	printSuggestion(&b, "web", egress.Report{}, true)
 	if !strings.Contains(b.String(), "nothing of web's was refused") {
 		t.Errorf("nothing refused: %s", b.String())
+	}
+}
+
+func TestEgressCheck(t *testing.T) {
+	stack := func(name, mode string) *fleet.Stack {
+		s := &fleet.Stack{}
+		s.Metadata.Name = name
+		if mode != "" {
+			s.Spec.Egress = &fleet.Egress{Mode: mode}
+		}
+		return s
+	}
+	f := &fleet.Fleet{}
+	if _, ok := egressCheck(f, []*fleet.Stack{stack("a", "")}); ok {
+		t.Error("nothing to say when every stack is off")
+	}
+	c, ok := egressCheck(f, []*fleet.Stack{stack("web", "enforce"), stack("db", "log"), stack("x", "")})
+	if !ok || c.Detail != "enforced: web; recorded: db" || !strings.Contains(c.Fix, "egress suggest") {
+		t.Errorf("%+v", c)
 	}
 }

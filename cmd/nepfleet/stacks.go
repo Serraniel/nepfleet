@@ -1608,6 +1608,9 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		portChecks = append(portChecks, doctor.Check{Name: "Ports", Status: doctor.OK, Detail: "no stacks on this host fight over a port"})
 	}
 	checks = append(checks, portChecks...)
+	if c, ok := egressCheck(e.fleet, stacks); ok {
+		checks = append(checks, c)
+	}
 	// Hardware and shared folders that the stacks' inputs use must be there:
 	// a stick that is unplugged, a GPU this host lacks, an unmounted share.
 	hw := doctor.HostHardware("/")
