@@ -3,7 +3,9 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -166,5 +168,83 @@ func TestEgressEndpoint(t *testing.T) {
 	}
 	if rec := get(db); rec.Code != http.StatusNotFound {
 		t.Errorf("a token for db must not see web: %d", rec.Code)
+	}
+}
+
+func TestEditEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	tok := map[string]string{}
+	for _, s := range []string{auth.ScopeRead, auth.ScopeApply, auth.ScopeEdit} {
+		secret, _, _ := store.Create(s, s, nil, time.Hour)
+		tok[s] = secret
+	}
+	webOnly, _, _ := store.Create("web-only", auth.ScopeEdit, []string{"web"}, time.Hour)
+	next := error(nil)
+	var got StackEdit
+	h := Handler(Options{Tokens: store,
+		StackFiles: func(context.Context, string) ([]StackFile, error) {
+			return []StackFile{{Path: "stack.yaml", Content: "x", Revision: "r1"}}, nil
+		},
+		EditStack: func(_ context.Context, _ string, e StackEdit, _ string, _ []string) (EditResult, error) {
+			got = e
+			return EditResult{Commit: "c1"}, next
+		}})
+	do := func(method, token, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(http.MethodGet, tok[auth.ScopeRead], "/api/v1/stacks/web/files", ""); rec.Code != http.StatusForbidden {
+		t.Errorf("a read token reads files: %d", rec.Code)
+	}
+	if rec := do(http.MethodGet, tok[auth.ScopeEdit], "/api/v1/stacks/web/files", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"revision":"r1"`) {
+		t.Errorf("read files: %d %s", rec.Code, rec.Body)
+	}
+	edit := `{"files":{"compose.yaml":"services: {}\n"},"base":{"compose.yaml":"r0"},"message":"bump"}`
+	for scope, want := range map[string]int{auth.ScopeRead: 403, auth.ScopeApply: 403, auth.ScopeEdit: 200} {
+		if rec := do(http.MethodPut, tok[scope], "/api/v1/stacks/web/files", edit); rec.Code != want {
+			t.Errorf("%s token: %d, want %d", scope, rec.Code, want)
+		}
+	}
+	if got.Message != "bump" || got.Base["compose.yaml"] != "r0" {
+		t.Errorf("edit: %+v", got)
+	}
+	if rec := do(http.MethodPut, webOnly, "/api/v1/stacks/db/files", edit); rec.Code != http.StatusNotFound {
+		t.Errorf("a token for web edits db: %d", rec.Code)
+	}
+	for err, want := range map[error]int{ErrStale: 409, ErrBadPath: 400, InvalidError{Reason: "bad"}: 422, ErrBusy: 409} {
+		next = err
+		if rec := do(http.MethodPut, tok[auth.ScopeEdit], "/api/v1/stacks/web/files", edit); rec.Code != want {
+			t.Errorf("%v: %d, want %d", err, rec.Code, want)
+		}
+	}
+	next = nil
+	for _, body := range []string{`{}`, `{"files":{}}`, `{"files":{"a":"b"},"x":1}`, `nope`} {
+		if rec := do(http.MethodPut, tok[auth.ScopeEdit], "/api/v1/stacks/web/files", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", body, rec.Code)
+		}
+	}
+}
+
+func TestEditCapsFiles(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	secret, _, _ := store.Create("e", auth.ScopeEdit, nil, time.Hour)
+	h := Handler(Options{Tokens: store, EditStack: func(context.Context, string, StackEdit, string, []string) (EditResult, error) {
+		t.Error("too many files reached the server")
+		return EditResult{}, nil
+	}})
+	files := map[string]string{}
+	for i := range maxEditFiles + 1 {
+		files[fmt.Sprintf("files/%d", i)] = "x"
+	}
+	body, _ := json.Marshal(StackEdit{Files: files})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/stacks/web/files", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+secret)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("%d files: %d", len(files), rec.Code)
 	}
 }

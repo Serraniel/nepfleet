@@ -205,6 +205,54 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: Another operation runs; try again }
+  /api/v1/stacks/{name}/files:
+    get:
+      tags: [stacks]
+      operationId: stackFiles
+      summary: The stack's editable files (edit scope)
+      description: >-
+        stack.yaml, a plain stack's compose.yaml, and files/**, with each one's git
+        blob hash as its revision. Encrypted values and lock.yaml are never listed.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: The files
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StackFile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [stacks]
+      operationId: editStack
+      summary: Change stack files, in one commit
+      description: >-
+        Needs the edit scope; a person also needs a sign-in or passkey
+        verification within 5 minutes. Writes only the given files, checks that the
+        stack still loads and renders, and commits as the person or token. It
+        doesn't apply: plan and apply afterwards.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StackEdit" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditResult" }
+        "400": { description: "A path that isn't one of the stack's editable files, or no files" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, or `{\"verify\": true}`: a person must verify first" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "A file changed since it was read, or another operation runs" }
+        "422": { description: The stack would no longer load or render; nothing was saved }
   /api/v1/maintenance:
     get:
       tags: [server]
@@ -715,6 +763,24 @@ components:
         hosts: { type: array, items: { type: string }, description: Names looked up and then connected to (or refused) }
         addresses: { type: array, items: { type: string }, description: Addresses with no name seen }
         lookedUp: { type: array, items: { type: string }, description: Names looked up but never connected to }
+    StackFile:
+      type: object
+      required: [path, content, revision]
+      properties:
+        path: { type: string, description: In the stack's directory }
+        content: { type: string }
+        revision: { type: string, description: "The file's git blob hash, sent back as its base" }
+    StackEdit:
+      type: object
+      properties:
+        files: { type: object, additionalProperties: { type: string }, description: Path to new content }
+        base: { type: object, additionalProperties: { type: string }, description: "Path to the revision read; empty for a new file" }
+        message: { type: string, description: "The commit's subject" }
+    EditResult:
+      type: object
+      required: [commit]
+      properties:
+        commit: { type: string }
     KumaMaintenance:
       type: object
       required: [kuma, windows]

@@ -29,6 +29,7 @@ import (
 const (
 	ScopeRead  = "read"  // read stacks, plans and history
 	ScopeApply = "apply" // also apply and roll back
+	ScopeEdit  = "edit"  // also change stack files, committed: what runs, not only re-apply it
 	ScopeAdmin = "admin" // also manage tokens and settings
 )
 
@@ -37,7 +38,7 @@ const (
 // only it and admin may send alerts.
 const ScopeNotify = "notify"
 
-var scopeRank = map[string]int{ScopeNotify: -1, ScopeRead: 0, ScopeApply: 1, ScopeAdmin: 2}
+var scopeRank = map[string]int{ScopeNotify: -1, ScopeRead: 0, ScopeApply: 1, ScopeEdit: 2, ScopeAdmin: 3}
 
 // ValidScope reports a known scope.
 func ValidScope(s string) bool { _, ok := scopeRank[s]; return ok }
@@ -87,7 +88,7 @@ func (s *Store) now() time.Time {
 // Create makes a token and returns its secret, shown once.
 func (s *Store) Create(name, scope string, stacks []string, ttl time.Duration) (secret string, t Token, err error) {
 	if !ValidScope(scope) {
-		return "", t, fmt.Errorf("scope is %s, %s, %s or %s", ScopeRead, ScopeApply, ScopeAdmin, ScopeNotify)
+		return "", t, fmt.Errorf("scope is %s, %s, %s, %s or %s", ScopeRead, ScopeApply, ScopeEdit, ScopeAdmin, ScopeNotify)
 	}
 	if scope == ScopeNotify && len(stacks) > 0 {
 		return "", t, errors.New("a notify token cannot be limited to stacks: it reads none")

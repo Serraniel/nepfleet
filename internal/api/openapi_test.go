@@ -104,6 +104,9 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"ImageUpdate":       reflect.TypeFor[ImageUpdate](),
 		"KumaMaintenance":   reflect.TypeFor[KumaMaintenance](),
 		"MaintenanceWindow": reflect.TypeFor[MaintenanceWindow](),
+		"StackEgress":       reflect.TypeFor[StackEgress](),
+		"StackFile":         reflect.TypeFor[StackFile](),
+		"EditResult":        reflect.TypeFor[EditResult](),
 	} {
 		s, ok := schemas[name]
 		if !ok {
