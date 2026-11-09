@@ -56,6 +56,8 @@ type Server struct {
 	Probe   ProbeFunc
 	// Connector, if set, lets the daemon keep tunnels to remotes.
 	Connector Connector
+	// Setup prepares remotes and installs NepFleet on them, for clients.
+	Setup Setup
 	// RetryAfter and PollEvery tune the tunnels; tests shorten them.
 	RetryAfter, PollEvery time.Duration
 
@@ -133,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/remotes/{name}/refresh", s.refresh)
 	mux.HandleFunc("POST /v1/remotes/{name}/connect", s.connect)
 	mux.HandleFunc("POST /v1/remotes/{name}/disconnect", s.disconnect)
+	s.setupRoutes(mux)
 	mux.HandleFunc("/v1/remotes/{name}/api/{rest...}", s.apiProxy)
 	mux.HandleFunc("DELETE /v1/remotes/{name}", func(w http.ResponseWriter, r *http.Request) {
 		s.stopTunnel(r.PathValue("name"))

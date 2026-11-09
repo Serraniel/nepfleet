@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Serraniel/nepfleet"
 	"github.com/Serraniel/nepfleet/internal/control"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
@@ -77,6 +78,13 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		defer cancel()
 		return remote.Probe(ctx, remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}.Run, t)
 	}}
+	// Setting remotes up from clients: what host bootstrap and host install do.
+	compose, err := remote.PinCompose(nepfleet.Compose, version)
+	if err != nil {
+		return err
+	}
+	ssh := remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}
+	s.Setup.Run, s.Setup.Compose, s.Setup.Ingress = ssh.Run, compose, "nepfleet_ingress"
 	if err := s.Load(); err != nil {
 		return err
 	}
