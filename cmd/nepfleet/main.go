@@ -36,6 +36,7 @@ import (
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/auth"
 	"github.com/Serraniel/nepfleet/internal/deploy"
+	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
@@ -465,6 +466,12 @@ func serve(args []string, stderr io.Writer) error {
 		errc <- srv.ListenAndServe()
 	}()
 	fmt.Fprintf(stderr, "nepfleet API listening on %s\n", *addr)
+	// After a reboot, emulators are gone until the binfmt stack runs again.
+	go func() {
+		if e, err := c.open(); err == nil {
+			reregisterBinfmt(ctx, e.fleet, *host, doctor.Host(), startProject, stderr)
+		}
+	}()
 
 	var serveErr error
 	select {

@@ -201,3 +201,7 @@ func list(ps []platform) string {
 	}
 	return strings.Join(s, ", ")
 }
+
+// Emulates reports whether binfmt_misc has an enabled emulator for arch (a
+// Docker architecture such as arm64). Registrations don't survive a reboot.
+func Emulates(e Env, arch string) bool { return e.emulates(arch) }
