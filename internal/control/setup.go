@@ -214,7 +214,7 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 	s.Setup.mu.Unlock()
 	go func() {
 		// Not the request's context: closing the window doesn't stop a setup halfway.
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
 		defer cancel()
 		run := func(ctx context.Context, script string) ([]byte, error) { return s.Setup.Run(ctx, t, script) }
 		err := remote.RunBootstrap(ctx, run, rep, p.Steps, j)
