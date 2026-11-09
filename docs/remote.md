@@ -95,6 +95,11 @@ nepfleet control status
 - **Access:** a Unix socket that only you can open, in a private directory (`~/.local/state/nepfleet/control`). It refuses a directory that others can enter.
 - **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
 - **To start it at login:** run `nepfleet control` from a systemd user unit.
+- **Setting a remote up from the app:** the daemon offers what `host bootstrap` and `host install` do, for clients such as the app's wizard:
+  - `GET /v1/remotes/<name>/setup?kind=bootstrap|install` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run.
+  - `POST /v1/remotes/<name>/setup` with `{"kind", "plan": "<id>"}` starts it only if the plan is still the one reviewed. Otherwise it answers `409`.
+  - `GET /v1/remotes/<name>/setup/job` follows it: state and log.
+  - A setup goes on when the window closes, and one runs per remote at a time.
 
 ## Connecting
 
