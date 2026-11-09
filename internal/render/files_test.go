@@ -20,7 +20,7 @@ func TestStackFiles(t *testing.T) {
 	write(t, filepath.Join(tdir, "other.yaml"), "kept: true\n")
 	tpl := &template.Template{Dir: tdir, Spec: template.Spec{Compose: "compose.yaml",
 		Inputs: []template.Input{{Name: "TITLE", Type: "string"}, {Name: "API_KEY", Type: "secret"}},
-		Files:  []template.File{{Src: "default.yaml", Dest: "config/settings.yaml"}, {Src: "other.yaml", Dest: "config/other.yaml"}}}}
+		Files:  []template.File{{Src: "default.yaml", Dest: "config/settings.yaml", Keep: true}, {Src: "other.yaml", Dest: "config/other.yaml", Keep: true}}}}
 	write(t, filepath.Join(sdir, "files", "config", "settings.yaml"), "title: ${TITLE}\nkey: ${API_KEY}\nliteral: $${HOME}\n")
 	s := &fleet.Stack{Dir: sdir}
 	s.Metadata.Name = "app"
@@ -34,6 +34,9 @@ func TestStackFiles(t *testing.T) {
 	}
 	if string(out.Files["config/other.yaml"]) != "kept: true\n" {
 		t.Errorf("other template files stay: %q", out.Files["config/other.yaml"])
+	}
+	if out.Keep["config/settings.yaml"] || !out.Keep["config/other.yaml"] {
+		t.Errorf("a file the repository holds is no longer the app's to keep: %v", out.Keep)
 	}
 	if m := string(out.Masked("config/settings.yaml")); strings.Contains(m, "test-api-key") {
 		t.Errorf("secrets must be masked in shown files: %q", m)

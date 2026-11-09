@@ -108,6 +108,9 @@ func readManifest(dir string) (*Manifest, error) {
 // skips that comparison.
 func PlanStack(name, mode, dir string, out *render.Output, pins map[string]string) (*Plan, error) {
 	p := &Plan{Stack: name, Dir: dir, Mode: mode}
+	if err := keepExisting(dir, out); err != nil {
+		return nil, err
+	}
 	for k := range out.Generated {
 		p.Generated = append(p.Generated, k)
 	}
@@ -214,4 +217,23 @@ func destructive(oldCompose, newCompose []byte) []string {
 		}
 	}
 	return out
+}
+
+// keepExisting gives files the app owns (render.Output.Keep) the content they
+// have in the working directory, so a plan shows no change for them and apply
+// writes them back as they are. Only a missing file gets the template's.
+func keepExisting(dir string, out *render.Output) error {
+	for path := range out.Keep {
+		if !filepath.IsLocal(path) {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, path)) //nolint:gosec // a local path in the stack's working directory
+		switch {
+		case err == nil:
+			out.Files[path] = raw
+		case !errors.Is(err, os.ErrNotExist):
+			return err
+		}
+	}
+	return nil
 }

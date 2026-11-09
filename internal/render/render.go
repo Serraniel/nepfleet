@@ -57,6 +57,9 @@ type Output struct {
 	// Generated holds values created by this render; persist them to the
 	// secrets file before deploying, or they change on every render.
 	Generated map[string]string
+	// Keep are files written only when missing from the working directory:
+	// the app owns them once it runs (see template.File.Keep).
+	Keep map[string]bool
 	// Secret names, for masking in plans and logs.
 	Secret map[string]bool
 	// secretValues are the values of Secret, for MaskSecrets.
@@ -71,7 +74,7 @@ const (
 
 // Render produces the stack's files. It never writes to disk.
 func Render(in Input) (*Output, error) {
-	out := &Output{Files: map[string][]byte{}, Generated: map[string]string{}, Secret: map[string]bool{}}
+	out := &Output{Files: map[string][]byte{}, Generated: map[string]string{}, Secret: map[string]bool{}, Keep: map[string]bool{}}
 	env := map[string]string{
 		"NEPFLEET_STACK":           in.Stack.Metadata.Name,
 		"NEPFLEET_INGRESS_NETWORK": in.Fleet.Spec.IngressNetwork,
@@ -119,6 +122,9 @@ func Render(in Input) (*Output, error) {
 				return nil, err
 			}
 			out.Files[f.Dest] = substitute(raw, env)
+			if f.Keep {
+				out.Keep[f.Dest] = true
+			}
 		}
 	}
 	if _, ok := out.Files[ComposeFile]; ok {

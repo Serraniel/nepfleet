@@ -174,6 +174,10 @@ type Generate struct {
 type File struct {
 	Src  string `yaml:"src" schema:"required"`
 	Dest string `yaml:"dest" schema:"required"`
+	// Keep: the app edits this file once it runs (settings saved from its UI),
+	// so it is written when missing and otherwise left as the app has it. A
+	// copy in the stack's files/ still wins: what the repository holds applies.
+	Keep bool `yaml:"keep"`
 }
 
 // Volume is persistent data the stack owns.
