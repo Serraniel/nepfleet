@@ -15,7 +15,7 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `GET /healthz` | none | `204` |
 | `GET /api/v1/info` | none | name, version, API version |
 | `GET /api/v1/openapi.yaml` | none | the OpenAPI document |
-| `GET /api/v1/stacks` | read | the stacks the token covers |
+| `GET /api/v1/stacks` | read | the stacks the token covers, each with `state` (`running`, `unhealthy`, `partial` or `stopped`) when it runs on this host in compose mode |
 | `GET /api/v1/templates` | read | per template source of the fleet: its commit and its catalogue (the `index.json` format); templates that don't validate are listed as `invalid` and not offered |
 | `GET /api/v1/stacks/{name}/plan` | read | what `apply` would change (the `nepfleet plan --json` format) and its `id`; secrets are masked; `?updateLock=true` plans taking updates |
 | `GET /api/v1/stacks/{name}/updates` | read | what the registries have for the stack's images, as `nepfleet updates --json`: newer tags in and beyond each track, and tags rebuilt since `lock.yaml` pinned them; it asks the registries, so it takes a while |

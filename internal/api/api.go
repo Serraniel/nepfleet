@@ -45,6 +45,9 @@ type StackInfo struct {
 	Links []StackLink `json:"links,omitempty"`
 	// Uses are the values it takes from other stacks: names only, never values.
 	Uses []StackRef `json:"uses,omitempty"`
+	// State is running, unhealthy, partial or stopped, from this host's containers;
+	// empty for stacks on other hosts, swarm stacks, and ones not applied.
+	State string `json:"state,omitempty"`
 }
 
 // StackRef is one value a stack takes from another, as {from, value|secret}.

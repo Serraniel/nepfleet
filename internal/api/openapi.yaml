@@ -673,6 +673,10 @@ components:
             properties:
               name: { type: string }
               url: { type: string }
+        state:
+          type: string
+          enum: [running, unhealthy, partial, stopped]
+          description: "From this host's containers; one-shot containers that finished fine count as running. Absent for stacks on other hosts, swarm stacks, and ones not applied."
         uses:
           type: array
           description: "Values it takes from other stacks: names only, never values. Stacks this token doesn't cover are left out."
