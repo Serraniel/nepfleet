@@ -74,6 +74,7 @@ Files under `stacks/<name>/files/` are versioned with the stack and rendered int
 
 - **Variables:** `${VAR}` is replaced as in template files, including secrets. Write `$${VAR}` for a literal `${VAR}`.
 - **Overriding a template:** a file with the same destination as a template's file replaces it; the template's other files stay. So the template ships defaults, and the repository owns what it overrides.
+- **Files the app edits:** a template file marked `keep: true` (settings an app saves from its UI) is written when it's missing, and otherwise left as the app has it: plans show no change for it, and apply writes it back unchanged. Delete it from the working directory to get the template's version again. A copy in `files/` still overrides it, as the repository then owns it.
 - **Changes:** plans show these files like compose changes, with secret values masked. `history` and `rollback` cover them, as they are part of the stack's directory, and deleted files are removed on apply.
 - **Restarts:** files change in place, so an app that only reads its config at start needs a restart to see it.
 - **Secrets on the host:** files stay readable for the container's user, and the stack's working directory is `0700` to keep other users of the host out.

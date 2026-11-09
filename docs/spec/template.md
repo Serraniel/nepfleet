@@ -74,6 +74,9 @@ spec:
       kind: secret
       length: 48
       encoding: base64url      # base64url | hex | alnum
+  files:                       # rendered into the working directory, mounted as ./config/…
+    - { src: files/config.yaml, dest: config/config.yaml }
+    - { src: files/settings.yaml, dest: config/settings.yaml, keep: true }   # the app edits it: written only when missing
   volumes:
     - name: data
       backup: true

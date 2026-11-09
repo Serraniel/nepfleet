@@ -65,6 +65,7 @@ func stackFiles(dir string, env map[string]string, out *Output) error {
 			return err
 		}
 		out.Files[rel] = substitute(raw, env)
+		delete(out.Keep, rel) // the repository's copy applies
 		return nil
 	})
 }

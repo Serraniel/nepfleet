@@ -350,3 +350,49 @@ func TestSecretMarks(t *testing.T) {
 		t.Error("a mark must not be a plain hash prefix of the secret")
 	}
 }
+
+// A file the app owns is written once, then left as the app has it: the plan
+// shows no change, and apply writes it back unchanged.
+func TestKeptFiles(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	out := func() *render.Output {
+		o := output("services:\n  web: {image: 'nginx:1'}\n", "X='1'\n")
+		o.Files["config/settings.yaml"] = []byte("theme: light\n")
+		o.Keep = map[string]bool{"config/settings.yaml": true}
+		return o
+	}
+	v1 := out()
+	p, err := PlanStack("app", "compose", dir, v1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(ctx, &fakeRunner{}, p, v1, Options{Commit: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(dir, "config", "settings.yaml")
+	if raw, _ := os.ReadFile(settings); string(raw) != "theme: light\n" {
+		t.Fatalf("first write: %q", raw)
+	}
+	// The app saves its settings.
+	if err := os.WriteFile(settings, []byte("theme: dark\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v2 := out()
+	if p, err = PlanStack("app", "compose", dir, v2, nil); err != nil || !p.Empty() {
+		t.Fatalf("a kept file must not show as a change: %+v, %v", p.Changes, err)
+	}
+	if _, err := Apply(ctx, &fakeRunner{}, p, v2, Options{Commit: "c2"}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(settings); string(raw) != "theme: dark\n" {
+		t.Errorf("the app's edit was overwritten: %q", raw)
+	}
+	// Removed (to reset it): the template's version comes back.
+	if err := os.Remove(settings); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ = PlanStack("app", "compose", dir, out(), nil); p.Empty() {
+		t.Error("a missing kept file must be written again")
+	}
+}

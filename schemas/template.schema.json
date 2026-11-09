@@ -156,6 +156,10 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "keep": {
+                "description": "Keep: the app edits this file once it runs (settings saved from its UI), so it is written when missing and otherwise left as the app has it. A copy in the stack's files/ still wins: what the repository holds applies.",
+                "type": "boolean"
+              },
               "src": {
                 "minLength": 1,
                 "type": "string"
