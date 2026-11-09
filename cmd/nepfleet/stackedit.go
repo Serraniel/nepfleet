@@ -259,7 +259,8 @@ func editStack(c common, stack string, e api.StackEdit, by string, allowed []str
 			}
 		}
 		if err != nil {
-			log.Printf("api: an edit of %s was refused: %v", stack, err)
+			// Not the error itself: a render error may quote a value, even a secret.
+			log.Printf("api: an edit of %s was refused: the stack would no longer load or render", stack)
 			return fail(api.InvalidError{Reason: cleanReason(err, s.Dir, env.fleet.Dir)})
 		}
 		paths := make([]string, 0, len(changes))
