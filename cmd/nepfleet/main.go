@@ -393,6 +393,16 @@ func serve(args []string, stderr io.Writer) error {
 		},
 		Alert:       func(_ context.Context, a api.Alert) error { return sendAlert(c, stderr, a) },
 		Maintenance: func(ctx context.Context) ([]api.KumaMaintenance, error) { return fleetMaintenance(ctx, c) },
+		StackFiles: func(_ context.Context, stack string) ([]api.StackFile, error) {
+			out, err := withStack(c, stack, func(_ *env, s *fleet.Stack) (any, error) { return stackFiles(s) })
+			if err != nil {
+				return nil, err
+			}
+			return out.([]api.StackFile), nil
+		},
+		EditStack: func(_ context.Context, stack string, e api.StackEdit, by string, stacks []string) (api.EditResult, error) {
+			return editStack(c, stack, e, by, stacks)
+		},
 		Egress: func(ctx context.Context, stack string) (*api.StackEgress, error) {
 			if !apiMu.TryLock() {
 				return nil, api.ErrBusy

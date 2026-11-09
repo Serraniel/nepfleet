@@ -522,3 +522,27 @@ func TestAddingPasskeyNeedsRecentVerification(t *testing.T) {
 		t.Errorf("a proof counts for a while, not forever: %d", rec.Code)
 	}
 }
+
+// Changing what runs needs a recent proof too, as adding a passkey does.
+func TestEditingNeedsRecentVerification(t *testing.T) {
+	l := newLoginHarness(t)
+	now := time.Now()
+	l.a.Sessions.Now = func() time.Time { return now }
+	saved := 0
+	l.h = Handler(Options{Accounts: l.a, AllowedOrigins: []string{testOrigin}, Tokens: &auth.Store{Dir: t.TempDir()},
+		Stacks: func() ([]StackInfo, error) { return []StackInfo{{Name: "web"}}, nil },
+		EditStack: func(context.Context, string, StackEdit, string, []string) (EditResult, error) {
+			saved++
+			return EditResult{Commit: "c1"}, nil
+		}})
+	session := l.setup()
+	edit := `{"files":{"compose.yaml":"services: {}\n"},"base":{}}`
+	if rec := l.do(http.MethodPut, "/api/v1/stacks/web/files", edit, session, testOrigin); rec.Code != http.StatusOK {
+		t.Fatalf("a fresh sign-in: %d %s", rec.Code, rec.Body)
+	}
+	now = now.Add(auth.ReverifyWindow + time.Minute)
+	rec := l.do(http.MethodPut, "/api/v1/stacks/web/files", edit, session, testOrigin)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) || saved != 1 {
+		t.Errorf("an old sign-in must verify first: %d %s (saved %d)", rec.Code, rec.Body, saved)
+	}
+}

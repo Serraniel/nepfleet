@@ -118,6 +118,12 @@ type Options struct {
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
 	// Egress is what a stack's egress sidecars recorded or refused.
 	Egress func(ctx context.Context, stack string) (*StackEgress, error)
+	// StackFiles lists a stack's editable files, without encrypted values (edit scope:
+	// files/ may hold plain configuration a read token shouldn't see).
+	StackFiles func(ctx context.Context, stack string) ([]StackFile, error)
+	// EditStack writes and commits a change to a stack's files, without
+	// applying it. Errors: ErrStale, ErrBadPath, InvalidError, ErrBusy.
+	EditStack func(ctx context.Context, stack string, e StackEdit, by string, stacks []string) (EditResult, error)
 	// Alert sends an alert from another tool to the fleet's notification
 	// channels, with their dedup and quiet hours.
 	Alert func(ctx context.Context, a Alert) error
@@ -276,6 +282,7 @@ func Handler(o Options) http.Handler {
 	registerAlerts(mux, o, l)
 	registerUpdates(mux, o, l)
 	registerMaintenance(mux, o, l)
+	registerEdit(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
