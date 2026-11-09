@@ -363,7 +363,11 @@ func serve(args []string, stderr io.Writer) error {
 		Tokens:         tokenStore(*stateDir),
 		TrustedProxies: trustedNets,
 		Accounts:       accounts,
-		Stacks:         func() ([]api.StackInfo, error) { return stackInfos(*fleetDir) },
+		Stacks: func() ([]api.StackInfo, error) {
+			// Without Docker, stacks are listed without a state.
+			cs, _ := composeContainers(context.Background())
+			return stackInfos(*fleetDir, *host, stackStates(cs))
+		},
 		Plan: func(ctx context.Context, stack string, updateLock bool) (any, error) {
 			if !apiMu.TryLock() {
 				return nil, api.ErrBusy
@@ -734,7 +738,7 @@ func serveTLS(cert, key, domain, stateDir string) (*tls.Config, error) {
 
 // stackInfos reads the fleet's stacks for the API, fresh on every request,
 // so edits and pulls show without a restart.
-func stackInfos(dir string) ([]api.StackInfo, error) {
+func stackInfos(dir, host string, states map[string]string) ([]api.StackInfo, error) {
 	f, err := fleet.Load(dir)
 	if err != nil {
 		return nil, err
@@ -752,6 +756,9 @@ func stackInfos(dir string) ([]api.StackInfo, error) {
 		si.URL = stackAddress(f, s)
 		si.Links = stackLinks(f, all, s)
 		si.Uses = stackUses(s)
+		if s.Spec.Mode != "swarm" && (s.Spec.Target == host || s.Spec.Target == "local") {
+			si.State = states[s.Metadata.Name]
+		}
 		out = append(out, si)
 	}
 	return out, nil
