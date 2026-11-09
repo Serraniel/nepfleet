@@ -38,9 +38,9 @@ type EditResult struct {
 }
 
 var (
-	// ErrStale: a file changed since the client read it.
+	// ErrStale means a file changed since the client read it.
 	ErrStale = errors.New("a file changed since you opened it; reload it and edit again")
-	// ErrBadPath: a path outside the stack, or one the editor may not touch.
+	// ErrBadPath means a path outside the stack, or one the editor may not touch.
 	ErrBadPath = errors.New("that path isn't one of the stack's editable files")
 )
 
