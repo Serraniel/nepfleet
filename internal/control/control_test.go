@@ -38,7 +38,6 @@ func TestRemotes(t *testing.T) {
 	}
 	for body, want := range map[string]int{
 		`{"address":"ssh://me@nas"}`:             http.StatusCreated,
-		`{"address":"ssh://me@203.0.113.10"}`:    http.StatusCreated, // named 203-0-113-10
 		`{"address":"-oProxyCommand=x"}`:         http.StatusBadRequest,
 		`{"address":"ssh://unreachable"}`:        http.StatusBadGateway,
 		`{"address":"ssh://b","name":"../evil"}`: http.StatusBadRequest,
@@ -50,6 +49,13 @@ func TestRemotes(t *testing.T) {
 	}
 	if rec := do(http.MethodPost, "/v1/remotes", `{"address":"ssh://nas"}`); rec.Code != http.StatusConflict {
 		t.Errorf("same name: %d", rec.Code)
+	}
+	// No name and an IP address: the name is derived from it.
+	if rec := do(http.MethodPost, "/v1/remotes", `{"address":"ssh://me@203.0.113.10"}`); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"name":"203-0-113-10"`) {
+		t.Errorf("an IP address without a name: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(http.MethodDelete, "/v1/remotes/203-0-113-10", ""); rec.Code >= 300 {
+		t.Errorf("removing it: %d %s", rec.Code, rec.Body)
 	}
 	// A failed check keeps the last report and says why.
 	down = true
