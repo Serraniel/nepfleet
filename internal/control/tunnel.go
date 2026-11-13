@@ -324,6 +324,11 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no such remote")
 		return
 	}
+	// Connecting talks to NepFleet there: until it runs, there is nothing to reach.
+	if rep := s.remotes[i].Report; rep != nil && !rep.NepFleetRunning && rep.Fleet == "" {
+		fail(w, http.StatusConflict, remote.ErrNoNepFleet.Error())
+		return
+	}
 	s.remotes[i].Connect = true
 	if err := s.save(); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
