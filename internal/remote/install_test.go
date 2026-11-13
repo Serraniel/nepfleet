@@ -46,7 +46,7 @@ func TestInstallPlan(t *testing.T) {
 		// Every script is valid shell, as the remote runs it.
 		if path, err := exec.LookPath("sh"); err == nil {
 			f := t.TempDir() + "/step.sh"
-			if err := os.WriteFile(f, []byte(stepScript(s, false)), 0o600); err != nil {
+			if err := os.WriteFile(f, []byte(stepScript(s, false, "")), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if out, err := exec.Command(path, "-n", f).CombinedOutput(); err != nil { //nolint:gosec,noctx // test

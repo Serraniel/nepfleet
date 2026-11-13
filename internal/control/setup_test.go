@@ -115,3 +115,63 @@ func TestSetup(t *testing.T) {
 		t.Errorf("a failed setup: %+v", j)
 	}
 }
+
+// A user whose sudo asks for a password: the plan says so, starting needs the
+// password, and it reaches the root steps but no log, job or error.
+func TestSetupSudoPassword(t *testing.T) {
+	const pw = "c0rrect-h0rse"
+	report := &remote.Report{Kernel: "Linux", Arch: "x86_64", OSID: "arch", User: "me", SudoPassword: true}
+	var mu sync.Mutex
+	var ran []string
+	s := &Server{Dir: t.TempDir(), Probe: func(_ context.Context, tg remote.Target) (*remote.Report, error) {
+		r := *report
+		r.Target = tg.String()
+		return &r, nil
+	}}
+	s.Setup.Run = func(_ context.Context, _ remote.Target, script string) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		ran = append(ran, script)
+		// A failing step whose output repeats the password must not leak it.
+		return nil, errors.New("sh: " + pw + ": not found")
+	}
+	s.Setup.Ingress = "nepfleet_ingress"
+	h := s.Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec
+	}
+	if rec := do(http.MethodPost, "/v1/remotes", `{"address":"ssh://me@vps","name":"vps"}`); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+	var p SetupPlan
+	if rec := do(http.MethodGet, "/v1/remotes/vps/setup?kind=bootstrap", ""); json.Unmarshal(rec.Body.Bytes(), &p) != nil || !p.SudoPassword || p.ID == "" || p.Error != "" {
+		t.Fatalf("plan: %s", rec.Body)
+	}
+	if rec := do(http.MethodPost, "/v1/remotes/vps/setup", `{"kind":"bootstrap","plan":"`+p.ID+`"}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("no password: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(http.MethodPost, "/v1/remotes/vps/setup", `{"kind":"bootstrap","plan":"`+p.ID+`","sudoPassword":"`+pw+`"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("start: %d %s", rec.Code, rec.Body)
+	}
+	var job SetupJob
+	for range 200 {
+		rec := do(http.MethodGet, "/v1/remotes/vps/setup/job", "")
+		if json.Unmarshal(rec.Body.Bytes(), &job) == nil && job.State != "running" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if job.State != "failed" || strings.Contains(job.Error+job.Log, pw) {
+		t.Errorf("job: %+v", job)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ran) == 0 || !strings.Contains(ran[0], "sudo -S") {
+		t.Errorf("the root step didn't get the password: %q", ran)
+	}
+	if rec := do(http.MethodGet, "/v1/remotes", ""); strings.Contains(rec.Body.String(), pw) {
+		t.Error("the password shows in the remotes")
+	}
+}

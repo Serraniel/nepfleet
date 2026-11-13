@@ -174,6 +174,9 @@ type Report struct {
 	User   string `json:"user"`
 	Root   bool   `json:"root"`
 	Sudo   bool   `json:"sudo"` // sudo without a password
+	// SudoPassword: sudo is there and asks for a password, which NepFleet
+	// asks the person for. Whether they may use sudo shows when they do.
+	SudoPassword bool `json:"sudoPassword,omitempty"`
 
 	Docker        bool   `json:"docker"`        // the docker command exists
 	DockerRunning bool   `json:"dockerRunning"` // and this user reaches the daemon
@@ -233,6 +236,8 @@ func parseReport(out []byte) *Report {
 			r.Root = yes
 		case "sudo":
 			r.Sudo = yes
+		case "sudo_password":
+			r.SudoPassword = yes
 		case "docker":
 			r.Docker = yes
 		case "docker_version":
@@ -296,7 +301,9 @@ if [ -r /etc/os-release ]; then
 fi
 kv user "$(id -un 2>/dev/null)"
 [ "$(id -u 2>/dev/null)" = 0 ] && kv root 1
-has sudo && sudo -n true >/dev/null 2>&1 && kv sudo 1
+if has sudo; then
+  if sudo -n true >/dev/null 2>&1; then kv sudo 1; else kv sudo_password 1; fi
+fi
 if has docker; then
   kv docker 1
   kv docker_version "$(docker version --format '{{.Server.Version}}' 2>/dev/null)"

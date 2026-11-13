@@ -79,8 +79,8 @@ func BootstrapPlan(r *Report, ingress string) ([]Step, error) {
 	// Root even with the group: a group just added only counts from the next login.
 	steps = append(steps, Step{Text: "create the ingress network " + ingress + ", if it is missing", Root: !r.DockerRunning || r.Root,
 		Script: "docker network inspect " + ingress + " >/dev/null 2>&1 || docker network create " + ingress + "\n"})
-	if slices.ContainsFunc(steps, func(s Step) bool { return s.Root }) && !r.Root && !r.Sudo {
-		return steps, errors.New("this needs root: log in as root, or as a user with sudo that needs no password, as NepFleet can't type one")
+	if slices.ContainsFunc(steps, func(s Step) bool { return s.Root }) && !r.Root && !r.Sudo && !r.SudoPassword {
+		return steps, errors.New("this needs root: log in as root, or as a user who may use sudo")
 	}
 	return steps, nil
 }
@@ -88,22 +88,69 @@ func BootstrapPlan(r *Report, ingress string) ([]Step, error) {
 // heredoc is the marker around a root script; scripts are fixed and never hold it.
 const heredoc = "NEPFLEET_BOOTSTRAP_EOF"
 
-// stepScript is what goes to the remote shell. errexit: a failed command stops
-// the step instead of carrying on.
-func stepScript(s Step, isRoot bool) string {
-	body := "set -e\n" + s.Script
-	if !s.Root || isRoot {
-		return body
-	}
-	return "sudo -n sh <<'" + heredoc + "'\n" + body + heredoc + "\n"
+// NeedsSudoPassword says whether running steps asks for the sudo password: a
+// root step, as a user whose sudo asks for one.
+func NeedsSudoPassword(r *Report, steps []Step) bool {
+	return !r.Root && !r.Sudo && r.SudoPassword && slices.ContainsFunc(steps, func(s Step) bool { return s.Root })
 }
 
-// RunBootstrap runs the steps in order and stops at the first failure.
-func RunBootstrap(ctx context.Context, run func(context.Context, string) ([]byte, error), r *Report, steps []Step, w io.Writer) error {
+var (
+	// ErrSudoPassword means sudo refused the password given.
+	ErrSudoPassword = errors.New("sudo refused the password: check it and try again")
+	// ErrNoSudo means the user may not use sudo on that machine.
+	ErrNoSudo = errors.New("this user may not use sudo there: log in as a user who may, or as root")
+	// ErrPasswordNeeded means a root step needs the sudo password, and none was given.
+	ErrPasswordNeeded = errors.New("sudo asks for a password there: give it to run the root steps")
+)
+
+// shQuote quotes s for a POSIX shell.
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// stepScript is what goes to the remote shell. errexit: a failed command stops
+// the step instead of carrying on. A sudo password goes to sudo on its stdin
+// through printf, a shell builtin, so it shows in no process list; the script
+// itself travels on SSH's stdin, never as an argument.
+func stepScript(s Step, isRoot bool, password string) string {
+	body := "set -e\n" + s.Script
+	switch {
+	case !s.Root || isRoot:
+		return body
+	case password == "":
+		return "sudo -n sh <<'" + heredoc + "'\n" + body + heredoc + "\n"
+	}
+	return "printf '%s\\n' " + shQuote(password) + " | sudo -S -p '' sh -c " + shQuote(body) + "\n"
+}
+
+// sudoError explains what sudo refused, and keeps the password out of the error.
+func sudoError(err error, password string) error {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "incorrect password"), strings.Contains(msg, "Sorry, try again"):
+		return ErrSudoPassword
+	case strings.Contains(msg, "not in the sudoers file"), strings.Contains(msg, "is not allowed to"):
+		return ErrNoSudo
+	case strings.Contains(msg, "a password is required"), strings.Contains(msg, "a terminal is required"):
+		return ErrPasswordNeeded
+	case password != "" && strings.Contains(msg, password):
+		return errors.New(strings.ReplaceAll(msg, password, "••••••"))
+	}
+	return err
+}
+
+// RunBootstrap runs the steps in order and stops at the first failure. password
+// is the sudo password for root steps, when sudo asks for one: it is used for
+// these steps only, and kept out of output and errors.
+func RunBootstrap(ctx context.Context, run func(context.Context, string) ([]byte, error), r *Report, steps []Step, w io.Writer, password string) error {
+	if strings.ContainsAny(password, "\n\x00") {
+		return errors.New("a sudo password can't contain a line break")
+	}
+	if password == "" && NeedsSudoPassword(r, steps) {
+		return ErrPasswordNeeded
+	}
 	for i, s := range steps {
 		fmt.Fprintf(w, "%d/%d %s\n", i+1, len(steps), s.Text)
-		if _, err := run(ctx, stepScript(s, r.Root)); err != nil {
-			return fmt.Errorf("step %d (%s) failed, and later steps did not run: %w", i+1, s.Text, err)
+		if _, err := run(ctx, stepScript(s, r.Root, password)); err != nil {
+			return fmt.Errorf("step %d (%s) failed, and later steps did not run: %w", i+1, s.Text, sudoError(err, password))
 		}
 	}
 	return nil

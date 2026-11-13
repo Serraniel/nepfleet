@@ -38,6 +38,7 @@ func cmdHost(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("host bootstrap", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	yes := fs.Bool("yes", false, "run the plan without asking")
+	sudoStdin := fs.Bool("sudo-password-stdin", false, "read the sudo password from the first line of stdin, for scripts")
 	name := fs.String("name", "", "the host's name in the fleet (default: from its address)")
 	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository to register the host in, and take the ingress network from")
 	config := fs.String("ssh-config", "", "ssh config file instead of ~/.ssh/config")
@@ -91,7 +92,11 @@ func cmdHost(args []string, stdout, stderr io.Writer) error {
 		return errors.New("nothing changed; run again with --yes to go ahead")
 	}
 	run := func(ctx context.Context, script string) ([]byte, error) { return ssh.Run(ctx, t, script) }
-	if err := remote.RunBootstrap(ctx, run, r, steps, stdout); err != nil {
+	pw, err := sudoPassword(r, steps, t, *sudoStdin, stdout)
+	if err != nil {
+		return err
+	}
+	if err := remote.RunBootstrap(ctx, run, r, steps, stdout, pw); err != nil {
 		return err
 	}
 	// What it says now counts, not what was planned.
@@ -130,6 +135,7 @@ func cmdHostApply(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("host apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	yes := fs.Bool("yes", false, "run the plan without asking")
+	sudoStdin := fs.Bool("sudo-password-stdin", false, "read the sudo password from the first line of stdin, for scripts")
 	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
 	config := fs.String("ssh-config", "", "ssh config file instead of ~/.ssh/config")
 	pos, err := parseInterspersed(fs, args)
@@ -191,8 +197,8 @@ func cmdHostApply(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if !r.Root && !r.Sudo && len(steps) > 0 {
-		return errors.New("this needs root: log in as root, or as a user with sudo that needs no password, as NepFleet can't type one")
+	if !r.Root && !r.Sudo && !r.SudoPassword && len(steps) > 0 {
+		return errors.New("this needs root: log in as root, or as a user who may use sudo")
 	}
 	if len(steps) == 0 {
 		fmt.Fprintf(stdout, "%s has no mounts to set up\n", h.Metadata.Name)
@@ -205,7 +211,11 @@ func cmdHostApply(args []string, stdout, stderr io.Writer) error {
 	if !*yes && !ask(stdout, "Run this plan? [y/N] ", "y") {
 		return errors.New("nothing changed; run again with --yes to go ahead")
 	}
-	if err := remote.RunBootstrap(ctx, run, r, steps, stdout); err != nil {
+	pw, err := sudoPassword(r, steps, t, *sudoStdin, stdout)
+	if err != nil {
+		return err
+	}
+	if err := remote.RunBootstrap(ctx, run, r, steps, stdout, pw); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "%s's mounts match hosts/%s.yaml; each mounts on first use\n", h.Metadata.Name, h.Metadata.Name)

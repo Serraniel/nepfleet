@@ -25,6 +25,7 @@ func cmdHostInstall(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("host install", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	yes := fs.Bool("yes", false, "run the plan without asking")
+	sudoStdin := fs.Bool("sudo-password-stdin", false, "read the sudo password from the first line of stdin, for scripts")
 	name := fs.String("name", "", "the host's name in its fleet (default: from its address)")
 	skipDir := fs.Bool("skip-dir", false, remote.InstallDir+" exists already, owned by the SSH user: no root needed")
 	config := fs.String("ssh-config", "", "ssh config file instead of ~/.ssh/config")
@@ -75,7 +76,11 @@ func cmdHostInstall(args []string, stdout, stderr io.Writer) error {
 		return errors.New("nothing changed; run again with --yes to go ahead")
 	}
 	run := func(ctx context.Context, script string) ([]byte, error) { return ssh.Run(ctx, t, script) }
-	if err := remote.RunBootstrap(ctx, run, r, steps, stdout); err != nil {
+	pw, err := sudoPassword(r, steps, t, *sudoStdin, stdout)
+	if err != nil {
+		return err
+	}
+	if err := remote.RunBootstrap(ctx, run, r, steps, stdout, pw); err != nil {
 		return err
 	}
 	after, err := remote.Probe(ctx, ssh.Run, t)

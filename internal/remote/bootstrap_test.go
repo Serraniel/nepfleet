@@ -73,13 +73,13 @@ func TestBootstrapPlan(t *testing.T) {
 
 func TestStepScript(t *testing.T) {
 	s := Step{Root: true, Script: "whoami\n"}
-	if got := stepScript(s, false); !strings.HasPrefix(got, "sudo -n sh <<'") || !strings.Contains(got, "set -e\nwhoami\n") {
+	if got := stepScript(s, false, ""); !strings.HasPrefix(got, "sudo -n sh <<'") || !strings.Contains(got, "set -e\nwhoami\n") {
 		t.Errorf("as a user: %q", got)
 	}
-	if got := stepScript(s, true); strings.Contains(got, "sudo") {
+	if got := stepScript(s, true, ""); strings.Contains(got, "sudo") {
 		t.Errorf("as root: %q", got)
 	}
-	if got := stepScript(Step{Script: "id\n"}, false); strings.Contains(got, "sudo") {
+	if got := stepScript(Step{Script: "id\n"}, false, ""); strings.Contains(got, "sudo") {
 		t.Errorf("no root needed: %q", got)
 	}
 }
@@ -94,7 +94,7 @@ func TestRunBootstrapStops(t *testing.T) {
 		return nil, nil
 	}
 	var b bytes.Buffer
-	err := RunBootstrap(context.Background(), run, &Report{}, []Step{{Text: "one"}, {Text: "two"}, {Text: "three"}}, &b)
+	err := RunBootstrap(context.Background(), run, &Report{}, []Step{{Text: "one"}, {Text: "two"}, {Text: "three"}}, &b, "")
 	if err == nil || ran != 2 || !strings.Contains(err.Error(), "step 2 (two)") {
 		t.Errorf("%v, ran %d", err, ran)
 	}
