@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.0](https://github.com/Serraniel/nepfleet/compare/v0.1.0...v0.2.0) (2026-11-13)
+
+
+### Features
+
+* **api:** edit stack files over the API, with an edit scope ([#239](https://github.com/Serraniel/nepfleet/issues/239)) ([083b9c1](https://github.com/Serraniel/nepfleet/commit/083b9c1865b38f374cdfc3b83cda0b53c5ef26ed))
+* **api:** stack state in the stack list ([#241](https://github.com/Serraniel/nepfleet/issues/241)) ([df080f4](https://github.com/Serraniel/nepfleet/commit/df080f46403fb86e1b5355cd872c29f367e9600b))
+* Arch package for the CLI (nepfleet-bin) ([#234](https://github.com/Serraniel/nepfleet/issues/234)) ([da5684c](https://github.com/Serraniel/nepfleet/commit/da5684c5e441b05210cfbd5862970784be833a46))
+* **control:** prepare and install a remote from the local daemon ([#238](https://github.com/Serraniel/nepfleet/issues/238)) ([dddc409](https://github.com/Serraniel/nepfleet/commit/dddc40929b827b97d2786e6f1a652b773b0c25fc))
+* **doctor:** explain port 53 held by systemd-resolved ([#248](https://github.com/Serraniel/nepfleet/issues/248)) ([9ab26f7](https://github.com/Serraniel/nepfleet/commit/9ab26f742c0107d78fd06fc954118cbe69ca94ac))
+* nepfleet host install sets NepFleet up on a machine over SSH ([#233](https://github.com/Serraniel/nepfleet/issues/233)) ([7b5f0bd](https://github.com/Serraniel/nepfleet/commit/7b5f0bd07d98e4304826934065a5efce4d5cda7b))
+* template files the app edits are written only when missing ([#242](https://github.com/Serraniel/nepfleet/issues/242)) ([5568fdb](https://github.com/Serraniel/nepfleet/commit/5568fdb953e281e35a097784ae3d4194a2103550))
+
+
+### Bug Fixes
+
+* register binfmt emulators again when serve starts after a reboot ([#240](https://github.com/Serraniel/nepfleet/issues/240)) ([c0e89cc](https://github.com/Serraniel/nepfleet/commit/c0e89cc690ce9fa2ea361438bd06e0b8fc44d8ad))
+* say that a key with a passphrase must be in the SSH agent ([#231](https://github.com/Serraniel/nepfleet/issues/231)) ([a23aab0](https://github.com/Serraniel/nepfleet/commit/a23aab048be8ee8750b7c805d384c2077a526fa9))
+
+
+### Dependencies
+
+* Bump alpine from `be26560` to `f59abe6` ([#246](https://github.com/Serraniel/nepfleet/issues/246)) ([9fd5253](https://github.com/Serraniel/nepfleet/commit/9fd52530df84876aae13dfb86f826f5261f921fe))
+* Bump golang from `d200d2d` to `fa3d596` ([#237](https://github.com/Serraniel/nepfleet/issues/237)) ([96a5628](https://github.com/Serraniel/nepfleet/commit/96a5628d02a1972b9d71c293aa0aa03102449c7a))
+* Bump the go group with 3 updates ([#243](https://github.com/Serraniel/nepfleet/issues/243)) ([a7a59dd](https://github.com/Serraniel/nepfleet/commit/a7a59dddf8152dcdeea7df377fb5f4b08410e6a4))
+
 ## 0.1.0 (2026-11-08)
 
 
