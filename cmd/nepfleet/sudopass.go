@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"golang.org/x/term"
 
@@ -24,23 +26,25 @@ func sudoPassword(r *remote.Report, steps []remote.Step, t remote.Target, fromSt
 	if !remote.NeedsSudoPassword(r, steps) {
 		return "", nil
 	}
-	if fromStdin {
+	fd := int(os.Stdin.Fd()) //nolint:gosec // file descriptors fit in int
+	interactive := term.IsTerminal(fd)
+	// From stdin for scripts; typed at a terminal, it is read without echo below.
+	if fromStdin && !interactive {
 		line, err := bufio.NewReader(stdinReader).ReadString('\n')
 		if err != nil && line == "" {
 			return "", fmt.Errorf("reading the sudo password from stdin: %w", err)
 		}
 		return strings.TrimRight(line, "\r\n"), nil
 	}
-	fd := int(os.Stdin.Fd()) //nolint:gosec // file descriptors fit in int
-	if !term.IsTerminal(fd) {
-		return "", fmt.Errorf("%w (with no terminal to ask on, pass it with --sudo-password-stdin)", remote.ErrPasswordNeeded)
+	if !interactive {
+		return "", fmt.Errorf("%w (with no terminal to ask on, pass it with --sudo-password-stdin and --yes)", remote.ErrPasswordNeeded)
 	}
 	user := r.User
 	if user == "" {
 		user = t.User
 	}
 	fmt.Fprintf(stdout, "[sudo] password for %s on %s: ", user, t.Host)
-	b, err := term.ReadPassword(fd)
+	b, err := readHidden(fd)
 	fmt.Fprintln(stdout)
 	if err != nil {
 		return "", err
@@ -49,4 +53,30 @@ func sudoPassword(r *remote.Report, steps []remote.Step, t remote.Target, fromSt
 		return "", remote.ErrPasswordNeeded
 	}
 	return string(b), nil
+}
+
+// readHidden reads a line without echo. Ctrl-C leaves the terminal as it was:
+// term.ReadPassword alone would leave echo off when the process ends there.
+func readHidden(fd int) ([]byte, error) {
+	state, err := term.GetState(fd)
+	if err != nil {
+		return nil, err
+	}
+	interrupt := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-interrupt:
+			_ = term.Restore(fd, state)
+			fmt.Fprintln(os.Stderr)
+			os.Exit(130)
+		case <-done:
+		}
+	}()
+	defer func() {
+		signal.Stop(interrupt)
+		close(done)
+	}()
+	return term.ReadPassword(fd)
 }

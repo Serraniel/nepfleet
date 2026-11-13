@@ -19,8 +19,8 @@ func TestStepScriptSudoPassword(t *testing.T) {
 	dir := t.TempDir()
 	// A stand-in sudo: checks the options, compares the password, runs the rest.
 	fake := `#!/bin/sh
-[ "$1" = -S ] && [ "$2" = -p ] && [ "$3" = "" ] || { echo "unexpected options: $*" >&2; exit 2; }
-shift 3
+[ "$1" = -k ] && [ "$2" = -S ] && [ "$3" = -p ] && [ "$4" = "" ] || { echo "unexpected options: $*" >&2; exit 2; }
+shift 4
 IFS= read -r pw
 [ "$pw" = "$WANT" ] || { echo "Sorry, try again." >&2; echo "sudo: 1 incorrect password attempt" >&2; exit 1; }
 exec "$@"
@@ -84,7 +84,7 @@ func TestRunBootstrapPassword(t *testing.T) {
 	if err := RunBootstrap(context.Background(), run, r, steps, &log, "a\nb"); err == nil {
 		t.Error("a password with a line break was accepted")
 	}
-	if err := RunBootstrap(context.Background(), run, r, steps, &log, "pw"); err != nil || len(scripts) != 1 || !strings.Contains(scripts[0], "sudo -S") {
+	if err := RunBootstrap(context.Background(), run, r, steps, &log, "pw"); err != nil || len(scripts) != 1 || !strings.Contains(scripts[0], "sudo -k -S") {
 		t.Errorf("with a password: %v %q", err, scripts)
 	}
 	if strings.Contains(log.String(), "pw") && !strings.Contains(log.String(), "1/1 root") {

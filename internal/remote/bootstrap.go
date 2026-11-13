@@ -99,6 +99,8 @@ var (
 	ErrSudoPassword = errors.New("sudo refused the password: check it and try again")
 	// ErrNoSudo means the user may not use sudo on that machine.
 	ErrNoSudo = errors.New("this user may not use sudo there: log in as a user who may, or as root")
+	// ErrSudoTTY means sudo there insists on a terminal (requiretty in sudoers).
+	ErrSudoTTY = errors.New("sudo there requires a terminal (Defaults requiretty in sudoers): remove that rule, or log in as root")
 	// ErrPasswordNeeded means a root step needs the sudo password, and none was given.
 	ErrPasswordNeeded = errors.New("sudo asks for a password there: give it to run the root steps")
 )
@@ -118,21 +120,37 @@ func stepScript(s Step, isRoot bool, password string) string {
 	case password == "":
 		return "sudo -n sh <<'" + heredoc + "'\n" + body + heredoc + "\n"
 	}
-	return "printf '%s\\n' " + shQuote(password) + " | sudo -S -p '' sh -c " + shQuote(body) + "\n"
+	// -k: always read the password, so it never stays in the pipe for the
+	// step to read; and the step's stdin is empty in any case.
+	return "printf '%s\\n' " + shQuote(password) + " | sudo -k -S -p '' sh -c " + shQuote("exec </dev/null\n"+body) + "\n"
 }
 
 // sudoError explains what sudo refused, and keeps the password out of the error.
 func sudoError(err error, password string) error {
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "incorrect password"), strings.Contains(msg, "Sorry, try again"):
+	// Classic sudo and sudo-rs (Ubuntu's default since 25.10) word these apart.
+	case strings.Contains(msg, "incorrect password"), strings.Contains(msg, "Sorry, try again"),
+		strings.Contains(msg, "Authentication failed"), strings.Contains(msg, "authentication failed"):
 		return ErrSudoPassword
-	case strings.Contains(msg, "not in the sudoers file"), strings.Contains(msg, "is not allowed to"):
+	case strings.Contains(msg, "not in the sudoers file"), strings.Contains(msg, "is not allowed to"),
+		strings.Contains(msg, "I'm afraid I can't do that"), strings.Contains(msg, "not allowed to execute"):
 		return ErrNoSudo
+	case strings.Contains(msg, "you must have a tty"):
+		return ErrSudoTTY
 	case strings.Contains(msg, "a password is required"), strings.Contains(msg, "a terminal is required"):
 		return ErrPasswordNeeded
-	case password != "" && strings.Contains(msg, password):
-		return errors.New(strings.ReplaceAll(msg, password, "••••••"))
+	}
+	if password != "" {
+		// Errors are cleaned (control characters become spaces): hide that form too.
+		for _, p := range []string{password, Clean(password)} {
+			if p != "" && strings.Contains(msg, p) {
+				msg = strings.ReplaceAll(msg, p, "••••••")
+			}
+		}
+		if msg != err.Error() {
+			return errors.New(msg)
+		}
 	}
 	return err
 }

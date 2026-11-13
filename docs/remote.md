@@ -51,7 +51,7 @@ It probes the machine and shows a plan, with every step that runs as root marked
 - Add your user to the `docker` group, which is effectively root on that host.
 - Create the fleet's ingress network, and add the machine to `hosts/`.
 
-- **Root:** it needs root or a user who may use `sudo`. If sudo asks for a password, NepFleet asks you for it once per run: on the terminal without echo, like sudo (or from the first line of stdin with `--sudo-password-stdin`, for scripts), and in the app's setup dialog. The password goes to `sudo -S` on the machine, over SSH's encrypted stdin only: never on a command line, in a file or a log, and it is never stored.
+- **Root:** it needs root or a user who may use `sudo`. If sudo asks for a password, NepFleet asks you for it once per run: on the terminal without echo, like sudo (or from the first line of stdin with `--sudo-password-stdin`, for scripts), and in the app's setup dialog. The password goes to `sudo -S` on the machine, over SSH's encrypted stdin only: never on a command line, in a file or a log, and it is never stored. A user who may not use sudo learns so when the password is tried (sudo may report that attempt to the admin), and hosts with `Defaults requiretty` need that rule removed or a root login. `--sudo-password-stdin` goes with `--yes`, as there is then no terminal to confirm on.
 - **Failures:** it stops at the first failed step. Steps can be run again safely.
 - **Arch:** no `pacman -Sy`, as partial upgrades break Arch. If the package database is too old, update the system first.
 

@@ -168,7 +168,7 @@ func TestSetupSudoPassword(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(ran) == 0 || !strings.Contains(ran[0], "sudo -S") {
+	if len(ran) == 0 || !strings.Contains(ran[0], "sudo -k -S") {
 		t.Errorf("the root step didn't get the password: %q", ran)
 	}
 	if rec := do(http.MethodGet, "/v1/remotes", ""); strings.Contains(rec.Body.String(), pw) {

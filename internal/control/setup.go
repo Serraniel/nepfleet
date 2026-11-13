@@ -59,6 +59,8 @@ type Setup struct {
 
 	mu   sync.Mutex
 	jobs map[string]*setupJob
+	// starting: remotes whose setup is being checked before it starts.
+	starting map[string]bool
 }
 
 type setupJob struct {
@@ -188,13 +190,23 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "this daemon can't run setups")
 		return
 	}
+	// Reserve the remote before probing, so two requests can't both start.
 	s.Setup.mu.Lock()
-	if j := s.Setup.jobs[name]; j != nil && j.snapshot().State == "running" {
+	if j := s.Setup.jobs[name]; (j != nil && j.snapshot().State == "running") || s.Setup.starting[name] {
 		s.Setup.mu.Unlock()
 		fail(w, http.StatusConflict, "a setup runs on this remote already")
 		return
 	}
+	if s.Setup.starting == nil {
+		s.Setup.starting = map[string]bool{}
+	}
+	s.Setup.starting[name] = true
 	s.Setup.mu.Unlock()
+	defer func() {
+		s.Setup.mu.Lock()
+		delete(s.Setup.starting, name)
+		s.Setup.mu.Unlock()
+	}()
 	p, rep, t, err := s.setupPlan(r.Context(), name, req.Kind)
 	switch {
 	case errors.Is(err, errNoRemote):
