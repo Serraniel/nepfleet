@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -109,9 +110,10 @@ func TestTunnels(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	f := &fakeRemote{cut: make(chan struct{})}
+	var running atomic.Bool // NepFleet on the remote
 	s := &Server{Dir: dir, Connector: f, RetryAfter: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
 		Probe: func(_ context.Context, tg remote.Target) (*remote.Report, error) {
-			return &remote.Report{Kernel: "Linux", Target: tg.String()}, nil
+			return &remote.Report{Kernel: "Linux", Target: tg.String(), NepFleetRunning: running.Load()}, nil
 		}}
 	if err := s.Load(); err != nil {
 		t.Fatal(err)
@@ -142,6 +144,17 @@ func TestTunnels(t *testing.T) {
 	}
 	if rec := do(http.MethodGet, "/v1/remotes/nas/api/v1/stacks", ""); rec.Code != http.StatusConflict {
 		t.Errorf("proxy while off: %d", rec.Code)
+	}
+	// Without NepFleet there, there is nothing to connect to: say so, and save nothing.
+	if rec := do(http.MethodPost, "/v1/remotes/nas/connect", ""); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "isn't installed") {
+		t.Errorf("connect without NepFleet: %d %s", rec.Code, rec.Body)
+	}
+	if got := state(); got.Connect {
+		t.Error("a refused connect was saved")
+	}
+	running.Store(true)
+	if rec := do(http.MethodPost, "/v1/remotes/nas/refresh", ""); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
 	}
 	if rec := do(http.MethodPost, "/v1/remotes/nas/connect", ""); rec.Code != http.StatusOK {
 		t.Fatal(rec.Body)
@@ -257,7 +270,7 @@ func TestFeed(t *testing.T) {
 	mk := func() *Server {
 		s := &Server{Dir: dir, Connector: f, RetryAfter: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
 			Probe: func(_ context.Context, tg remote.Target) (*remote.Report, error) {
-				return &remote.Report{Kernel: "Linux", Target: tg.String()}, nil
+				return &remote.Report{Kernel: "Linux", Target: tg.String(), NepFleetRunning: true}, nil
 			}}
 		if err := s.Load(); err != nil {
 			t.Fatal(err)
