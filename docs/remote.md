@@ -51,7 +51,7 @@ It probes the machine and shows a plan, with every step that runs as root marked
 - Add your user to the `docker` group, which is effectively root on that host.
 - Create the fleet's ingress network, and add the machine to `hosts/`.
 
-- **Root:** it needs root or passwordless `sudo`. NepFleet never types a password.
+- **Root:** it needs root or a user who may use `sudo`. If sudo asks for a password, NepFleet asks you for it once per run: on the terminal without echo, like sudo (or from the first line of stdin with `--sudo-password-stdin`, for scripts), and in the app's setup dialog. The password goes to `sudo -S` on the machine, over SSH's encrypted stdin only: never on a command line, in a file or a log, and it is never stored. A user who may not use sudo learns so when the password is tried (sudo may report that attempt to the admin), and hosts with `Defaults requiretty` need that rule removed or a root login. `--sudo-password-stdin` goes with `--yes`, as there is then no terminal to confirm on.
 - **Failures:** it stops at the first failed step. Steps can be run again safely.
 - **Arch:** no `pacman -Sy`, as partial upgrades break Arch. If the package database is too old, update the system first.
 
@@ -67,7 +67,7 @@ nepfleet host install ssh://me@server --name server
 
 It probes the machine and shows a plan, then asks:
 
-1. Create `/srv/nepfleet`, owned by your SSH user. This needs root or passwordless `sudo`. If you created it yourself, pass `--skip-dir`.
+1. Create `/srv/nepfleet`, owned by your SSH user. This needs root or `sudo`, which may ask for its password as above. If you created it yourself, pass `--skip-dir`.
 2. Write `compose.yaml`, the one this NepFleet ships, pinned to its own version, and `.env`. The API listens on the machine's loopback only.
 3. Pull the image.
 4. Generate the fleet's age key on the machine. It never leaves it: back it up yourself, as the command says at the end.
@@ -96,8 +96,8 @@ nepfleet control status
 - **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
 - **To start it at login:** run `nepfleet control` from a systemd user unit.
 - **Setting a remote up from the app:** the daemon offers what `host bootstrap` and `host install` do, for clients such as the app's wizard:
-  - `GET /v1/remotes/<name>/setup?kind=bootstrap|install` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run.
-  - `POST /v1/remotes/<name>/setup` with `{"kind", "plan": "<id>"}` starts it only if the plan is still the one reviewed. Otherwise it answers `409`.
+  - `GET /v1/remotes/<name>/setup?kind=bootstrap|install` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run, and `sudoPassword: true` when its root steps need the sudo password.
+  - `POST /v1/remotes/<name>/setup` with `{"kind", "plan": "<id>", "sudoPassword"}` starts it only if the plan is still the one reviewed (otherwise `409`). `sudoPassword` is needed when the plan says so, is used for that run only, and appears in no job, log or error.
   - `GET /v1/remotes/<name>/setup/job` follows it: state and log.
   - A setup goes on when the window closes, and one runs per remote at a time.
 

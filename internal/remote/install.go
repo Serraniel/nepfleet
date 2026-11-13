@@ -91,8 +91,8 @@ func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, 
 	if skipDir {
 		return steps[1:], nil
 	}
-	if steps[0].Root && !r.Root && !r.Sudo {
-		return steps, fmt.Errorf("creating %s needs root: log in as root or as a user with sudo that needs no password, or create it yourself, owned by %s, and use --skip-dir", InstallDir, r.User)
+	if steps[0].Root && !r.Root && !r.Sudo && !r.SudoPassword {
+		return steps, fmt.Errorf("creating %s needs root: log in as root or as a user with sudo, or create it yourself, owned by %s, and use --skip-dir", InstallDir, r.User)
 	}
 	return steps, nil
 }

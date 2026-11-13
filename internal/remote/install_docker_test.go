@@ -54,7 +54,7 @@ func TestInstallForReal(t *testing.T) {
 		_ = exec.Command("sudo", "-n", "rm", "-rf", InstallDir).Run()
 	})
 	var log strings.Builder
-	if err := RunBootstrap(ctx, run, r, steps, &log); err != nil {
+	if err := RunBootstrap(ctx, run, r, steps, &log, ""); err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
 	res, err := http.Get("http://127.0.0.1:7480/healthz") //nolint:noctx // test
@@ -73,7 +73,7 @@ func TestInstallForReal(t *testing.T) {
 		t.Errorf("age.key: %v %v", fi, err)
 	}
 	// Running it again changes nothing and still succeeds.
-	if err := RunBootstrap(ctx, run, r, steps, &log); err != nil {
+	if err := RunBootstrap(ctx, run, r, steps, &log, ""); err != nil {
 		t.Errorf("a second run: %v", err)
 	}
 }

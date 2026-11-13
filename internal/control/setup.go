@@ -33,6 +33,9 @@ type SetupPlan struct {
 	// Error says why it can't run (Docker missing, no root, …); the steps then
 	// show what it would need.
 	Error string `json:"error,omitempty"`
+	// SudoPassword: root steps run as a user whose sudo asks for a password, so
+	// starting the setup needs it. It is used for that run only, never kept.
+	SudoPassword bool `json:"sudoPassword,omitempty"`
 }
 
 // SetupJob is a running or finished setup.
@@ -56,6 +59,8 @@ type Setup struct {
 
 	mu   sync.Mutex
 	jobs map[string]*setupJob
+	// starting: remotes whose setup is being checked before it starts.
+	starting map[string]bool
 }
 
 type setupJob struct {
@@ -133,6 +138,7 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 		p.Error = err.Error()
 	} else {
 		p.ID = planID(kind, steps)
+		p.SudoPassword = remote.NeedsSudoPassword(rep, steps)
 	}
 	return p, rep, t, nil
 }
@@ -171,6 +177,8 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Kind string `json:"kind"`
 		Plan string `json:"plan"`
+		// SudoPassword is for this run only: never stored, logged or returned.
+		SudoPassword string `json:"sudoPassword,omitempty"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 	dec.DisallowUnknownFields()
@@ -182,13 +190,23 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "this daemon can't run setups")
 		return
 	}
+	// Reserve the remote before probing, so two requests can't both start.
 	s.Setup.mu.Lock()
-	if j := s.Setup.jobs[name]; j != nil && j.snapshot().State == "running" {
+	if j := s.Setup.jobs[name]; (j != nil && j.snapshot().State == "running") || s.Setup.starting[name] {
 		s.Setup.mu.Unlock()
 		fail(w, http.StatusConflict, "a setup runs on this remote already")
 		return
 	}
+	if s.Setup.starting == nil {
+		s.Setup.starting = map[string]bool{}
+	}
+	s.Setup.starting[name] = true
 	s.Setup.mu.Unlock()
+	defer func() {
+		s.Setup.mu.Lock()
+		delete(s.Setup.starting, name)
+		s.Setup.mu.Unlock()
+	}()
 	p, rep, t, err := s.setupPlan(r.Context(), name, req.Kind)
 	switch {
 	case errors.Is(err, errNoRemote):
@@ -204,6 +222,13 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 		// The machine changed since the review: show the new plan instead.
 		fail(w, http.StatusConflict, "the plan changed since it was shown; review it again")
 		return
+	case p.SudoPassword && req.SudoPassword == "":
+		fail(w, http.StatusBadRequest, remote.ErrPasswordNeeded.Error())
+		return
+	}
+	password := req.SudoPassword
+	if !p.SudoPassword {
+		password = "" // nothing asks for it
 	}
 	j := &setupJob{job: SetupJob{Kind: req.Kind, State: "running", Started: time.Now().UTC()}}
 	s.Setup.mu.Lock()
@@ -217,7 +242,7 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
 		defer cancel()
 		run := func(ctx context.Context, script string) ([]byte, error) { return s.Setup.Run(ctx, t, script) }
-		err := remote.RunBootstrap(ctx, run, rep, p.Steps, j)
+		err := remote.RunBootstrap(ctx, run, rep, p.Steps, j, password)
 		j.mu.Lock()
 		j.job.Finished = time.Now().UTC()
 		if err != nil {
