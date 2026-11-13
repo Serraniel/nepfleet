@@ -57,7 +57,7 @@ func parseMinted(out []byte) (Token, error) {
 	return Token{ID: string(id[1]), Secret: string(secret[1])}, nil
 }
 
-// ErrNoNepFleet: a remote has no NepFleet to connect to yet.
+// ErrNoNepFleet means a remote has no NepFleet to connect to yet.
 var ErrNoNepFleet = errors.New("NepFleet isn't installed on this machine yet: prepare it and install NepFleet first")
 
 // MintToken creates an apply-scope token on the remote. SSH access to the
