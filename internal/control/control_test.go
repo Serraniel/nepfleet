@@ -38,6 +38,7 @@ func TestRemotes(t *testing.T) {
 	}
 	for body, want := range map[string]int{
 		`{"address":"ssh://me@nas"}`:             http.StatusCreated,
+		`{"address":"ssh://me@203.0.113.10"}`:    http.StatusCreated, // named 203-0-113-10
 		`{"address":"-oProxyCommand=x"}`:         http.StatusBadRequest,
 		`{"address":"ssh://unreachable"}`:        http.StatusBadGateway,
 		`{"address":"ssh://b","name":"../evil"}`: http.StatusBadRequest,

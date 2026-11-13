@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,8 @@ type Remote struct {
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+
+var dashes = regexp.MustCompile(`-+`)
 
 // ProbeFunc looks at a machine; the daemon uses remote.Probe over SSH.
 type ProbeFunc func(ctx context.Context, t remote.Target) (*remote.Report, error)
@@ -180,7 +183,7 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "" {
-		req.Name = t.Host
+		req.Name = nameFor(t.Host)
 	}
 	if !nameRe.MatchString(req.Name) {
 		fail(w, http.StatusBadRequest, fmt.Sprintf("%q cannot be a remote's name: lowercase letters, digits, - and _", req.Name))
@@ -328,4 +331,25 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 		}
 		return nil
 	}
+}
+
+// nameFor derives a remote's name from its host when none is given: an IP
+// address or a name with dots isn't one, so other characters become "-"
+// (203.0.113.10 becomes 203-0-113-10, nas.local becomes nas-local).
+func nameFor(host string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.Trim(host, "[]")) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	name := dashes.ReplaceAllString(b.String(), "-")
+	name = strings.Trim(name, "-_")
+	if len(name) > 63 {
+		name = strings.Trim(name[:63], "-_")
+	}
+	return name
 }
