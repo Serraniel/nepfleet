@@ -2,7 +2,10 @@
 
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestStackStates(t *testing.T) {
 	got := stackStates([]container{
@@ -24,5 +27,20 @@ func TestStackStates(t *testing.T) {
 	}
 	if _, ok := got["none"]; ok || len(got) != len(want) {
 		t.Errorf("extra states: %v", got)
+	}
+}
+
+func TestPortFix(t *testing.T) {
+	yes, no := func() bool { return true }, func() bool { return false }
+	if got := portFix(53, yes); !strings.Contains(got, "BIND_ADDR") || !strings.Contains(got, "DNSStubListener=no") {
+		t.Errorf("port 53 with the stub resolver: %q", got)
+	}
+	for _, c := range []struct {
+		port int
+		stub func() bool
+	}{{53, no}, {80, yes}} {
+		if got := portFix(c.port, c.stub); !strings.Contains(got, "ss -ltnp") {
+			t.Errorf("port %d: %q", c.port, got)
+		}
 	}
 }

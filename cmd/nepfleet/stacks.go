@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1590,7 +1591,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 					if deploy.PortBusy(pub) {
 						portChecks = append(portChecks, doctor.Check{Name: "Ports", Status: doctor.Fail,
 							Detail: fmt.Sprintf("%s wants port %d, but something on this host holds it", s.Metadata.Name, pub.Port),
-							Fix:    "stop what holds it (ss -ltnp), or change the stack's port"})
+							Fix:    portFix(pub.Port, stubResolverListens)})
 					}
 				}
 			}
@@ -1791,4 +1792,26 @@ func (e *env) dataSafety(ctx context.Context, p *prepared, stdout io.Writer) (*d
 		}
 	}
 	return d, nil
+}
+
+// stubResolverListens says whether systemd-resolved's stub listener holds port
+// 53 on 127.0.0.53, as on Ubuntu by default.
+func stubResolverListens() bool {
+	c, err := net.DialTimeout("tcp", "127.0.0.53:53", 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
+}
+
+// portFix is how to free a port a stack wants. Port 53 is usually taken by
+// systemd-resolved, which a DNS server such as Pi-hole can sidestep.
+func portFix(port int, stubListens func() bool) string {
+	if port == 53 && stubListens() {
+		return "systemd-resolved listens on 127.0.0.53:53: set the stack's BIND_ADDR to this host's LAN address, " +
+			"or turn the stub listener off (DNSStubListener=no in /etc/systemd/resolved.conf.d/, " +
+			"then link /etc/resolv.conf to /run/systemd/resolve/resolv.conf)"
+	}
+	return "stop what holds it (ss -ltnp), or change the stack's port"
 }
