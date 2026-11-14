@@ -125,6 +125,10 @@ type Options struct {
 	// StartUpdates runs updates apply (now: also outside the update window);
 	// like StartApply, it answers the run to start as a job.
 	StartUpdates func(ctx context.Context, now bool, by string) (func(log io.Writer) error, error)
+	// ComposeProjects lists the Compose projects of the server's Docker;
+	// ImportCompose imports one as a stack, adopted and committed as by.
+	ComposeProjects func(ctx context.Context) ([]ComposeProject, error)
+	ImportCompose   func(ctx context.Context, req ImportCompose, by string) (ImportResult, error)
 	// Backups lists the archives a stack can be restored from; StartRestore
 	// restores its volumes from one, answering the run to start as a job.
 	Backups      func(ctx context.Context, stack string) (Backups, error)
@@ -375,6 +379,7 @@ func Handler(o Options) http.Handler {
 	registerUsers(mux, o, l)
 	registerRender(mux, o, l)
 	registerMatch(mux, o, l)
+	registerImport(mux, o, l)
 	registerKeyBackup(mux, o, l)
 	registerMirror(mux, o, l)
 	registerEgress(mux, o, l)

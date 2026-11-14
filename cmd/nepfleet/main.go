@@ -435,6 +435,10 @@ func serve(args []string, stderr io.Writer) error {
 		EditStack: func(_ context.Context, stack string, e api.StackEdit, by string, stacks []string) (api.EditResult, error) {
 			return editStack(c, stack, e, by, stacks)
 		},
+		ComposeProjects: func(ctx context.Context) ([]api.ComposeProject, error) { return composeProjectsAPI(ctx, c) },
+		ImportCompose: func(ctx context.Context, req api.ImportCompose, by string) (api.ImportResult, error) {
+			return importComposeAPI(ctx, c, req, by)
+		},
 		Backups: func(ctx context.Context, stack string) (api.Backups, error) { return backupsAPI(ctx, c, stack) },
 		StartRestore: func(_ context.Context, stack, archive string, volumes []string, by string) (func(io.Writer) error, error) {
 			return startRestore(applyCtx, c, stack, archive, volumes, by)

@@ -868,3 +868,46 @@ func TestRestoreEndpoints(t *testing.T) {
 		t.Errorf("volumes: %v", gotVols)
 	}
 }
+
+func TestImportComposeEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	apply, _, _ := store.Create("a", auth.ScopeApply, nil, time.Hour)
+	edit, _, _ := store.Create("e", auth.ScopeEdit, nil, time.Hour)
+	onlyWeb, _, _ := store.Create("w", auth.ScopeEdit, []string{"web"}, time.Hour)
+	h := Handler(Options{Tokens: store,
+		ComposeProjects: func(context.Context) ([]ComposeProject, error) {
+			return []ComposeProject{{Name: "blog", Status: "running(2)", ConfigFiles: []string{"/srv/blog/compose.yaml"}}}, nil
+		},
+		ImportCompose: func(_ context.Context, req ImportCompose, _ string) (ImportResult, error) {
+			if req.Project == "taken" {
+				return ImportResult{}, ErrStackExists
+			}
+			return ImportResult{Stack: req.Project, Commit: "c1"}, nil
+		}})
+	do := func(method, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/api/v1/import/compose", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("GET", apply, ""); rec.Code != http.StatusForbidden {
+		t.Errorf("apply lists: %d", rec.Code)
+	}
+	if rec := do("GET", edit, ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"blog"`) {
+		t.Errorf("list: %d %s", rec.Code, rec.Body)
+	}
+	for body, want := range map[string]int{
+		`{"project":"blog"}`:  201,
+		`{"project":"taken"}`: 409,
+		`{"project":"../x"}`:  400,
+		`{}`:                  400,
+	} {
+		if rec := do("POST", edit, body); rec.Code != want {
+			t.Errorf("%s: %d, want %d", body, rec.Code, want)
+		}
+	}
+	if rec := do("POST", onlyWeb, `{"project":"web"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("a limited token imports: %d", rec.Code)
+	}
+}
