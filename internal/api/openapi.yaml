@@ -386,6 +386,56 @@ paths:
         "403": { description: The scope isn't admin }
         "404": { description: No channel of that name }
         "502": { description: "Sending failed; the reason, with URLs removed" }
+  /api/v1/tokens:
+    get:
+      tags: [server]
+      operationId: tokens
+      summary: The API tokens, never their secrets (admin scope)
+      responses:
+        "200":
+          description: The tokens, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TokenInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+    post:
+      tags: [server]
+      operationId: createToken
+      summary: Create an API token; its secret is shown only in this answer
+      description: >-
+        As nepfleet token create. Needs the admin scope; a person also needs a
+        sign-in or passkey verification within 5 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewToken" }
+      responses:
+        "201":
+          description: The token, with its secret this once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatedToken" }
+        "400": { description: Not the expected body }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "422": { description: "A rule broken: scope, name, stacks, or days (1 to 3650)" }
+  /api/v1/tokens/{id}:
+    delete:
+      tags: [server]
+      operationId: revokeToken
+      summary: Revoke an API token (admin scope)
+      description: A person also needs a recent verification.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^[0-9a-f]{8}$" } }
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "404": { description: No such token }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -997,6 +1047,31 @@ components:
       required: [channels]
       properties:
         channels: { type: array, items: { type: string } }
+    TokenInfo:
+      type: object
+      required: [id, name, scope, created, expires, expired]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        scope: { type: string, enum: [read, apply, edit, admin, notify] }
+        stacks: { type: array, items: { type: string }, description: "Empty: all stacks" }
+        created: { type: string, format: date-time }
+        expires: { type: string, format: date-time }
+        expired: { type: boolean }
+    NewToken:
+      type: object
+      required: [name, scope, days]
+      properties:
+        name: { type: string, maxLength: 64 }
+        scope: { type: string, enum: [read, apply, edit, admin, notify] }
+        stacks: { type: array, items: { type: string } }
+        days: { type: integer, minimum: 1, maximum: 3650 }
+    CreatedToken:
+      type: object
+      required: [token, secret]
+      properties:
+        token: { $ref: "#/components/schemas/TokenInfo" }
+        secret: { type: string, description: Shown only in this answer }
     SecretKeys:
       type: object
       required: [keys]

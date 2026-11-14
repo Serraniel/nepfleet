@@ -309,6 +309,7 @@ func Handler(o Options) http.Handler {
 	registerSecrets(mux, o, l)
 	registerFeatures(mux, o, l)
 	registerChannels(mux, o, l)
+	registerTokens(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
