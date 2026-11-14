@@ -688,6 +688,57 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { description: "No such source, or the stack's compose file has no images" }
         "503": { description: Another operation runs; try again }
+  /api/v1/stacks/{name}/backups:
+    get:
+      tags: [stacks]
+      operationId: stackBackups
+      summary: The archives the stack can be restored from (edit scope)
+      description: >-
+        The volume-backup archives of the stack's host, newest first, read through a
+        helper container, and the stack's volume keys. Only for stacks on the
+        server's own host.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: The archives
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Backups" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't edit }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "No volume-backup stack on this host, or the stack runs elsewhere" }
+  /api/v1/stacks/{name}/restore:
+    post:
+      tags: [stacks]
+      operationId: restoreStack
+      summary: Restore the stack's volumes from a backup archive, as a job
+      description: >-
+        As nepfleet restore: the stack stops, each volume's data is copied to
+        <volume>-before-restore-<time>, then replaced from the archive (decrypted
+        with the fleet's age key), and the stack starts again if it ran. confirm
+        repeats the stack's name. Needs the edit scope, and a recent verification
+        for a person. Follow the job at /api/v1/jobs/{id}.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RestoreRequest" }
+      responses:
+        "202":
+          description: Started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { description: Not the expected body }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, or `{\"verify\": true}`" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "confirm isn't the stack's name, or another operation runs" }
+        "422": { description: "Not an archive name, no volume-backup stack here, or the stack runs elsewhere" }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1270,7 +1321,7 @@ components:
       properties:
         id: { type: string }
         stack: { type: string, description: "Empty for a fleet-wide job (updates)" }
-        kind: { type: string, enum: [apply, rollback, updates] }
+        kind: { type: string, enum: [apply, rollback, restore, updates] }
         state: { type: string, enum: [running, succeeded, failed] }
         started: { type: string, format: date-time }
         finished: { type: string, format: date-time }
@@ -1330,6 +1381,20 @@ components:
         image: { type: string }
         stack: { type: string, description: The stack's tag }
         template: { type: string, description: The template's tag }
+    Backups:
+      type: object
+      required: [folder, archives, volumes]
+      properties:
+        folder: { type: string, description: The host folder of the archives }
+        archives: { type: array, items: { type: string }, description: Newest first }
+        volumes: { type: array, items: { type: string }, description: "The stack's volume keys" }
+    RestoreRequest:
+      type: object
+      required: [archive, confirm]
+      properties:
+        archive: { type: string }
+        volumes: { type: array, items: { type: string }, description: "Volume keys; all when empty" }
+        confirm: { type: string, description: "The stack's name" }
     RenderedFile:
       type: object
       required: [path, content]

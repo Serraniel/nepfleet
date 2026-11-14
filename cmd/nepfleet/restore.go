@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/Serraniel/neptide/pkg/snapshot"
+
+	"github.com/Serraniel/nepfleet/internal/fleet"
 )
 
 // volumeName is a Docker volume name as compose creates them.
@@ -55,6 +57,28 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	key := cmp.Or(*identity, ageKeyFile())
+	open := func() (io.ReadCloser, error) { return decrypt(*archive, key, stderr) }
+	var vols []string
+	if *only != "" {
+		vols = strings.Split(*only, ",")
+	}
+	confirm := func() error {
+		if !*yes && !ask(stdout, fmt.Sprintf("The stack stops while its data is replaced. Type %s to continue: ", s.Metadata.Name), s.Metadata.Name) {
+			return errors.New("not confirmed")
+		}
+		return nil
+	}
+	// Ctrl-C stops the current step; what was done is still reported.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return restoreVolumes(ctx, e, s, *archive, open, vols, confirm, stdout)
+}
+
+// restoreVolumes puts a stack's volumes (all in the archive, or the keys in
+// only) back from the archive open reads, after confirm agrees. The command
+// line and the API share it.
+func restoreVolumes(ctx context.Context, e *env, s *fleet.Stack, label string, open func() (io.ReadCloser, error), only []string, confirm func() error, stdout io.Writer) error {
 	// Not during an apply of the same stack, from the CLI or the API.
 	release, err := lockStack(e.stateDir, s.Metadata.Name)
 	if err != nil {
@@ -64,8 +88,6 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 	if s.Spec.Mode == "swarm" {
 		return errors.New("restore supports compose stacks; for a swarm stack, scale it to 0 and restore its volumes on the node that holds them")
 	}
-	key := cmp.Or(*identity, ageKeyFile())
-	open := func() (io.ReadCloser, error) { return decrypt(*archive, key, stderr) }
 
 	// What the archive has for this stack, read before anything changes.
 	rc, err := open()
@@ -80,7 +102,7 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 		err = cerr
 	}
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", *archive, err)
+		return fmt.Errorf("reading %s: %w", label, err)
 	}
 	inArchive := slices.Sorted(maps.Keys(members))
 	// The stack's volumes are the ones compose labelled with its project,
@@ -93,8 +115,8 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("%s has no volumes on this host: apply it here first", s.Metadata.Name)
 	}
 	var wanted []string
-	if *only != "" {
-		wanted = strings.Split(*only, ",")
+	if len(only) > 0 {
+		wanted = only
 		keys := slices.Collect(maps.Values(own))
 		for _, k := range wanted {
 			if !slices.Contains(keys, k) {
@@ -121,17 +143,14 @@ func cmdRestore(args []string, stdout, stderr io.Writer) error {
 	}
 
 	stamp := time.Now().Format("20060102-150405")
-	fmt.Fprintf(stdout, "Restore %s from %s:\n", s.Metadata.Name, *archive)
+	fmt.Fprintf(stdout, "Restore %s from %s:\n", s.Metadata.Name, label)
 	for _, v := range vols {
 		fmt.Fprintf(stdout, "  %s (current data kept in %s-before-restore-%s)\n", v, v, stamp)
 	}
-	if !*yes && !ask(stdout, fmt.Sprintf("The stack stops while its data is replaced. Type %s to continue: ", s.Metadata.Name), s.Metadata.Name) {
-		return errors.New("not confirmed")
+	if err := confirm(); err != nil {
+		return err
 	}
 
-	// Ctrl-C stops the current step; what was done is still reported.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	project := []string{"compose", "--project-name", s.Metadata.Name}
 	running, err := output(ctx, append(project, "ps", "--quiet", "--status", "running")...)
 	if err != nil {
