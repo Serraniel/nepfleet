@@ -468,6 +468,19 @@ paths:
             application/vnd.cyclonedx+json:
               schema: { type: object }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/doctor:
+    get:
+      tags: [server]
+      operationId: doctor
+      summary: How the server's host stands, as nepfleet doctor and doctor --security (admin scope)
+      responses:
+        "200":
+          description: The checks and the security findings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DoctorReport" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
         "503": { description: Another operation runs; try again }
   /api/v1/secrets:
     get:
@@ -1075,6 +1088,30 @@ components:
         template: { type: string }
         what: { type: string }
         stacks: { type: array, items: { type: string }, description: "name@target" }
+    DoctorCheck:
+      type: object
+      required: [name, status, detail]
+      properties:
+        name: { type: string }
+        status: { type: string, enum: [ok, warn, fail] }
+        detail: { type: string }
+        fix: { type: string }
+    SecurityFinding:
+      type: object
+      required: [check, level, message]
+      properties:
+        check: { type: string }
+        level: { type: string }
+        message: { type: string }
+    DoctorReport:
+      type: object
+      required: [host, stacks, checks, security]
+      properties:
+        host: { type: string }
+        stacks: { type: integer }
+        checks: { type: array, items: { $ref: "#/components/schemas/DoctorCheck" } }
+        security: { type: array, items: { $ref: "#/components/schemas/SecurityFinding" } }
+        securityError: { type: string }
     Channels:
       type: object
       required: [channels]
