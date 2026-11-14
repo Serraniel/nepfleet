@@ -373,6 +373,54 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Channels" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/notifications/channels/{name}:
+    put:
+      tags: [server]
+      operationId: setChannel
+      summary: Add or replace a notification channel (admin scope)
+      description: >-
+        Stores the shoutrrr URL encrypted in fleet.secret.yaml (as NOTIFY_<NAME>), adds the
+        channel to fleet.yaml and, when no route sends to it yet, a route of every event at
+        minSeverity and above; commits both. The URL is checked, not used: test it afterwards.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_.-]{1,64}$" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              additionalProperties: false
+              properties:
+                url: { type: string, description: A shoutrrr URL; it holds tokens and is stored encrypted }
+                minSeverity: { type: string, enum: [info, warning, error] }
+      responses:
+        "200":
+          description: Saved and committed
+          content:
+            application/json:
+              schema: { type: object, properties: { commit: { type: string } } }
+        "400": { description: "Not a valid name, URL or severity; the reason, without the URL" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+        "409": { description: Another change is running, or fleet.yaml or fleet.secret.yaml has uncommitted changes }
+    delete:
+      tags: [server]
+      operationId: removeChannel
+      summary: Remove a notification channel, its routes' mentions of it and the secret the app stored (admin scope)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Removed and committed
+          content:
+            application/json:
+              schema: { type: object, properties: { commit: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+        "404": { description: No channel of that name }
+        "409": { description: Another change is running, or the files have uncommitted changes }
   /api/v1/notifications/channels/{name}/test:
     post:
       tags: [server]

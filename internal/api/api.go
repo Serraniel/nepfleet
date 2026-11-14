@@ -160,6 +160,12 @@ type Options struct {
 	// one a test message (ErrNoChannel for an unknown name).
 	Channels    func() ([]string, error)
 	TestChannel func(ctx context.Context, name string) error
+	// SetChannel adds or replaces a channel: its shoutrrr URL stored
+	// encrypted, a route of events at minSeverity and above if none sends
+	// to it, committed. RemoveChannel deletes it (ErrNoChannel if unknown).
+	// Both return the commit; errors: InvalidError, ErrBusy, ErrUncommitted.
+	SetChannel    func(ctx context.Context, name, url, minSeverity, by string) (string, error)
+	RemoveChannel func(ctx context.Context, name, by string) (string, error)
 	// Features are the opt-in system stacks and the stacks providing them.
 	Features func() ([]Feature, error)
 	// SecretKeys lists the keys of a stack's encrypted values, or of the
