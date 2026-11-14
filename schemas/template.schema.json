@@ -312,6 +312,28 @@
                   "boolean"
                 ]
               },
+              "help": {
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "helpFrom": {
+                "description": "HelpFrom names an enum input whose current value picks the text in Help (e.g. the token help for the chosen DNS provider); Description stays for values without one.",
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
               "name": {
                 "pattern": "^[A-Z][A-Z0-9_]*$",
                 "type": "string"

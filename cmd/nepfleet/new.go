@@ -101,6 +101,8 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("%s: %w", inp.Name, err)
 			}
 		}
+		// The help for what was chosen so far (e.g. the selected DNS provider's).
+		inp.Description = tpl.Spec.HelpText(inp, values)
 		for !given && interactive {
 			if v, err = askInput(stdout, in, inp, *target == "local" || *target == c.host, e.fleet.Spec.Paths); err != nil {
 				return err
