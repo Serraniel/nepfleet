@@ -74,6 +74,16 @@ It probes the machine and shows a plan, then asks:
 - **Running it again** is safe: a key or fleet that's there stays.
 - **Then connect:** `nepfleet remote add` and `nepfleet remote connect`, or the Fleets page of the app.
 
+## Updating NepFleet on a machine
+
+`host install` pins the machine's NepFleet to the installing version, and neptide doesn't move it outside that pin. When the desktop app is newer than a machine's NepFleet, Fleets offers to update it to the app's version, as a plan to review like the install (setup kind `update`):
+1. Keep the current `compose.yaml` as `compose.yaml.previous`.
+2. Write the new version's `compose.yaml` (`.env`, the fleet repository and the data stay).
+3. Pull the image.
+4. Restart and wait until it's healthy. If it isn't, the previous version starts again.
+
+Changes made to `/srv/nepfleet/compose.yaml` by hand are in `compose.yaml.previous` afterwards: carry them over.
+
 ## Checking NepFleet on a machine
 
 `nepfleet doctor` on a machine checks Docker, the age key and its backup, disk, ports, log rotation and more, and says how to fix what it finds. From the desktop app, Fleets runs it on a machine over SSH (the control daemon's `POST /v1/remotes/<name>/doctor`). That also works when the machine's API doesn't answer, which is when it matters most:

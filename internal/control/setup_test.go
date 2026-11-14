@@ -175,3 +175,25 @@ func TestSetupSudoPassword(t *testing.T) {
 		t.Error("the password shows in the remotes")
 	}
 }
+
+func TestSetupUpdatePlan(t *testing.T) {
+	probe := func(_ context.Context, tg remote.Target) (*remote.Report, error) {
+		return &remote.Report{Kernel: "Linux", Target: tg.String(), NepFleetImage: "ghcr.io/serraniel/nepfleet:0.3.1", NepFleetRunning: true}, nil
+	}
+	s := &Server{Dir: t.TempDir(), Probe: probe, Version: "0.4.0"}
+	s.Setup.Compose = []byte("services: {}\n")
+	h := s.Handler()
+	do := func(method, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(`{"address":"ssh://me@vps","name":"vps"}`)))
+		return rec
+	}
+	if rec := do(http.MethodPost, "/v1/remotes"); rec.Code != http.StatusCreated {
+		t.Fatalf("add: %d", rec.Code)
+	}
+	rec := do(http.MethodGet, "/v1/remotes/vps/setup?kind="+SetupUpdate)
+	var p SetupPlan
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &p) != nil || p.ID == "" || len(p.Steps) != 4 || p.Error != "" {
+		t.Errorf("update plan: %d %s", rec.Code, rec.Body)
+	}
+}
