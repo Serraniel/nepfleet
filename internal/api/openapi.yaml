@@ -743,7 +743,7 @@ paths:
     get:
       tags: [stacks]
       operationId: composeProjects
-      summary: The Compose projects of the server's Docker, as nepfleet import compose lists them (edit scope)
+      summary: The Compose projects of the server's Docker, as nepfleet import compose lists them (edit scope, a token not limited to stacks)
       responses:
         "200":
           description: The projects

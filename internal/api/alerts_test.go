@@ -907,6 +907,9 @@ func TestImportComposeEndpoints(t *testing.T) {
 			t.Errorf("%s: %d, want %d", body, rec.Code, want)
 		}
 	}
+	if rec := do("GET", onlyWeb, ""); rec.Code != http.StatusForbidden {
+		t.Errorf("a limited token lists the host's projects: %d", rec.Code)
+	}
 	if rec := do("POST", onlyWeb, `{"project":"web"}`); rec.Code != http.StatusForbidden {
 		t.Errorf("a limited token imports: %d", rec.Code)
 	}

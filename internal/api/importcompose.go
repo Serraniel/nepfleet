@@ -43,6 +43,11 @@ func registerImport(mux *http.ServeMux, o Options, l *limiter) {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
 			return
 		}
+		// Every project and its paths on the host: not for a token limited to stacks.
+		if t, _ := TokenFrom(r.Context()); len(t.Stacks) > 0 {
+			http.Error(w, "listing the host's compose projects needs a token not limited to stacks", http.StatusForbidden)
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 		defer cancel()
 		ps, err := o.ComposeProjects(ctx)
