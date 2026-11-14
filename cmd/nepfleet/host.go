@@ -162,23 +162,9 @@ func cmdHostApply(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	creds := map[string]string{}
-	var sec map[string]string
-	for _, m := range h.Spec.Mounts {
-		if m.PasswordSecret == "" {
-			continue
-		}
-		if sec == nil {
-			store := secrets.SOPS{Recipients: f.Spec.Secrets.Age}
-			if sec, err = store.Load(filepath.Join(f.Dir, fleet.FleetSecretsFile)); err != nil {
-				return err
-			}
-		}
-		pw, ok := sec[m.PasswordSecret]
-		if !ok {
-			return fmt.Errorf("mount %s: %s is not in %s (nepfleet secret set --global %s)", m.Name, m.PasswordSecret, fleet.FleetSecretsFile, m.PasswordSecret)
-		}
-		creds[m.Name] = pw
+	creds, err := mountCreds(f, h)
+	if err != nil {
+		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -191,11 +177,7 @@ func cmdHostApply(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	run := func(ctx context.Context, script string) ([]byte, error) { return ssh.Run(ctx, t, script) }
-	listed, err := run(ctx, remote.MountsPresent)
-	if err != nil {
-		return err
-	}
-	steps, err := remote.MountSteps(r.OSID, h.Spec.Mounts, creds, strings.Split(strings.TrimSpace(string(listed)), "\n"))
+	steps, err := mountSteps(ctx, run, r, h, creds)
 	if err != nil {
 		return err
 	}
@@ -222,4 +204,66 @@ func cmdHostApply(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "%s's mounts match hosts/%s.yaml; each mounts on first use\n", h.Metadata.Name, h.Metadata.Name)
 	return nil
+}
+
+// mountCreds decrypts the share passwords a host's mounts name, from
+// fleet.secret.yaml.
+func mountCreds(f *fleet.Fleet, h *fleet.Host) (map[string]string, error) {
+	var err error
+	creds := map[string]string{}
+	var sec map[string]string
+	for _, m := range h.Spec.Mounts {
+		if m.PasswordSecret == "" {
+			continue
+		}
+		if sec == nil {
+			store := secrets.SOPS{Recipients: f.Spec.Secrets.Age}
+			if sec, err = store.Load(filepath.Join(f.Dir, fleet.FleetSecretsFile)); err != nil {
+				return nil, err
+			}
+		}
+		pw, ok := sec[m.PasswordSecret]
+		if !ok {
+			return nil, fmt.Errorf("mount %s: %s is not in %s (nepfleet secret set --global %s)", m.Name, m.PasswordSecret, fleet.FleetSecretsFile, m.PasswordSecret)
+		}
+		creds[m.Name] = pw
+	}
+	return creds, nil
+}
+
+// mountSteps plans what makes a machine's mounts match its host file, from
+// what it has now.
+func mountSteps(ctx context.Context, run func(context.Context, string) ([]byte, error), r *remote.Report, h *fleet.Host, creds map[string]string) ([]remote.Step, error) {
+	listed, err := run(ctx, remote.MountsPresent)
+	if err != nil {
+		return nil, err
+	}
+	return remote.MountSteps(r.OSID, h.Spec.Mounts, creds, strings.Split(strings.TrimSpace(string(listed)), "\n"))
+}
+
+// controlMounts is the desktop daemon's mount planner: the host file of the
+// machine, from the fleet repository folder the app names.
+func controlMounts(fleetDir func() string) func(ctx context.Context, name string, run func(context.Context, string) ([]byte, error), r *remote.Report) ([]remote.Step, error) {
+	return func(ctx context.Context, name string, run func(context.Context, string) ([]byte, error), r *remote.Report) ([]remote.Step, error) {
+		dir := fleetDir()
+		if dir == "" {
+			return nil, errors.New("choose the folder of your fleet repository in the settings first: mounts are planned from its hosts/ files")
+		}
+		f, err := fleet.Load(dir)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(filepath.Join(f.Dir, "hosts", name+".yaml")); err != nil {
+			return nil, fmt.Errorf("the fleet repository has no hosts/%s.yaml for this machine: add one with its mounts", name)
+		}
+		h, err := f.LoadHost(name)
+		if err != nil {
+			return nil, err
+		}
+		creds, err := mountCreds(f, h)
+		if err != nil {
+			return nil, err
+		}
+		return mountSteps(ctx, run, r, h, creds)
+	}
 }

@@ -144,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/remotes/{name}/connect", s.connect)
 	mux.HandleFunc("POST /v1/remotes/{name}/disconnect", s.disconnect)
 	s.setupRoutes(mux)
+	s.settingsRoutes(mux)
 	s.keyRoutes(mux)
 	mux.HandleFunc("/v1/remotes/{name}/api/{rest...}", s.apiProxy)
 	mux.HandleFunc("DELETE /v1/remotes/{name}", func(w http.ResponseWriter, r *http.Request) {
