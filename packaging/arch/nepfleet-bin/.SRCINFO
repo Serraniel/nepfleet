@@ -1,6 +1,6 @@
 pkgbase = nepfleet-bin
 	pkgdesc = Self-hosted fleet manager for Docker Compose and Swarm stacks, from a git repository
-	pkgver = 0.3.1
+	pkgver = 0.3.2
 	pkgrel = 1
 	url = https://github.com/Serraniel/nepfleet
 	arch = x86_64
@@ -17,11 +17,11 @@ pkgbase = nepfleet-bin
 	conflicts = nepfleet
 	options = !strip
 	options = !debug
-	source = LICENSE-0.3.1::https://raw.githubusercontent.com/Serraniel/nepfleet/v0.3.1/LICENSE
+	source = LICENSE-0.3.2::https://raw.githubusercontent.com/Serraniel/nepfleet/v0.3.2/LICENSE
 	sha256sums = 8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef
-	source_x86_64 = nepfleet-0.3.1-amd64::https://github.com/Serraniel/nepfleet/releases/download/v0.3.1/nepfleet_0.3.1_linux_amd64
-	sha256sums_x86_64 = cf0d58ace846490824541ef5198b2b60469891fdc9f1fb27c198e1ff8067857c
-	source_aarch64 = nepfleet-0.3.1-arm64::https://github.com/Serraniel/nepfleet/releases/download/v0.3.1/nepfleet_0.3.1_linux_arm64
-	sha256sums_aarch64 = ba37c4189e78b4ab49e1a9c46ee607185e96e5ad330b50d2d2fde8182ff517ff
+	source_x86_64 = nepfleet-0.3.2-amd64::https://github.com/Serraniel/nepfleet/releases/download/v0.3.2/nepfleet_0.3.2_linux_amd64
+	sha256sums_x86_64 = 387eb268931f8b83d2a814b001db857e59fbdf4c6d8b751bea56d5c246b605fb
+	source_aarch64 = nepfleet-0.3.2-arm64::https://github.com/Serraniel/nepfleet/releases/download/v0.3.2/nepfleet_0.3.2_linux_arm64
+	sha256sums_aarch64 = d9b414a9c592e8679ad218e1b81c9acac243c2b73689c077a62b72ae749e09e9
 
 pkgname = nepfleet-bin
