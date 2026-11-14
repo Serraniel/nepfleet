@@ -24,6 +24,9 @@ const (
 	// SetupMounts makes the machine's network mounts match its hosts/<name>.yaml
 	// in the fleet repository folder (Settings), as `nepfleet host apply`.
 	SetupMounts = "mounts"
+	// SetupUpdate moves the machine's NepFleet container to this daemon's
+	// version, with the previous one started again if it isn't healthy.
+	SetupUpdate = "update"
 )
 
 // SetupPlan is what a setup would do on a remote, for a person to review.
@@ -133,6 +136,8 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 		steps, err = remote.BootstrapPlan(rep, s.Setup.Ingress)
 	case SetupInstall:
 		steps, err = remote.InstallPlan(rep, name, s.Setup.Compose, false)
+	case SetupUpdate:
+		steps, err = remote.UpdatePlan(rep, s.Setup.Compose, s.Version)
 	case SetupMounts:
 		if s.Setup.Mounts == nil || s.Setup.Run == nil {
 			return nil, nil, t, errors.New("this daemon can't set up mounts")
@@ -146,7 +151,7 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 			err = errors.New("nothing to do: the mounts match the host file already")
 		}
 	default:
-		return nil, nil, t, errors.New("kind is bootstrap, install or mounts")
+		return nil, nil, t, errors.New("kind is bootstrap, install, update or mounts")
 	}
 	p := &SetupPlan{Kind: kind, Steps: steps}
 	if p.Steps == nil {
