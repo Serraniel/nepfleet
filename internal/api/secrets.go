@@ -37,7 +37,7 @@ var ErrNoSecret = errors.New("no secret of that key")
 
 // ErrUncommitted means the file has changes on the server that aren't
 // committed: they stay, and nothing is saved.
-var ErrUncommitted = errors.New("the secrets file has uncommitted changes on the server; commit or discard them first")
+var ErrUncommitted = errors.New("the file has uncommitted changes on the server; commit or discard them first")
 
 // secretKey is a name a compose file can use as a variable.
 var secretKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)

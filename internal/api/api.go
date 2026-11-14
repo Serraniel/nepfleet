@@ -116,6 +116,9 @@ type Options struct {
 	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
 	// instances.
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
+	// EgressAllow adds to a stack's egress allow list and commits it as by,
+	// without applying. Errors: InvalidError, ErrBusy, ErrUncommitted.
+	EgressAllow func(ctx context.Context, stack string, add []string, by string) (EgressAllowResult, error)
 	// Egress is what a stack's egress sidecars recorded or refused.
 	Egress func(ctx context.Context, stack string) (*StackEgress, error)
 	// SyncStatus is where the fleet repository stands against its origin;
