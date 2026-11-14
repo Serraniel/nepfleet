@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,9 @@ import (
 // A home with an encrypted and a plain key, and an agent of its own.
 func keyHome(t *testing.T) (home, locked, plain string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("OpenSSH for Windows runs its agent as a service, not on a socket of our own")
+	}
 	for _, p := range []string{"ssh-agent", "ssh-add", "ssh-keygen"} {
 		if _, err := exec.LookPath(p); err != nil {
 			t.Skip(p + " isn't installed")

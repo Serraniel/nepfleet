@@ -23,11 +23,11 @@ import (
 
 // AskpassEnv carries a passphrase to `nepfleet askpass`, the SSH_ASKPASS helper
 // ssh-add runs, in that one child process's environment only.
-const AskpassEnv = "NEPFLEET_ASKPASS"
+const AskpassEnv = "NEPFLEET_ASKPASS" //nolint:gosec // the name of a variable, not a credential
 
 // AskpassOnceEnv names a file askpass removes before answering: ssh-add asks
 // again after a wrong passphrase, and gets an empty answer then, which ends it.
-const AskpassOnceEnv = "NEPFLEET_ASKPASS_ONCE"
+const AskpassOnceEnv = "NEPFLEET_ASKPASS_ONCE" //nolint:gosec // the name of a variable, not a credential
 
 // KeyLifetime is how long an unlocked key stays in the agent.
 const KeyLifetime = 8 * time.Hour
@@ -55,7 +55,7 @@ func AgentReachable(sock string) bool {
 	if sock == "" {
 		return false
 	}
-	c, err := net.DialTimeout("unix", sock, time.Second)
+	c, err := net.DialTimeout("unix", sock, time.Second) //nolint:gosec // a local agent socket of this user, not a network address
 	if err != nil {
 		return false
 	}
