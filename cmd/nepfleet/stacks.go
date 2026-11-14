@@ -1853,3 +1853,30 @@ func doctorAPI(ctx context.Context, c common) (api.DoctorReport, error) {
 	}
 	return rep, nil
 }
+
+// renderAPI is GET /api/v1/stacks/{name}/render: the files the stack renders
+// to, with secrets masked, as nepfleet render prints them.
+func renderAPI(c common, stack string) ([]api.RenderedFile, error) {
+	if !apiMu.TryLock() {
+		return nil, api.ErrBusy
+	}
+	defer apiMu.Unlock()
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	s, err := e.fleet.LoadStack(stack)
+	if err != nil {
+		return nil, api.ErrNotFound
+	}
+	p, err := e.prepare(s)
+	if err != nil {
+		return nil, api.InvalidError{Reason: cleanReason(err, e.fleet.Dir)}
+	}
+	paths := slices.Sorted(maps.Keys(p.out.Files))
+	out := make([]api.RenderedFile, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, api.RenderedFile{Path: path, Content: string(p.out.Masked(path))})
+	}
+	return out, nil
+}

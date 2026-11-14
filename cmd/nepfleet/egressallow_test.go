@@ -69,3 +69,21 @@ func TestEgressAllowAPI(t *testing.T) {
 		t.Errorf("unknown stack: %v", err)
 	}
 }
+
+func TestRenderAPI(t *testing.T) {
+	c, _, _ := rollbackFleet(t)
+	files, err := renderAPI(c, "web")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("%v %v", files, err)
+	}
+	var paths []string
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	if !slices.IsSorted(paths) || !slices.ContainsFunc(files, func(f api.RenderedFile) bool { return strings.Contains(f.Content, "nginx") }) {
+		t.Errorf("files: %v", paths)
+	}
+	if _, err := renderAPI(c, "ghost"); !errors.Is(err, api.ErrNotFound) {
+		t.Errorf("unknown: %v", err)
+	}
+}

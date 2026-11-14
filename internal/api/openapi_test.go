@@ -119,6 +119,7 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"DoctorReport":      reflect.TypeFor[DoctorReport](),
 		"UserInfo":          reflect.TypeFor[UserInfo](),
 		"EgressAllow":       reflect.TypeFor[EgressAllow](),
+		"RenderedFile":      reflect.TypeFor[RenderedFile](),
 		"EgressAllowResult": reflect.TypeFor[EgressAllowResult](),
 		"PasskeyInfo":       reflect.TypeFor[PasskeyInfo](),
 		"SecretValue":       reflect.TypeFor[SecretValue](),

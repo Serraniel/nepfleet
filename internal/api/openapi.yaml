@@ -558,6 +558,26 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "Another operation runs, or stack.yaml has uncommitted changes on the server" }
         "422": { description: "Not a host name, address or range (no wildcards); nothing saved" }
+  /api/v1/stacks/{name}/render:
+    get:
+      tags: [stacks]
+      operationId: renderStack
+      summary: The files the stack renders to, secrets masked, as nepfleet render
+      description: Needs the read scope.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: The files, by path
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RenderedFile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: The stack doesn't render; the reason }
+        "503": { description: Another operation runs; try again }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1164,6 +1184,12 @@ components:
         template: { type: string }
         what: { type: string }
         stacks: { type: array, items: { type: string }, description: "name@target" }
+    RenderedFile:
+      type: object
+      required: [path, content]
+      properties:
+        path: { type: string }
+        content: { type: string }
     EgressAllow:
       type: object
       required: [add]
