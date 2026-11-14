@@ -78,13 +78,21 @@ func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, 
 			Script: "cd " + InstallDir + "\n" +
 				"if [ ! -s age.key ]; then docker compose run --rm -T --entrypoint age-keygen nepfleet -o " + InstallDir + "/age.key 2>/dev/null; fi\n" +
 				"chmod 600 age.key\n"},
-		{Text: "create the fleet repository, encrypting to that key",
+		{Text: "create the fleet repository, encrypting to that key, and commit it",
 			Script: "cd " + InstallDir + "\n" +
 				"if [ ! -f fleet/fleet.yaml ]; then docker compose run --rm -T nepfleet init . >/dev/null; fi\n" +
-				"pub=\"$(docker compose run --rm -T --entrypoint age-keygen nepfleet -y " + InstallDir + "/age.key)\"\n" +
+				"pub=\"$(docker compose run --rm -T --entrypoint age-keygen nepfleet -y " + InstallDir + "/age.key 2>/dev/null)\"\n" +
 				"case \"$pub\" in age1*) ;; *) echo \"no public key: $pub\" >&2; exit 1;; esac\n" +
-				"grep -q \"$pub\" fleet/fleet.yaml || sed -i \"s|^    age: \\[\\]\\$|    age: [\\\"$pub\\\"]|\" fleet/fleet.yaml\n" +
-				"grep -q \"$pub\" fleet/fleet.yaml\n"},
+				// NepFleet edits fleet.yaml itself and checks it loads with the key.
+				// An older image without key add-recipient: the edit by hand.
+				"docker compose run --rm -T nepfleet key add-recipient --fleet " + InstallDir + "/fleet \"$pub\" ||\n" +
+				"  { grep -q \"$pub\" fleet/fleet.yaml || sed -i \"s|^    age: \\[\\]\\$|    age: [\\\"$pub\\\"]|\" fleet/fleet.yaml; }\n" +
+				"grep -q \"$pub\" fleet/fleet.yaml || { echo \"fleet.yaml doesn't encrypt to the new key\" >&2; exit 1; }\n" +
+				// The first commit, with the container's git identity.
+				"if ! docker compose run --rm -T --entrypoint git nepfleet -C " + InstallDir + "/fleet rev-parse -q --verify HEAD >/dev/null 2>&1; then\n" +
+				"  docker compose run --rm -T --entrypoint git nepfleet -C " + InstallDir + "/fleet add -A\n" +
+				"  docker compose run --rm -T --entrypoint git nepfleet -C " + InstallDir + "/fleet commit -qm \"chore: the fleet repository, as host install created it\"\n" +
+				"fi\n"},
 		{Text: "start the API and wait until it's healthy",
 			Script: "cd " + InstallDir + "\ndocker compose up -d --wait\n"},
 	}

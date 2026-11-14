@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -66,8 +67,11 @@ func TestInstallForReal(t *testing.T) {
 		t.Errorf("healthz: %d", res.StatusCode)
 	}
 	fleetYAML, err := os.ReadFile(InstallDir + "/fleet/fleet.yaml")
-	if err != nil || !strings.Contains(string(fleetYAML), `age: ["age1`) {
+	if err != nil || !regexp.MustCompile(`age1[02-9ac-hj-np-z]{58}`).Match(fleetYAML) {
 		t.Errorf("the fleet doesn't encrypt to the new key:\n%s %v", fleetYAML, err)
+	}
+	if out, err := exec.Command("git", "-C", InstallDir+"/fleet", "log", "--oneline", "-1").CombinedOutput(); err != nil { //nolint:noctx // test
+		t.Errorf("the fleet repository has no commit: %v %s", err, out)
 	}
 	if fi, err := os.Stat(InstallDir + "/age.key"); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("age.key: %v %v", fi, err)
