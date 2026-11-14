@@ -553,4 +553,8 @@ func TestEditingNeedsRecentVerification(t *testing.T) {
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) || saved != 1 {
 		t.Errorf("setting a secret with an old sign-in: %d %s (saved %d)", rec.Code, rec.Body, saved)
 	}
+	rec = l.do(http.MethodPost, "/api/v1/tokens", `{"name":"ci","scope":"admin","days":1}`, session, testOrigin)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) {
+		t.Errorf("creating a token with an old sign-in: %d %s", rec.Code, rec.Body)
+	}
 }

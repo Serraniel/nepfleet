@@ -495,3 +495,58 @@ func TestChannelEndpoints(t *testing.T) {
 		t.Errorf("unknown: %d", rec.Code)
 	}
 }
+
+func TestTokenEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	admin, _, _ := store.Create("admin", auth.ScopeAdmin, nil, time.Hour)
+	edit, _, _ := store.Create("edit", auth.ScopeEdit, nil, time.Hour)
+	h := Handler(Options{Tokens: store})
+	do := func(method, path, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("GET", "/api/v1/tokens", edit, ""); rec.Code != http.StatusForbidden {
+		t.Errorf("edit lists tokens: %d", rec.Code)
+	}
+	rec := do("GET", "/api/v1/tokens", admin, "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "hash") || !strings.Contains(rec.Body.String(), `"name":"edit"`) {
+		t.Errorf("list: %d %s", rec.Code, rec.Body)
+	}
+	for body, want := range map[string]int{
+		`{"name":"ci","scope":"apply","stacks":["web"],"days":30}`: 201,
+		`{"name":"ci","scope":"apply","days":0}`:                   422,
+		`{"name":"ci","scope":"root","days":3}`:                    422,
+		`{"name":"x","scope":"admin","stacks":["web"],"days":3}`:   422,
+		`{"name":"x","scope":"read","stacks":["../x"],"days":3}`:   422,
+		`{"name":"x","scope":"read","days":3,"more":1}`:            400,
+	} {
+		if rec := do("POST", "/api/v1/tokens", admin, body); rec.Code != want {
+			t.Errorf("%s: %d, want %d (%s)", body, rec.Code, want, rec.Body)
+		}
+	}
+	if rec := do("POST", "/api/v1/tokens", edit, `{"name":"ci","scope":"admin","days":3}`); rec.Code != http.StatusForbidden {
+		t.Errorf("edit creates an admin token: %d", rec.Code)
+	}
+	rec = do("POST", "/api/v1/tokens", admin, `{"name":"tmp","scope":"read","days":1}`)
+	var created CreatedToken
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || !strings.HasPrefix(created.Secret, auth.Prefix) || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("created: %s %v", rec.Body, err)
+	}
+	if got, err := store.Check(created.Secret); err != nil || got.Name != "tmp" {
+		t.Errorf("the new secret works: %v", err)
+	}
+	if rec := do("DELETE", "/api/v1/tokens/"+created.Token.ID, admin, ""); rec.Code != http.StatusNoContent {
+		t.Errorf("revoke: %d", rec.Code)
+	}
+	if _, err := store.Check(created.Secret); err == nil {
+		t.Error("a revoked token still works")
+	}
+	for _, id := range []string{created.Token.ID, "nothex!!"} {
+		if rec := do("DELETE", "/api/v1/tokens/"+id, admin, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("revoke %s: %d", id, rec.Code)
+		}
+	}
+}
