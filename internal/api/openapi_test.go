@@ -110,6 +110,7 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"SyncStatus":        reflect.TypeFor[SyncStatus](),
 		"SecretKeys":        reflect.TypeFor[SecretKeys](),
 		"Feature":           reflect.TypeFor[Feature](),
+		"Channels":          reflect.TypeFor[Channels](),
 		"SecretValue":       reflect.TypeFor[SecretValue](),
 		"SecretResult":      reflect.TypeFor[SecretResult](),
 		"NewStackResult":    reflect.TypeFor[NewStackResult](),

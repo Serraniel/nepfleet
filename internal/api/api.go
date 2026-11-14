@@ -127,6 +127,10 @@ type Options struct {
 	// NewStack creates and commits a stack from a template, without applying
 	// it. Errors: ErrStackExists, InvalidError, ErrBusy.
 	NewStack func(ctx context.Context, req NewStack, by string) (NewStackResult, error)
+	// Channels names fleet.yaml's notification channels; TestChannel sends
+	// one a test message (ErrNoChannel for an unknown name).
+	Channels    func() ([]string, error)
+	TestChannel func(ctx context.Context, name string) error
 	// Features are the opt-in system stacks and the stacks providing them.
 	Features func() ([]Feature, error)
 	// SecretKeys lists the keys of a stack's encrypted values, or of the
@@ -304,6 +308,7 @@ func Handler(o Options) http.Handler {
 	registerNewStack(mux, o, l)
 	registerSecrets(mux, o, l)
 	registerFeatures(mux, o, l)
+	registerChannels(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))

@@ -360,6 +360,32 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Feature" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/notifications/channels:
+    get:
+      tags: [server]
+      operationId: channels
+      summary: The notification channels of fleet.yaml, by name only
+      description: Needs the read scope. Their URLs hold tokens and are never served.
+      responses:
+        "200":
+          description: The names
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Channels" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/notifications/channels/{name}/test:
+    post:
+      tags: [server]
+      operationId: testChannel
+      summary: Send a channel a test message, as nepfleet notify test (admin scope)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Sent }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+        "404": { description: No channel of that name }
+        "502": { description: "Sending failed; the reason, with URLs removed" }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -966,6 +992,11 @@ components:
         template: { type: string }
         what: { type: string }
         stacks: { type: array, items: { type: string }, description: "name@target" }
+    Channels:
+      type: object
+      required: [channels]
+      properties:
+        channels: { type: array, items: { type: string } }
     SecretKeys:
       type: object
       required: [keys]
