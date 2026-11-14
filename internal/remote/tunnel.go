@@ -43,8 +43,12 @@ nf() {
 `
 
 // mintScript creates a token. It takes only checked values: see MintToken.
+//
+// The scope is admin: the token is created over SSH as a user who can run
+// any nepfleet command there already, so it grants the app nothing more,
+// and creating stacks, secrets, tokens and the rest need edit or admin.
 func mintScript(label, lifetime string) string {
-	return nepfleetCmd + "nf token create --name " + label + " --scope apply --expires " + lifetime + " 2>&1\n"
+	return nepfleetCmd + "nf token create --name " + label + " --scope admin --expires " + lifetime + " 2>&1\n"
 }
 
 // parseMinted reads what token create printed.
