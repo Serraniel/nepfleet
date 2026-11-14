@@ -529,6 +529,35 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
         "409": { description: "No such user or passkey, more than one fits, or it's the last way in" }
+  /api/v1/stacks/{name}/egress/allow:
+    post:
+      tags: [stacks]
+      operationId: allowEgress
+      summary: Add hosts or addresses to the stack's egress allow list, in one commit
+      description: >-
+        As pasting nepfleet egress suggest's list: adds the entries to
+        spec.egress.allow in stack.yaml (keeping its comments), checks the stack
+        still loads, and commits as the person or token. It doesn't apply. Needs the
+        edit scope, and a recent verification for a person.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EgressAllow" }
+      responses:
+        "200":
+          description: The commit (none when all were allowed already) and what was added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EgressAllowResult" }
+        "400": { description: Not the expected body }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, or `{\"verify\": true}`" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Another operation runs, or stack.yaml has uncommitted changes on the server" }
+        "422": { description: "Not a host name, address or range (no wildcards); nothing saved" }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1135,6 +1164,17 @@ components:
         template: { type: string }
         what: { type: string }
         stacks: { type: array, items: { type: string }, description: "name@target" }
+    EgressAllow:
+      type: object
+      required: [add]
+      properties:
+        add: { type: array, items: { type: string }, maxItems: 200 }
+    EgressAllowResult:
+      type: object
+      required: [added]
+      properties:
+        commit: { type: string }
+        added: { type: array, items: { type: string } }
     UserInfo:
       type: object
       required: [name, created, codes, passkeys]

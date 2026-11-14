@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -662,5 +663,39 @@ func TestUserEndpoints(t *testing.T) {
 	}
 	if all, _ := users.List(); len(all) != 1 || len(all[0].Credentials) != 1 {
 		t.Errorf("left: %+v", all)
+	}
+}
+
+func TestEgressAllowEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	apply, _, _ := store.Create("a", auth.ScopeApply, nil, time.Hour)
+	edit, _, _ := store.Create("e", auth.ScopeEdit, nil, time.Hour)
+	var got []string
+	h := Handler(Options{Tokens: store, EgressAllow: func(_ context.Context, _ string, add []string, _ string) (EgressAllowResult, error) {
+		got = add
+		return EgressAllowResult{Commit: "c1", Added: add}, nil
+	}})
+	do := func(token, body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/stacks/web/egress/allow", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for body, want := range map[string]int{
+		`{"add":["api.example.org","2001:db8::/32"]}`: 200,
+		`{"add":["bad host"]}`:                        422,
+		`{"add":["x: y"]}`:                            422,
+		`{"add":[]}`:                                  400,
+	} {
+		if code := do(edit, body); code != want {
+			t.Errorf("%s: %d, want %d", body, code, want)
+		}
+	}
+	if do(apply, `{"add":["a.org"]}`) != http.StatusForbidden {
+		t.Error("an apply token edits")
+	}
+	if !slices.Equal(got, []string{"api.example.org", "2001:db8::/32"}) {
+		t.Errorf("got %v", got)
 	}
 }
