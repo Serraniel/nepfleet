@@ -243,6 +243,16 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		run := func(ctx context.Context, script string) ([]byte, error) { return s.Setup.Run(ctx, t, script) }
 		err := remote.RunBootstrap(ctx, run, rep, p.Steps, j, password)
+		// What the machine is now, saved before the job reads as done: a
+		// client that sees it finished then finds the new state.
+		if rep, perr := s.Probe(ctx, t); perr == nil {
+			s.mu.Lock()
+			if i := s.index(name); i >= 0 {
+				s.remotes[i].Report, s.remotes[i].Next, s.remotes[i].Checked = rep, rep.Next(), time.Now().UTC()
+				_ = s.save()
+			}
+			s.mu.Unlock()
+		}
 		j.mu.Lock()
 		j.job.Finished = time.Now().UTC()
 		if err != nil {
@@ -251,15 +261,6 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 			j.job.State = "succeeded"
 		}
 		j.mu.Unlock()
-		// What the machine is now.
-		if rep, err := s.Probe(ctx, t); err == nil {
-			s.mu.Lock()
-			if i := s.index(name); i >= 0 {
-				s.remotes[i].Report, s.remotes[i].Next, s.remotes[i].Checked = rep, rep.Next(), time.Now().UTC()
-				_ = s.save()
-			}
-			s.mu.Unlock()
-		}
 	}()
 	writeJSON(w, http.StatusAccepted, j.snapshot())
 }
