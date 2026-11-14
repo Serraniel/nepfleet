@@ -355,3 +355,37 @@ func TestAPINetworkImpostor(t *testing.T) {
 		}
 	}
 }
+
+func TestInputHelpPerValue(t *testing.T) {
+	tpl, err := Load("testdata/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := tpl.Spec.Inputs
+	provider := Input{Name: "PROVIDER", Type: "enum", Options: []string{"none", "cloudflare"}, Default: "none"}
+	token := Input{Name: "TOKEN", Type: "secret", Description: "a token", HelpFrom: "PROVIDER", Help: map[string]string{"cloudflare": "Zone → DNS → Edit"}}
+	tpl.Spec.Inputs = append(slices.Clone(base), provider, token)
+	if err := tpl.Validate(); err != nil {
+		t.Fatalf("valid help rejected: %v", err)
+	}
+	if got := tpl.Spec.HelpText(token, map[string]string{"PROVIDER": "cloudflare"}); got != "Zone → DNS → Edit" {
+		t.Errorf("help for cloudflare = %q", got)
+	}
+	if got := tpl.Spec.HelpText(token, nil); got != "a token" {
+		t.Errorf("no help for the default (none): %q, want the description", got)
+	}
+
+	for _, c := range []struct {
+		in   Input
+		want string
+	}{
+		{Input{Name: "T", Type: "secret", HelpFrom: "PROVIDER"}, "go together"},
+		{Input{Name: "T", Type: "secret", HelpFrom: "DOMAIN", Help: map[string]string{"x": "y"}}, "another enum input"},
+		{Input{Name: "T", Type: "secret", HelpFrom: "PROVIDER", Help: map[string]string{"hetzner": "y"}}, "not an option"},
+	} {
+		tpl.Spec.Inputs = append(slices.Clone(base), provider, c.in)
+		if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: want %q, got %v", c.in, c.want, err)
+		}
+	}
+}

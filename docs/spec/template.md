@@ -69,6 +69,12 @@ spec:
       type: hostname           # string|text|secret|hostname|url|email|int|bool|enum|path
       title: Domain
       required: true
+    - name: DNS_TOKEN
+      type: secret
+      description: An API token of your DNS provider.   # shown when help has nothing for the value
+      helpFrom: DNS_PROVIDER   # an enum input: its current value picks the text
+      help:
+        cloudflare: "Zone → Zone → Read and Zone → DNS → Edit, for your zone only."
   generate:                    # created once at install, stored encrypted
     - name: ADMIN_TOKEN
       kind: secret

@@ -160,6 +160,30 @@ type Input struct {
 	Default     string   `yaml:"default" json:"default,omitempty"`
 	Options     []string `yaml:"options" json:"options,omitempty"`
 	Pattern     string   `yaml:"pattern" json:"pattern,omitempty"`
+	// HelpFrom names an enum input whose current value picks the text in
+	// Help (e.g. the token help for the chosen DNS provider); Description
+	// stays for values without one.
+	HelpFrom string            `yaml:"helpFrom" json:"helpFrom,omitempty"`
+	Help     map[string]string `yaml:"help" json:"help,omitempty"`
+}
+
+// HelpText is what to show for in: the help for the current value of its
+// HelpFrom input (values, else that input's default), else its description.
+func (s *Spec) HelpText(in Input, values map[string]string) string {
+	if in.HelpFrom != "" {
+		v, ok := values[in.HelpFrom]
+		if !ok || v == "" {
+			for _, other := range s.Inputs {
+				if other.Name == in.HelpFrom {
+					v = other.Default
+				}
+			}
+		}
+		if h, ok := in.Help[v]; ok {
+			return h
+		}
+	}
+	return in.Description
 }
 
 // KindNotifyToken generates an API token of scope notify for the stack.
@@ -345,6 +369,25 @@ func (t *Template) Validate() error {
 	byName := map[string]Input{}
 	for _, in := range s.Inputs {
 		byName[in.Name] = in
+	}
+	for _, in := range s.Inputs {
+		if (in.HelpFrom == "") != (len(in.Help) == 0) {
+			bad("spec.inputs %q: helpFrom and help go together", in.Name)
+			continue
+		}
+		if in.HelpFrom == "" {
+			continue
+		}
+		from, ok := byName[in.HelpFrom]
+		if !ok || from.Type != "enum" || from.Name == in.Name {
+			bad("spec.inputs %q: helpFrom must name another enum input", in.Name)
+			continue
+		}
+		for _, k := range slices.Sorted(maps.Keys(in.Help)) {
+			if !slices.Contains(from.Options, k) {
+				bad("spec.inputs %q: help %q is not an option of %s", in.Name, k, from.Name)
+			}
+		}
 	}
 	for i, h := range s.Hardware {
 		in, ok := byName[h.Input]
