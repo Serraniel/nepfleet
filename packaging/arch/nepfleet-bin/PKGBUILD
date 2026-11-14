@@ -2,7 +2,7 @@
 # The NepFleet CLI from a GitHub release. Until it's on the AUR:
 #   cd packaging/arch/nepfleet-bin && makepkg -si
 pkgname=nepfleet-bin
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc="Self-hosted fleet manager for Docker Compose and Swarm stacks, from a git repository"
 arch=('x86_64' 'aarch64')
@@ -23,8 +23,8 @@ source_x86_64=("nepfleet-${pkgver}-amd64::${url}/releases/download/v${pkgver}/ne
 source_aarch64=("nepfleet-${pkgver}-arm64::${url}/releases/download/v${pkgver}/nepfleet_${pkgver}_linux_arm64")
 # From the release's SHA256SUMS, whose signature is SHA256SUMS.sigstore.json.
 sha256sums=('8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef')
-sha256sums_x86_64=('5f1dc3e4b88bc22166030578bed69437e41db5baef70379c7ecc6419e4ac2257')
-sha256sums_aarch64=('fbd2c08a8bc336384f9a754ee7a42f7da5114e0761d8bf8ef6585f77ca146ed8')
+sha256sums_x86_64=('cf0d58ace846490824541ef5198b2b60469891fdc9f1fb27c198e1ff8067857c')
+sha256sums_aarch64=('ba37c4189e78b4ab49e1a9c46ee607185e96e5ad330b50d2d2fde8182ff517ff')
 
 package() {
   local bin=nepfleet-${pkgver}-amd64
