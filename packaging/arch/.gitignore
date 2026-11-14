@@ -1,0 +1,7 @@
+# What makepkg leaves next to a PKGBUILD.
+src/
+pkg/
+*.pkg.tar.*
+*-amd64
+*-arm64
+LICENSE-*
