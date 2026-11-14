@@ -4,7 +4,6 @@ package api
 
 import (
 	"errors"
-	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -144,7 +143,7 @@ func (a *Accounts) totpRoutes(mux *http.ServeMux, guarded guardedRoute) {
 		if err := a.Users.SetTOTP(u.ID, &auth.TOTP{Secret: c.secret, LastStep: step}); err != nil {
 			return err
 		}
-		log.Printf("api: %q turned on sign-in codes", u.Name)
+		logf("api: %q turned on sign-in codes", u.Name)
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}))
@@ -156,7 +155,7 @@ func (a *Accounts) totpRoutes(mux *http.ServeMux, guarded guardedRoute) {
 		if err := a.Users.SetTOTP(u.ID, nil); err != nil {
 			return err
 		}
-		log.Printf("api: %q turned off sign-in codes", u.Name)
+		logf("api: %q turned off sign-in codes", u.Name)
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}))
@@ -180,7 +179,7 @@ func (a *Accounts) totpRoutes(mux *http.ServeMux, guarded guardedRoute) {
 			return err
 		}
 		a.totpSucceeded(name)
-		log.Printf("api: %q signed in with a code", u.Name)
+		logf("api: %q signed in with a code", u.Name)
 		if err := a.signIn(w, u); err != nil {
 			return err
 		}

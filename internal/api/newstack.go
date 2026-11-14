@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"slices"
 
@@ -85,7 +84,7 @@ func registerNewStack(mux *http.ServeMux, o Options, l *limiter) {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %s created stack %s from %s in %s (token %s)", t.Name, res.Name, req.Template, res.Commit, t.ID)
+		logf("api: %s created stack %s from %s in %s (token %s)", t.Name, res.Name, req.Template, res.Commit, t.ID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(res)

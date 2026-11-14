@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"slices"
@@ -190,9 +189,9 @@ func (a *Accounts) usedPasskey(ctx context.Context, user *auth.User, cred *webau
 	}
 	if cred.Authenticator.CloneWarning {
 		if err := a.Users.LockCredential(user.ID, cred.ID); err != nil {
-			log.Printf("api: locking a passkey of %q: %v", user.Name, err)
+			logf("api: locking a passkey of %q: %v", user.Name, err)
 		}
-		log.Printf("api: passkey %s of %q locked: its signature count went backwards", auth.CredentialName(cred.ID), user.Name)
+		logf("api: passkey %s of %q locked: its signature count went backwards", auth.CredentialName(cred.ID), user.Name)
 		if a.Alert != nil {
 			_ = a.Alert(ctx, Alert{Source: "nepfleet", Rule: "passkey locked",
 				Detail: fmt.Sprintf("A passkey of %s (%s) signed in with a signature count that went backwards, so a copy of it may be in use. It's locked: sign-ins with it are refused until it's removed with nepfleet user remove-passkey.", user.Name, auth.CredentialName(cred.ID))})
@@ -266,7 +265,7 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		}
 		if err := next(w, r, addr); err != nil {
 			l.fail(addr)
-			log.Printf("api: sign-in: %v", err)
+			logf("api: sign-in: %v", err)
 			http.Error(w, "sign-in failed", http.StatusUnauthorized)
 		}
 	}
@@ -357,7 +356,7 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		a.mu.Lock()
 		a.SetupToken = ""
 		a.mu.Unlock()
-		log.Printf("api: first user %q created", c.user.Name)
+		logf("api: first user %q created", c.user.Name)
 		if err := a.signIn(w, c.user); err != nil {
 			return err
 		}
@@ -394,7 +393,7 @@ func (a *Accounts) routes(mux *http.ServeMux, l *limiter, o Options, origins []s
 		if err := a.usedPasskey(r.Context(), user, cred); err != nil {
 			return err
 		}
-		log.Printf("api: %q signed in", user.Name)
+		logf("api: %q signed in", user.Name)
 		if err := a.signIn(w, user); err != nil {
 			return err
 		}

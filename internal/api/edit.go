@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
@@ -120,7 +119,7 @@ func registerEdit(mux *http.ServeMux, o Options, l *limiter) {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %s changed %d file(s) of %s in %s (token %s)", t.Name, len(e.Files), name, res.Commit, t.ID)
+		logf("api: %s changed %d file(s) of %s in %s (token %s)", t.Name, len(e.Files), name, res.Commit, t.ID)
 		writeJSON(w, res)
 	})))
 }

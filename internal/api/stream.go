@@ -5,7 +5,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -82,7 +81,7 @@ func streamEvents(o Options) http.HandlerFunc {
 		// Each write gets its own time: the server's limit is for short answers.
 		send := func(text string) bool {
 			if err := rc.SetWriteDeadline(time.Now().Add(streamWriteWindow)); err != nil {
-				log.Printf("api: event stream: %v", err)
+				logf("api: event stream: %v", err)
 				return false
 			}
 			if _, err := fmt.Fprint(w, text); err != nil {
@@ -103,7 +102,7 @@ func streamEvents(o Options) http.HandlerFunc {
 		for {
 			evs, err := o.Events(after, streamPage, allow)
 			if err != nil {
-				log.Printf("api: event stream: %v", err)
+				logf("api: event stream: %v", err)
 				return
 			}
 			raw, err := json.Marshal(evs)

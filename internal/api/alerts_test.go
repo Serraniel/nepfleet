@@ -13,8 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -912,5 +914,15 @@ func TestImportComposeEndpoints(t *testing.T) {
 	}
 	if rec := do("POST", onlyWeb, `{"project":"web"}`); rec.Code != http.StatusForbidden {
 		t.Errorf("a limited token imports: %d", rec.Code)
+	}
+}
+
+func TestLogfKeepsOneLine(t *testing.T) {
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	logf("api: %s created token %s", "Ada\n2026/01/01 api: forged", "x\ry")
+	if strings.Count(buf.String(), "\n") != 1 || strings.Contains(buf.String(), "\r") {
+		t.Errorf("not one line: %q", buf.String())
 	}
 }

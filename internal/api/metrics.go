@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -57,7 +56,7 @@ func serveMetrics(o Options) http.HandlerFunc {
 		if o.Stacks != nil {
 			all, err := o.Stacks()
 			if err != nil {
-				log.Printf("api: metrics: %v", err)
+				logf("api: metrics: %v", err)
 				http.Error(w, "the fleet cannot be read", http.StatusInternalServerError)
 				return
 			}
@@ -71,7 +70,7 @@ func serveMetrics(o Options) http.HandlerFunc {
 		if o.Events != nil {
 			evs, err := o.Events(0, metricsEvents, allow)
 			if err != nil {
-				log.Printf("api: metrics: %v", err)
+				logf("api: metrics: %v", err)
 				http.Error(w, "events cannot be read", http.StatusInternalServerError)
 				return
 			}

@@ -5,7 +5,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"regexp"
 
@@ -108,7 +107,7 @@ func registerSecrets(mux *http.ServeMux, o Options, l *limiter) {
 			verb = "removed"
 		}
 		// The key only: never the value.
-		log.Printf("api: %q %s secret %s of %s in %s (token %s)", t.Name, verb, key, where, commit, t.ID) //nolint:gosec // %q escapes the name; checked key and stack names
+		logf("api: %q %s secret %s of %s in %s (token %s)", t.Name, verb, key, where, commit, t.ID)
 		writeJSON(w, SecretResult{Commit: commit})
 	}
 
