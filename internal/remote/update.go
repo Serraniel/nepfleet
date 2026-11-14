@@ -61,3 +61,16 @@ func UpdatePlan(r *Report, compose []byte, version string) ([]Step, error) {
 				"fi\n"},
 	}, nil
 }
+
+// StartPlan starts a NepFleet that host install set up and that has stopped
+// (the doctor's "its container is stopped"), and waits until it's healthy.
+func StartPlan(r *Report) ([]Step, error) {
+	if r.NepFleetRunning || r.NepFleetImage != "" {
+		return nil, errors.New("NepFleet runs here already")
+	}
+	return []Step{
+		{Text: "start NepFleet in " + InstallDir + " and wait until it's healthy",
+			Script: "cd " + InstallDir + "\ntest -f compose.yaml || { echo 'no compose.yaml in " + InstallDir + ": NepFleet was not set up here by host install' >&2; exit 1; }\n" +
+				"docker compose up -d --wait\n"},
+	}, nil
+}

@@ -46,3 +46,16 @@ func TestUpdatePlan(t *testing.T) {
 		}
 	}
 }
+
+func TestStartPlan(t *testing.T) {
+	steps, err := StartPlan(&Report{})
+	if err != nil || len(steps) != 1 || !strings.Contains(steps[0].Script, "docker compose up -d --wait") || steps[0].Root {
+		t.Fatalf("start: %+v %v", steps, err)
+	}
+	if _, err := StartPlan(&Report{NepFleetImage: "ghcr.io/serraniel/nepfleet:0.4.0", NepFleetRunning: true}); err == nil {
+		t.Error("started a running NepFleet")
+	}
+	if got := parseDoctor([]byte("nepfleet-doctor: stopped\n")); len(got) != 1 || got[0].Action != "start" {
+		t.Errorf("stopped check: %+v", got)
+	}
+}

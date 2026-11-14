@@ -18,6 +18,9 @@ type DoctorCheck struct {
 	Status string `json:"status"` // ok, warn, fail
 	Detail string `json:"detail,omitempty"`
 	Fix    string `json:"fix,omitempty"`
+	// Action names a setup kind that applies the fix as a reviewed plan
+	// (start), when the app can do it.
+	Action string `json:"action,omitempty"`
 }
 
 // doctorScript runs nepfleet doctor where NepFleet is: in its container, else
@@ -61,7 +64,7 @@ func parseDoctor(out []byte) []DoctorCheck {
 	switch {
 	case strings.Contains(text, "nepfleet-doctor: stopped"):
 		return []DoctorCheck{{Name: "NepFleet", Status: "fail", Detail: "its container is stopped",
-			Fix: "start it on the machine: cd /srv/nepfleet && docker compose up -d"}}
+			Fix: "start it on the machine: cd /srv/nepfleet && docker compose up -d", Action: "start"}}
 	case strings.Contains(text, "nepfleet-doctor: absent"):
 		return []DoctorCheck{{Name: "NepFleet", Status: "fail", Detail: "not installed on this machine",
 			Fix: "set it up from Fleets (Set up NepFleet here)"}}
