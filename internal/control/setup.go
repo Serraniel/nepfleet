@@ -21,6 +21,9 @@ import (
 const (
 	SetupBootstrap = "bootstrap"
 	SetupInstall   = "install"
+	// SetupMounts makes the machine's network mounts match its hosts/<name>.yaml
+	// in the fleet repository folder (Settings), as `nepfleet host apply`.
+	SetupMounts = "mounts"
 )
 
 // SetupPlan is what a setup would do on a remote, for a person to review.
@@ -56,6 +59,9 @@ type Setup struct {
 	Compose []byte
 	// Ingress is the ingress network bootstrap creates.
 	Ingress string
+	// Mounts plans a machine's mounts (nil: the daemon can't); run reaches
+	// the machine.
+	Mounts func(ctx context.Context, name string, run func(context.Context, string) ([]byte, error), r *remote.Report) ([]remote.Step, error)
 
 	mu   sync.Mutex
 	jobs map[string]*setupJob
@@ -127,8 +133,20 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 		steps, err = remote.BootstrapPlan(rep, s.Setup.Ingress)
 	case SetupInstall:
 		steps, err = remote.InstallPlan(rep, name, s.Setup.Compose, false)
+	case SetupMounts:
+		if s.Setup.Mounts == nil || s.Setup.Run == nil {
+			return nil, nil, t, errors.New("this daemon can't set up mounts")
+		}
+		run := func(ctx context.Context, script string) ([]byte, error) { return s.Setup.Run(ctx, t, script) }
+		steps, err = s.Setup.Mounts(ctx, name, run, rep)
+		if err == nil && len(steps) > 0 && !rep.Root && !rep.Sudo && !rep.SudoPassword {
+			err = errors.New("this needs root: log in as root, or as a user who may use sudo")
+		}
+		if err == nil && len(steps) == 0 {
+			err = errors.New("nothing to do: the mounts match the host file already")
+		}
 	default:
-		return nil, nil, t, errors.New("kind is bootstrap or install")
+		return nil, nil, t, errors.New("kind is bootstrap, install or mounts")
 	}
 	p := &SetupPlan{Kind: kind, Steps: steps}
 	if p.Steps == nil {
@@ -183,7 +201,7 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil || req.Plan == "" {
-		fail(w, http.StatusBadRequest, `send {"kind": "bootstrap|install", "plan": "<id of the reviewed plan>"}`)
+		fail(w, http.StatusBadRequest, `send {"kind": "bootstrap|install|mounts", "plan": "<id of the reviewed plan>"}`)
 		return
 	}
 	if s.Setup.Run == nil {
