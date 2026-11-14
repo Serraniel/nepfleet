@@ -18,6 +18,7 @@ import (
 
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/doctor"
+	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/notify"
 )
 
@@ -55,8 +56,11 @@ func cmdKey(args []string, stdout, stderr io.Writer) error {
 	if len(args) > 0 && args[0] == "unlock" {
 		return cmdKeyUnlock(args, stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "add-recipient" {
+		return cmdKeyAddRecipient(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "backup" {
-		return errors.New("usage: nepfleet key backup --out FILE [--recipient age1…]\n       nepfleet key unlock [~/.ssh/key …]")
+		return errors.New("usage: nepfleet key backup --out FILE [--recipient age1…]\n       nepfleet key unlock [~/.ssh/key …]\n       nepfleet key add-recipient age1…")
 	}
 	var c common
 	fs := flag.NewFlagSet("key backup", flag.ContinueOnError)
@@ -389,4 +393,30 @@ func mirrorAPI(c common, run bool) ([]api.MirrorStatus, error) {
 		out = append(out, api.MirrorStatus{URL: m, OK: state[m].OK, Error: state[m].Error})
 	}
 	return out, nil
+}
+
+// cmdKeyAddRecipient: nepfleet key add-recipient age1… — the fleet's secrets
+// encrypt to that key too (spec.secrets.age). Existing secret files keep
+// their recipients until they are written again.
+func cmdKeyAddRecipient(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("key add-recipient", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return errors.New("usage: nepfleet key add-recipient age1… [--fleet DIR]")
+	}
+	added, err := fleet.AddRecipient(*dir, pos[0])
+	if err != nil {
+		return err
+	}
+	if added {
+		fmt.Fprintf(stdout, "the fleet's secrets now encrypt to %s; commit fleet.yaml\n", pos[0])
+	} else {
+		fmt.Fprintf(stdout, "%s is a recipient already\n", pos[0])
+	}
+	return nil
 }

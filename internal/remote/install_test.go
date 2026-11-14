@@ -54,7 +54,7 @@ func TestInstallPlan(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"chown me: /srv/nepfleet", "NEPFLEET_HOST=%s\\n", " vps > .env", "${NEPFLEET_UID}", "age-keygen", "init .", "up -d --wait"} {
+	for _, want := range []string{"chown me: /srv/nepfleet", "NEPFLEET_HOST=%s\\n", " vps > .env", "${NEPFLEET_UID}", "age-keygen", "init .", "key add-recipient", "commit -qm", "up -d --wait"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("missing %q", want)
 		}
