@@ -40,6 +40,7 @@ import (
 	"github.com/Serraniel/nepfleet/internal/importer"
 	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/notify"
+	"github.com/Serraniel/nepfleet/internal/remote"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/secrets"
 	"github.com/Serraniel/nepfleet/internal/source"
@@ -1562,7 +1563,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	c.register(fs)
 	security := fs.Bool("security", false, "check this host's security instead: SSH, firewall, exposed ports, updates, Docker")
-	asJSON := fs.Bool("json", false, "with --security: print the findings as JSON")
+	asJSON := fs.Bool("json", false, "print the checks (or with --security the findings) as JSON")
 	notifyNew := fs.Bool("notify", false, "with --security: send new problems to the fleet's notification channels")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1573,6 +1574,22 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	checks, n, err := doctorChecks(c)
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		// For the app's remote doctor: one line, the same checks.
+		out := make([]remote.DoctorCheck, 0, len(checks))
+		for _, ch := range checks {
+			out = append(out, remote.DoctorCheck{Name: ch.Name, Status: ch.Status.Word(), Detail: ch.Detail, Fix: ch.Fix})
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "%s\n", raw)
+		if doctor.Failed(checks) {
+			return errors.New("some checks failed")
+		}
+		return nil
 	}
 	fmt.Fprintf(stdout, "Host %s, %d stack(s) planned here\n\n", c.host, n)
 	for _, ch := range checks {

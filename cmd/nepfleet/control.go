@@ -85,6 +85,11 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	}
 	ssh := remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}
 	s.Setup.Run, s.Setup.Compose, s.Setup.Ingress = ssh.Run, compose, "nepfleet_ingress"
+	s.Doctor = func(ctx context.Context, t remote.Target) ([]remote.DoctorCheck, error) {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		return remote.Doctor(ctx, ssh.Run, t)
+	}
 	s.Setup.Mounts = controlMounts(func() string { return s.LoadSettings().FleetDir })
 	if err := s.Load(); err != nil {
 		return err
