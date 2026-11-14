@@ -48,6 +48,7 @@ type tunnel struct {
 	mu     sync.Mutex
 	state  string
 	err    string
+	locked []string
 	token  remote.Token
 	minted time.Time
 	cancel context.CancelFunc
@@ -170,6 +171,9 @@ func (s *Server) runTunnel(ctx context.Context, t *tunnel, name string, target r
 			msg = err.Error()
 		}
 		t.set(TunnelDown, msg)
+		t.mu.Lock()
+		t.locked = lockedKeys(err)
+		t.mu.Unlock()
 		if up {
 			backoff = s.retry()
 		}
@@ -372,6 +376,11 @@ func (s *Server) viewLocked(r Remote) Remote {
 	r.Tunnel, r.TunnelError = TunnelOff, ""
 	if t := s.tunnels[r.Name]; t != nil {
 		r.Tunnel, r.TunnelError = t.status()
+		t.mu.Lock()
+		if len(t.locked) > 0 && r.Tunnel == TunnelDown {
+			r.LockedKeys = t.locked
+		}
+		t.mu.Unlock()
 	}
 	return r
 }

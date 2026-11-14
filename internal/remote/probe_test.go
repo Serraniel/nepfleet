@@ -128,9 +128,10 @@ func TestMintedToken(t *testing.T) {
 	}
 }
 
-func TestSSHErrorNamesTheAgent(t *testing.T) {
+// With no locked key to blame, a refused login points at authorized_keys.
+func TestSSHErrorRefusedLogin(t *testing.T) {
 	err := sshError(Target{Host: "vps"}, "user@vps: Permission denied (publickey).", errors.New("exit status 255"))
-	if err == nil || !strings.Contains(err.Error(), "ssh-add") || !strings.Contains(err.Error(), "passphrase") {
+	if err == nil || !strings.Contains(err.Error(), "authorized_keys of your user") {
 		t.Errorf("%v", err)
 	}
 }

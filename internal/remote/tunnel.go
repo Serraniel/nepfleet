@@ -126,7 +126,7 @@ func (s SSH) Forward(ctx context.Context, t Target, socket string) error {
 		return ctx.Err()
 	}
 	if err != nil {
-		return sshError(t, Clean(stderr.String()), err)
+		return s.loginError(ctx, t, Clean(stderr.String()), err)
 	}
 	return fmt.Errorf("%s: the tunnel ended", t)
 }

@@ -10,16 +10,12 @@ nepfleet remote probe nas --json
 It reports the system and architecture, your user's rights, Docker and Compose, running projects, the swarm role, and whether NepFleet or a fleet repository is already there. Then it says what fits: connect, adopt, or set up new.
 
 - **Read-only:** a fixed script goes over SSH's stdin and nothing is installed or written. The only thing it starts is `sudo -n true`, to learn whether sudo needs a password.
-- **Your SSH setup:** it uses the system `ssh`, with your keys, agent and config. NepFleet never asks for a password.
-- **Keys with a passphrase** must be in your SSH agent, as `ssh` runs without prompting: the control daemon and the desktop app reconnect in the background, with nobody to type it. On Arch, for example:
-
-  ```sh
-  systemctl --user enable --now ssh-agent
-  echo 'SSH_AUTH_SOCK=${XDG_RUNTIME_DIR}/ssh-agent.socket' > ~/.config/environment.d/ssh-agent.conf   # for graphical apps, after a fresh login
-  ssh-add      # the passphrase, once per login
-  ```
-
-  KDE's KWallet and GNOME Keyring run an agent too. `ssh-add -l` lists what yours holds.
+- **Your SSH setup:** it uses the system `ssh`, with your keys, agent and config. It never asks for an SSH password: only keys work.
+- **Keys with a passphrase:** `ssh` runs without a terminal here (the daemon and the app reconnect in the background), so a key with a passphrase is used through an SSH agent.
+  - **Which agent:** your session's agent if one runs (`SSH_AUTH_SOCK`); otherwise the control daemon starts its own, which only you can use, and stops it with the daemon.
+  - **Unlocking:** when SSH refuses the login and one of the keys `ssh` would offer has a passphrase, NepFleet names that key. The app asks for the passphrase; on the command line, `host bootstrap`, `host install` and `host apply` ask on the terminal (without echo), and `nepfleet key unlock [~/.ssh/key …]` unlocks keys into your agent.
+  - **How:** `ssh-add -t 8h <key>`, with NepFleet as `SSH_ASKPASS`. The passphrase reaches it in that one child process's environment, never as an argument, a file or a log line. Only private keys in `~/.ssh` are accepted, and the key is in the agent for 8 hours, then has to be unlocked again.
+  - **Your own agent instead:** run one for your session (on Arch, `systemctl --user enable --now ssh-agent`, and `SSH_AUTH_SOCK=${XDG_RUNTIME_DIR}/ssh-agent.socket` in `~/.config/environment.d/`). Then a key unlocked once, by `ssh-add` or by NepFleet, works for both. KDE's KWallet and GNOME Keyring run an agent too.
 - **Host keys:** an unknown or changed host key is refused, never accepted. Connect once with `ssh` and check the fingerprint.
 - **Remote output is untrusted:** only known fields are read, and control characters are removed before anything is shown.
 

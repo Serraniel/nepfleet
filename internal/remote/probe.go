@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -115,9 +116,21 @@ func (s SSH) Run(ctx context.Context, t Target, script string) ([]byte, error) {
 		_, _ = io.Copy(io.Discard, stdout) // let ssh finish
 	}
 	if err := cmd.Wait(); err != nil {
-		return nil, sshError(t, Clean(stderr.String()), err)
+		return nil, s.loginError(ctx, t, Clean(stderr.String()), err)
 	}
 	return out, rerr
+}
+
+// loginError is sshError, naming the locked keys when one is why SSH refused.
+func (s SSH) loginError(ctx context.Context, t Target, stderr string, err error) error {
+	if strings.Contains(stderr, "Permission denied") {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if keys := s.lockedKeys(ctx, t); len(keys) > 0 {
+			return &LockedKeyError{Target: t, Keys: keys}
+		}
+	}
+	return sshError(t, stderr, err)
 }
 
 func sshError(t Target, stderr string, err error) error {
@@ -125,8 +138,12 @@ func sshError(t Target, stderr string, err error) error {
 	case strings.Contains(stderr, "Host key verification failed"), strings.Contains(stderr, "No ED25519 host key"), strings.Contains(stderr, "host key is not known"):
 		return fmt.Errorf("%s: its host key is not known or has changed. Connect once with ssh and check the fingerprint: NepFleet never accepts a key on its own", t)
 	case strings.Contains(stderr, "Permission denied"):
-		// The usual cause: a key with a passphrase, which ssh can't ask for here.
-		return fmt.Errorf("%s: SSH refused the login. NepFleet uses your SSH keys without prompting, so a key with a passphrase must be in your SSH agent: run ssh-add (check with ssh-add -l), then try again. It never asks for a password", t)
+		// No locked key to blame (see loginError): the key isn't known there.
+		who := "your user"
+		if t.User != "" {
+			who = t.User
+		}
+		return fmt.Errorf("%s: SSH refused the login: none of your keys was accepted. Check that your public key is in ~/.ssh/authorized_keys of %s there. NepFleet uses keys only, never a password", t, who)
 	case stderr != "":
 		return fmt.Errorf("%s: %s", t, stderr)
 	}

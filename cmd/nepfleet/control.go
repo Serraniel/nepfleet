@@ -88,6 +88,21 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	if err := s.Load(); err != nil {
 		return err
 	}
+	// Keys with a passphrase need an agent: the session's, or our own.
+	if !remote.AgentReachable(os.Getenv("SSH_AUTH_SOCK")) {
+		sock, stopAgent, err := remote.StartAgent(controlDir())
+		if err != nil {
+			fmt.Fprintf(stderr, "nepfleet control: no SSH agent (%v); keys with a passphrase can't be unlocked\n", err)
+		} else {
+			_ = os.Setenv("SSH_AUTH_SOCK", sock)
+			defer stopAgent()
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		s.Keys = control.Keys{Askpass: exe, Unlock: func(r *http.Request, path, passphrase, askpass string) error {
+			return remote.Unlock(r.Context(), path, passphrase, askpass, remote.KeyLifetime)
+		}}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *httpAddr != "" {

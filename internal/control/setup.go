@@ -154,7 +154,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 		case errors.Is(err, errNoRemote):
 			fail(w, http.StatusNotFound, err.Error())
 		case err != nil:
-			fail(w, http.StatusBadGateway, err.Error())
+			failErr(w, http.StatusBadGateway, err)
 		default:
 			writeJSON(w, http.StatusOK, p)
 		}
@@ -213,7 +213,7 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, err.Error())
 		return
 	case err != nil:
-		fail(w, http.StatusBadGateway, err.Error())
+		failErr(w, http.StatusBadGateway, err)
 		return
 	case p.Error != "":
 		fail(w, http.StatusConflict, p.Error)
