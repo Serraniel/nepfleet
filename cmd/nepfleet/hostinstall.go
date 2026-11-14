@@ -52,7 +52,9 @@ func cmdHostInstall(args []string, stdout, stderr io.Writer) error {
 	defer cancel()
 	// The image is pinned to a digest signed by NepFleet's release workflow,
 	// checked here, before anything happens on the machine.
-	compose, err := remote.VerifiedCompose(ctx, nepfleet.Compose, version, remote.SigstoreVerifier())
+	vctx, vcancel := context.WithTimeout(ctx, 2*time.Minute)
+	compose, err := remote.VerifiedCompose(vctx, nepfleet.Compose, version, remote.SigstoreVerifier())
+	vcancel()
 	if err != nil {
 		return err
 	}

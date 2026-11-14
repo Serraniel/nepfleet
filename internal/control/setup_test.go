@@ -38,7 +38,7 @@ func TestSetup(t *testing.T) {
 		}
 		return nil, nil
 	}
-	s.Setup.Compose = []byte("services: {}\n")
+	s.Setup.Compose = []byte("services:\n  nepfleet:\n    image: ghcr.io/serraniel/nepfleet:0.4.0\n")
 	s.Setup.Ingress = "nepfleet_ingress"
 	h := s.Handler()
 	do := func(method, path, body string) *httptest.ResponseRecorder {
@@ -181,7 +181,7 @@ func TestSetupUpdatePlan(t *testing.T) {
 		return &remote.Report{Kernel: "Linux", Target: tg.String(), NepFleetImage: "ghcr.io/serraniel/nepfleet:0.3.1", NepFleetRunning: true}, nil
 	}
 	s := &Server{Dir: t.TempDir(), Probe: probe, Version: "0.4.0"}
-	s.Setup.Compose = []byte("services: {}\n")
+	s.Setup.Compose = []byte("services:\n  nepfleet:\n    image: ghcr.io/serraniel/nepfleet:0.4.0\n")
 	h := s.Handler()
 	do := func(method, path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()

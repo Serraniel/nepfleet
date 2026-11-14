@@ -63,6 +63,8 @@ func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, 
 		return nil, fmt.Errorf("%q cannot be a host's name", name)
 	case strings.Contains(string(compose), composeEOF):
 		return nil, errors.New("compose.yaml holds the heredoc marker")
+	case !composeImageRe.Match(compose):
+		return nil, errors.New("no compose.yaml with NepFleet's image to write")
 	}
 	steps := []Step{
 		{Text: "create " + InstallDir + ", owned by " + r.User, Root: !r.Root,

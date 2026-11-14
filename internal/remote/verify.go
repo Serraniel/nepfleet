@@ -73,9 +73,10 @@ func VerifiedCompose(ctx context.Context, compose []byte, version string, verify
 	return composeImageRe.ReplaceAll(compose, []byte("${1}"+image+"@"+digest+"${2}")), nil
 }
 
+// pinnedImageRe is NepFleet's image line pinned to a digest: the image
+// itself, not a comment after it.
+var pinnedImageRe = regexp.MustCompile(`(?m)^\s*image:\s*ghcr\.io/serraniel/nepfleet:[^\s@]+@sha256:[0-9a-f]{64}(\s|$)`)
+
 // Verified says whether compose pins NepFleet's image to a digest, for the
 // plans' wording.
-func Verified(compose []byte) bool {
-	m := composeImageRe.Find(compose)
-	return m != nil && strings.Contains(string(m), "@sha256:")
-}
+func Verified(compose []byte) bool { return pinnedImageRe.Match(compose) }

@@ -37,6 +37,9 @@ func TestVerifiedCompose(t *testing.T) {
 	if out, err := VerifiedCompose(context.Background(), []byte(testCompose), "0.4.0", refuse); err == nil || out != nil || !strings.Contains(err.Error(), "isn't verified") {
 		t.Errorf("unverified: %s %v", out, err)
 	}
+	if Verified([]byte("services:\n  nepfleet:\n    image: ghcr.io/serraniel/nepfleet:0.4.0 # @sha256:" + strings.Repeat("a", 64) + "\n")) {
+		t.Error("a digest in a comment counted as pinned")
+	}
 	odd := func(context.Context, string) (string, error) { return "latest", nil }
 	if _, err := VerifiedCompose(context.Background(), []byte(testCompose), "0.4.0", odd); err == nil {
 		t.Error("accepted a digest that isn't one")

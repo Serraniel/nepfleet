@@ -42,6 +42,8 @@ func UpdatePlan(r *Report, compose []byte, version string) ([]Step, error) {
 		return nil, fmt.Errorf("NepFleet %s runs here already, as new as this app's %s", current, target)
 	case strings.Contains(string(compose), composeEOF):
 		return nil, errors.New("compose.yaml holds the heredoc marker")
+	case !composeImageRe.Match(compose):
+		return nil, errors.New("no compose.yaml with NepFleet's image to write")
 	}
 	return []Step{
 		{Text: "keep the current compose.yaml as compose.yaml.previous (" + current + ")",
