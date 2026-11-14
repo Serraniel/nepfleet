@@ -56,7 +56,8 @@ func TestSettings(t *testing.T) {
 	if got := s.LoadSettings().FleetDir; got != fleet {
 		t.Errorf("saved %q", got)
 	}
-	if rec := do(http.MethodGet, ""); !strings.Contains(rec.Body.String(), fleet) {
+	var got Settings
+	if rec := do(http.MethodGet, ""); json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.FleetDir != fleet {
 		t.Errorf("get: %s", rec.Body)
 	}
 }

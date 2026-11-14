@@ -57,6 +57,9 @@ func checkFleetDir(dir string) (string, error) {
 		return "", errors.New("give the folder's full path")
 	}
 	dir = filepath.Clean(dir)
+	if strings.Contains(dir, "..") {
+		return "", errors.New("give the folder's path without ..")
+	}
 	// A copy of your own: in your home folder, where this daemon runs as you.
 	home, err := os.UserHomeDir()
 	if err != nil {
