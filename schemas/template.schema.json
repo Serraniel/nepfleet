@@ -190,9 +190,10 @@
                 "type": "string"
               },
               "kind": {
-                "description": "secret",
+                "description": "Kind secret is random text of Length; notify-token is an API token of scope notify, which NepFleet registers when the stack is applied and renews before it expires. It needs no length or encoding.",
                 "enum": [
-                  "secret"
+                  "secret",
+                  "notify-token"
                 ],
                 "type": "string"
               },
@@ -208,7 +209,6 @@
             },
             "required": [
               "kind",
-              "length",
               "name"
             ],
             "type": "object"

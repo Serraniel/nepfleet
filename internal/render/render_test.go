@@ -428,3 +428,32 @@ func TestDockerGIDBuiltin(t *testing.T) {
 		t.Errorf("NEPFLEET_DOCKER_GID = %q, want 972", got)
 	}
 }
+
+func TestNotifyTokenGenerated(t *testing.T) {
+	f, tpl := setup(t)
+	tpl.Spec.Generate = append(tpl.Spec.Generate, template.Generate{Name: "ALERTS", Kind: template.KindNotifyToken})
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl})
+	must(t, err)
+	tok := out.Generated["ALERTS"]
+	if !strings.HasPrefix(tok, "nft_") || len(tok) < 40 {
+		t.Errorf("token = %q", tok)
+	}
+	if out.Tokens["ALERTS"] != "notify" || out.Tokens["KEY"] != "" {
+		t.Errorf("Tokens = %v, want only ALERTS (notify)", out.Tokens)
+	}
+	env := EnvValues(out.Files[EnvFile])
+	if env["NEPFLEET_API_URL"] != DefaultAPIURL || env["NEPFLEET_API_NETWORK"] != APINetwork {
+		t.Errorf("API built-ins: %q %q", env["NEPFLEET_API_URL"], env["NEPFLEET_API_NETWORK"])
+	}
+
+	// Kept: an existing token is neither generated again nor registered again.
+	out, err = Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl,
+		Secrets: map[string]string{"ALERTS": tok, "KEY": "k"}, APIURL: "http://nepfleet:9000"})
+	must(t, err)
+	if len(out.Tokens) != 0 || out.Generated["ALERTS"] != "" {
+		t.Errorf("existing token: Tokens %v, Generated %v", out.Tokens, out.Generated)
+	}
+	if got := EnvValues(out.Files[EnvFile])["NEPFLEET_API_URL"]; got != "http://nepfleet:9000" {
+		t.Errorf("NEPFLEET_API_URL = %q", got)
+	}
+}

@@ -216,6 +216,7 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
+	sec = e.staleTokens(tpl, sec)
 	var noBackup []string
 	if usesBuiltin(tpl, "NEPFLEET_NO_BACKUP_VOLUMES") {
 		if noBackup, err = e.noBackupVolumes(s); err != nil {
@@ -236,7 +237,7 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 		}
 	}
 	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret,
-		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/"), DockerGID: doctor.DockerGID("/")})
+		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/"), DockerGID: doctor.DockerGID("/"), APIURL: servedAPIURL})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -665,6 +666,10 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			continue
 		}
 		if len(p.out.Generated) > 0 {
+			if err := e.registerTokens(name, p.out); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", name, err))
+				continue
+			}
 			for k, v := range p.out.Generated {
 				p.secrets[k] = v
 			}

@@ -526,6 +526,8 @@ func serve(args []string, stderr io.Writer) error {
 	}()
 	fmt.Fprintf(stderr, "nepfleet API listening on %s\n", *addr)
 	// After a reboot, emulators are gone until the binfmt stack runs again.
+	servedAPIURL = apiURLFor(*addr)
+	go joinAPINetwork(ctx, stderr)
 	go func() {
 		if e, err := c.open(); err == nil {
 			reregisterBinfmt(ctx, e.fleet, *host, doctor.Host(), startProject, stderr)

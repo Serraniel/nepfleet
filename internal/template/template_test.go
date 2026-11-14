@@ -303,3 +303,27 @@ func TestBotCheckOwnServiceValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestNotifyTokenValidation(t *testing.T) {
+	tpl, err := Load("testdata/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := tpl.Spec.Generate
+	tpl.Spec.Generate = append(base, Generate{Name: "ALERTS", Kind: KindNotifyToken})
+	if err := tpl.Validate(); err != nil {
+		t.Fatalf("a notify-token without length rejected: %v", err)
+	}
+	tpl.Spec.Generate = append(base, Generate{Name: "ALERTS", Kind: KindNotifyToken, Length: 32})
+	if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), "no length or encoding") {
+		t.Errorf("a notify-token with a length: %v", err)
+	}
+	tpl.Spec.Generate = append(base, Generate{Name: "PW", Kind: "secret"})
+	if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), "length") {
+		t.Errorf("a secret without a length: %v", err)
+	}
+	v, err := Generate{Name: "ALERTS", Kind: KindNotifyToken}.Value()
+	if err != nil || !strings.HasPrefix(v, "nft_") || len(v) != 4+43 {
+		t.Errorf("token value %q, %v", v, err)
+	}
+}
