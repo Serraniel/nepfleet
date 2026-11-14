@@ -26,7 +26,7 @@ var (
 type Job struct {
 	ID       string    `json:"id"`
 	Stack    string    `json:"stack"`
-	Kind     string    `json:"kind"`  // apply, rollback
+	Kind     string    `json:"kind"`  // apply, rollback, updates (no stack: the fleet)
 	State    string    `json:"state"` // running, succeeded, failed
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished,omitzero"`

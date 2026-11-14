@@ -116,6 +116,9 @@ type Options struct {
 	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
 	// instances.
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
+	// StartUpdates runs updates apply (now: also outside the update window);
+	// like StartApply, it answers the run to start as a job.
+	StartUpdates func(ctx context.Context, now bool, by string) (func(log io.Writer) error, error)
 	// Render is what a stack renders to, secrets masked, as nepfleet render.
 	Render func(ctx context.Context, stack string) ([]RenderedFile, error)
 	// EgressAllow adds to a stack's egress allow list and commits it as by,
@@ -281,6 +284,39 @@ func Handler(o Options) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, job)
 	})))
+	mux.HandleFunc("POST /api/v1/updates/run", requireAuth(o, l, auth.ScopeApply, func(w http.ResponseWriter, r *http.Request) {
+		if o.StartUpdates == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		t, _ := TokenFrom(r.Context())
+		if len(t.Stacks) > 0 {
+			http.Error(w, "updates run over the whole fleet: this needs a token not limited to stacks", http.StatusForbidden)
+			return
+		}
+		var req struct {
+			Now bool `json:"now"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, `send {"now": true|false}, or nothing`, http.StatusBadRequest)
+			return
+		}
+		run, err := o.StartUpdates(r.Context(), req.Now, t.Name)
+		switch {
+		case errors.Is(err, ErrBusy):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case writeErr(w, err):
+			return
+		}
+		log.Printf("api: %s runs updates (token %s)", t.Name, t.ID)
+		job := js.start("updates", "", t.Name, func(l *jobLog) error { return run(l) })
+		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, job)
+	}))
 	mux.HandleFunc("POST /api/v1/stacks/{name}/rollback", requireAuth(o, l, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.StartRollback == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)
@@ -329,7 +365,8 @@ func Handler(o Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
 		t, _ := TokenFrom(r.Context())
-		if !ok || !t.Allows(auth.ScopeRead, job.Stack) {
+		// A fleet-wide job (no stack) names every stack: not for a limited token.
+		if !ok || !t.Allows(auth.ScopeRead, job.Stack) || (job.Stack == "" && len(t.Stacks) > 0) {
 			http.Error(w, "no such job", http.StatusNotFound)
 			return
 		}

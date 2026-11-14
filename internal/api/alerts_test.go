@@ -723,3 +723,45 @@ func TestRenderEndpoint(t *testing.T) {
 		t.Errorf("db: %d", rec.Code)
 	}
 }
+
+func TestUpdatesRunEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	read, _, _ := store.Create("r", auth.ScopeRead, nil, time.Hour)
+	apply, _, _ := store.Create("a", auth.ScopeApply, nil, time.Hour)
+	onlyWeb, _, _ := store.Create("w", auth.ScopeApply, []string{"web"}, time.Hour)
+	gotNow := false
+	h := Handler(Options{Tokens: store, StartUpdates: func(_ context.Context, now bool, _ string) (func(io.Writer) error, error) {
+		gotNow = now
+		return func(w io.Writer) error { _, err := io.WriteString(w, "web: updating\n"); return err }, nil
+	}})
+	do := func(method, path, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("POST", "/api/v1/updates/run", read, ""); rec.Code != http.StatusForbidden {
+		t.Errorf("read: %d", rec.Code)
+	}
+	if rec := do("POST", "/api/v1/updates/run", onlyWeb, ""); rec.Code != http.StatusForbidden {
+		t.Errorf("limited: %d", rec.Code)
+	}
+	if rec := do("POST", "/api/v1/updates/run", apply, `{"x":1}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("odd body: %d", rec.Code)
+	}
+	rec := do("POST", "/api/v1/updates/run", apply, `{"now":true}`)
+	var job Job
+	if rec.Code != http.StatusAccepted || json.Unmarshal(rec.Body.Bytes(), &job) != nil || job.Kind != "updates" || !gotNow {
+		t.Fatalf("start: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("POST", "/api/v1/updates/run", apply, ""); rec.Code != http.StatusAccepted {
+		t.Errorf("no body: %d", rec.Code)
+	}
+	if rec := do("GET", "/api/v1/jobs/"+job.ID, onlyWeb, ""); rec.Code != http.StatusNotFound {
+		t.Errorf("a limited token reads the fleet's job: %d", rec.Code)
+	}
+	if rec := do("GET", "/api/v1/jobs/"+job.ID, read, ""); rec.Code != 200 {
+		t.Errorf("read: %d", rec.Code)
+	}
+}

@@ -479,6 +479,9 @@ func serve(args []string, stderr io.Writer) error {
 		StartRollback: func(_ context.Context, stack, commit string, confirm bool, by string) (func(io.Writer) error, error) {
 			return startRollback(applyCtx, c, stack, commit, confirm, by)
 		},
+		StartUpdates: func(_ context.Context, now bool, by string) (func(io.Writer) error, error) {
+			return startUpdates(applyCtx, c, now, by)
+		},
 		StartApply: func(_ context.Context, stack, planID string, confirm, updateLock bool, by string) (func(io.Writer) error, error) {
 			return startApply(applyCtx, c, stack, planID, confirm, updateLock, by)
 		},

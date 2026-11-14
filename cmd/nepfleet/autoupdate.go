@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/deploy"
 	"github.com/Serraniel/nepfleet/internal/notify"
 )
@@ -113,16 +114,22 @@ func cmdUpdatesApply(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return runUpdates(ctx, c, fs.Args(), *now, *wait, stdout, stderr)
+}
+
+// runUpdates is updates apply: stacks with updates: auto take rebuilt images
+// (in the window, unless now), and the others' news is sent once.
+func runUpdates(ctx context.Context, c common, names []string, now bool, wait time.Duration, stdout, stderr io.Writer) error {
 	e, err := c.open()
 	if err != nil {
 		return err
 	}
-	stacks, err := e.stacks(fs.Args())
+	stacks, err := e.stacks(names)
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	e.resolverOnce()
 	n, err := e.notifier()
 	if err != nil {
@@ -146,7 +153,7 @@ func cmdUpdatesApply(args []string, stdout, stderr io.Writer) error {
 		rel := relTo(e.fleet.Dir, s.Dir)
 		status, _ := gitOut(e.fleet.Dir, "status", "--porcelain", "--", rel)
 		summary := updateSummary(updates)
-		switch decideUpdate(s.Spec.Updates, updates, inWindow || *now, strings.TrimSpace(status) != "") {
+		switch decideUpdate(s.Spec.Updates, updates, inWindow || now, strings.TrimSpace(status) != "") {
 		case updateNothing:
 			continue
 		case updateNotify:
@@ -169,7 +176,7 @@ func cmdUpdatesApply(args []string, stdout, stderr io.Writer) error {
 				}
 				return nil
 			}
-			if err := runApply(ctx, c, []string{name}, applyOptions{yes: true, wait: *wait, updateLock: true, check: check}, stdout, stderr); err != nil {
+			if err := runApply(ctx, c, []string{name}, applyOptions{yes: true, wait: wait, updateLock: true, check: check}, stdout, stderr); err != nil {
 				errs = append(errs, err)
 				continue
 			}
@@ -178,4 +185,16 @@ func cmdUpdatesApply(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// startUpdates is POST /api/v1/updates/run: updates apply as a job.
+func startUpdates(ctx context.Context, c common, now bool, by string) (func(io.Writer) error, error) {
+	if !apiMu.TryLock() {
+		return nil, api.ErrBusy
+	}
+	return func(log io.Writer) error {
+		defer apiMu.Unlock()
+		fmt.Fprintf(log, "updates, requested by %s over the API\n", by)
+		return runUpdates(ctx, c, nil, now, applyWait, log, log)
+	}, nil
 }

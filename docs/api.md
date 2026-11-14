@@ -21,6 +21,7 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `GET /api/v1/stacks/{name}/updates` | read | what the registries have for the stack's images, as `nepfleet updates --json`: newer tags in and beyond each track, and tags rebuilt since `lock.yaml` pinned them; it asks the registries, so it takes a while |
 | `POST /api/v1/stacks/{name}/apply` | apply | starts applying the reviewed plan: `{"plan": "<id>", "confirmDestructive": false, "updateLock": false}` → `202` with a job |
 | `POST /api/v1/stacks/{name}/rollback` | apply | starts rolling back to a commit from the stack's history: `{"commit": "<full ID>", "confirmDestructive": false}` → `202` with a job |
+| `POST /api/v1/updates/run` | apply | runs `nepfleet updates apply` now, as a job: `{"now": false}` (true ignores `spec.updates.window`) → `202` with a job of kind `updates` and no stack. Needs a token not limited to stacks; such jobs are only readable by those, too |
 | `GET /api/v1/events?after=0&limit=100` | read | notification events newer than an ID, oldest first (at most 500); a token limited to stacks sees only those, and no host-wide events |
 | `GET /metrics` | read | Prometheus metrics: the server, its number of stacks, and when each stack last had each event, such as `apply.rolled_back`. Give Prometheus a read token with `authorization.credentials_file` |
 | `GET /api/v1/events/stream?after=0` | read | the same events live, as server-sent events; reconnect with the last ID (`Last-Event-ID`), as a stream ends after 10 minutes so the token is checked again |

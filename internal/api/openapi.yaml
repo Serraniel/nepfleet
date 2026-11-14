@@ -578,6 +578,33 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { description: The stack doesn't render; the reason }
         "503": { description: Another operation runs; try again }
+  /api/v1/updates/run:
+    post:
+      tags: [stacks]
+      operationId: runUpdates
+      summary: Run nepfleet updates apply now, as a job
+      description: >-
+        Stacks with updates auto take rebuilt images (health-gated, never with
+        destructive changes), within spec.updates.window unless now is true; the
+        others' news goes to the notification channels once. Needs the apply scope,
+        and a token not limited to stacks. Follow the job at /api/v1/jobs/{id}.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                now: { type: boolean, description: Ignore spec.updates.window }
+      responses:
+        "202":
+          description: Started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { description: Not the expected body }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't apply, or the token is limited to stacks" }
+        "409": { description: Another operation runs }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1159,8 +1186,8 @@ components:
       required: [id, stack, kind, state, started, log, by]
       properties:
         id: { type: string }
-        stack: { type: string }
-        kind: { type: string, enum: [apply, rollback] }
+        stack: { type: string, description: "Empty for a fleet-wide job (updates)" }
+        kind: { type: string, enum: [apply, rollback, updates] }
         state: { type: string, enum: [running, succeeded, failed] }
         started: { type: string, format: date-time }
         finished: { type: string, format: date-time }
