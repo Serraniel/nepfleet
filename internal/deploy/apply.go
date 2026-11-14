@@ -55,6 +55,9 @@ type Options struct {
 	Dirty  bool
 	// IngressNetwork is created if missing.
 	IngressNetwork string
+	// APINetwork is created if missing, internal: the stack uses NepFleet's
+	// API there, which the server joins when it starts.
+	APINetwork string
 	// Lock pins images to digests; nil disables pinning. Sync adds missing
 	// images (resolved with Resolver) and drops unused ones; UpdateLock
 	// re-resolves every image.
@@ -87,7 +90,12 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 		o.WaitTimeout = 3 * time.Minute
 	}
 	if o.IngressNetwork != "" {
-		if err := ensureNetwork(ctx, r, o.IngressNetwork, p.Mode == "swarm"); err != nil {
+		if err := ensureNetwork(ctx, r, o.IngressNetwork, p.Mode == "swarm", false); err != nil {
+			return res, err
+		}
+	}
+	if o.APINetwork != "" {
+		if err := ensureNetwork(ctx, r, o.APINetwork, p.Mode == "swarm", true); err != nil {
 			return res, err
 		}
 	}
@@ -419,13 +427,16 @@ func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]
 	return err
 }
 
-func ensureNetwork(ctx context.Context, r Runner, name string, swarm bool) error {
+func ensureNetwork(ctx context.Context, r Runner, name string, swarm, internal bool) error {
 	if _, err := r.Run(ctx, "", "network", "inspect", name); err == nil {
 		return nil
 	}
 	args := []string{"network", "create"}
 	if swarm {
 		args = append(args, "--driver", "overlay", "--attachable")
+	}
+	if internal {
+		args = append(args, "--internal")
 	}
 	_, err := r.Run(ctx, "", append(args, name)...)
 	return err

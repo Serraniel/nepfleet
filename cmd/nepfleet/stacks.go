@@ -682,6 +682,9 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		opts := deploy.Options{
 			WaitTimeout: *wait, Commit: commit, Dirty: dirty, IngressNetwork: e.fleet.Spec.IngressNetwork,
 		}
+		if usesBuiltin(p.tpl, "NEPFLEET_API_NETWORK") {
+			opts.APINetwork = render.APINetwork
+		}
 		if p.tpl != nil {
 			opts.Template, opts.TemplateVersion = p.tpl.Metadata.Name, p.tpl.Spec.Version
 		}
@@ -1052,7 +1055,15 @@ func cmdRender(args []string, stdout, stderr io.Writer) error {
 	}
 	slices.Sort(paths)
 	for _, path := range paths {
-		fmt.Fprintf(stdout, "# ---- %s\n%s", path, p.out.Masked(path))
+		out := p.out.Masked(path)
+		// A swarm stack's compose file as docker stack gets it: integration
+		// labels on the service, depends_on as a list, one-shots' policy.
+		if path == render.ComposeFile && s.Spec.Mode == "swarm" {
+			if out, err = render.ForSwarm(out); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintf(stdout, "# ---- %s\n%s", path, out)
 	}
 	return nil
 }
