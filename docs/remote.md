@@ -74,6 +74,13 @@ It probes the machine and shows a plan, then asks:
 - **Running it again** is safe: a key or fleet that's there stays.
 - **Then connect:** `nepfleet remote add` and `nepfleet remote connect`, or the Fleets page of the app.
 
+## Checking NepFleet on a machine
+
+`nepfleet doctor` on a machine checks Docker, the age key and its backup, disk, ports, log rotation and more, and says how to fix what it finds. From the desktop app, Fleets runs it on a machine over SSH (the control daemon's `POST /v1/remotes/<name>/doctor`). That also works when the machine's API doesn't answer, which is when it matters most:
+- **Where it runs:** in the NepFleet container when one runs, else the host's `nepfleet`.
+- **A stopped or missing NepFleet** is reported as a failed check, with how to start it or set it up.
+- **Older versions** without `doctor --json` work too: their text output is read.
+
 ## The control daemon
 
 `nepfleet control` is a small service on your own machine that remembers your remotes and will own the connections to them. Clients talk to it, so closing one changes nothing. `nepfleet remote` starts it when it isn't running, and it keeps running afterwards.

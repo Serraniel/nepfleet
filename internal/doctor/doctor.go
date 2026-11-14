@@ -28,6 +28,9 @@ const (
 
 func (s Status) String() string { return [...]string{"✓", "⚠", "✗"}[s] }
 
+// Word is the status for JSON: ok, warn or fail.
+func (s Status) Word() string { return [...]string{"ok", "warn", "fail"}[s] }
+
 // Check is one result.
 type Check struct {
 	Name   string

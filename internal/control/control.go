@@ -66,6 +66,8 @@ type Server struct {
 	Setup Setup
 	// Keys unlocks SSH keys with a passphrase.
 	Keys Keys
+	// Doctor runs nepfleet doctor on a remote over SSH (remote.Doctor).
+	Doctor func(context.Context, remote.Target) ([]remote.DoctorCheck, error)
 	// RetryAfter and PollEvery tune the tunnels; tests shorten them.
 	RetryAfter, PollEvery time.Duration
 
@@ -141,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/events/seen", s.eventsSeen)
 	mux.HandleFunc("POST /v1/remotes", s.add)
 	mux.HandleFunc("POST /v1/remotes/{name}/refresh", s.refresh)
+	mux.HandleFunc("POST /v1/remotes/{name}/doctor", s.doctor)
 	mux.HandleFunc("POST /v1/remotes/{name}/connect", s.connect)
 	mux.HandleFunc("POST /v1/remotes/{name}/disconnect", s.disconnect)
 	s.setupRoutes(mux)
@@ -269,6 +272,37 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// doctor runs nepfleet doctor on the remote, over SSH like a check: it works
+// when the remote's API doesn't, which is when it's needed.
+func (s *Server) doctor(w http.ResponseWriter, r *http.Request) {
+	if s.Doctor == nil {
+		fail(w, http.StatusNotImplemented, "this daemon can't run the doctor")
+		return
+	}
+	s.mu.Lock()
+	i := s.index(r.PathValue("name"))
+	var address string
+	if i >= 0 {
+		address = s.remotes[i].Address
+	}
+	s.mu.Unlock()
+	if i < 0 {
+		fail(w, http.StatusNotFound, "no such remote")
+		return
+	}
+	t, err := remote.ParseTarget(address)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	checks, err := s.Doctor(r.Context(), t)
+	if err != nil {
+		failErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, checks)
 }
 
 func fail(w http.ResponseWriter, code int, msg string) {
