@@ -3,6 +3,11 @@
 ## [0.3.1](https://github.com/Serraniel/nepfleet/compare/v0.3.0...v0.3.1) (2026-11-14)
 
 
+### Security
+
+* [GHSA-f23x-qmgj-2656](https://github.com/Serraniel/nepfleet/security/advisories/GHSA-f23x-qmgj-2656): log injection in the API's server log (low), fixed.
+* [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932): golang.org/x/crypto updated past the unmaintained, unsafe openpgp package (upstream).
+
 ### Bug Fixes
 
 * **api:** one log line per entry, whatever names and requests hold ([#302](https://github.com/Serraniel/nepfleet/issues/302)) ([07c6d92](https://github.com/Serraniel/nepfleet/commit/07c6d92a62db8cd966efa0c7544a3d66f13e6f4c))
