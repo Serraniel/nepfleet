@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/Serraniel/nepfleet/compare/v0.3.3...v0.3.4) (2026-11-14)
+
+
+### Bug Fixes
+
+* **remote:** host install adds the age recipient through nepfleet, checks it, and commits ([#322](https://github.com/Serraniel/nepfleet/issues/322)) ([70a36aa](https://github.com/Serraniel/nepfleet/commit/70a36aa4ecf1a32d9e742fd54bab62b1910ff6c5))
+
 ## [0.3.3](https://github.com/Serraniel/nepfleet/compare/v0.3.2...v0.3.3) (2026-11-14)
 
 
