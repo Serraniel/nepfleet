@@ -37,6 +37,9 @@ type Remote struct {
 	Next string `json:"next,omitempty"`
 	// Error is why the last probe failed; Report stays from the one before.
 	Error string `json:"error,omitempty"`
+	// LockedKeys are keys with a passphrase that the last check or the tunnel
+	// needed: unlocking them (POST /v1/keys/unlock) is the way in.
+	LockedKeys []string `json:"lockedKeys,omitempty"`
 	// Connect: keep a tunnel up, also after a restart of the daemon.
 	Connect bool `json:"connect,omitempty"`
 	// Tunnel and TunnelError are the tunnel's state now; not meaningful in the
@@ -61,6 +64,8 @@ type Server struct {
 	Connector Connector
 	// Setup prepares remotes and installs NepFleet on them, for clients.
 	Setup Setup
+	// Keys unlocks SSH keys with a passphrase.
+	Keys Keys
 	// RetryAfter and PollEvery tune the tunnels; tests shorten them.
 	RetryAfter, PollEvery time.Duration
 
@@ -139,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/remotes/{name}/connect", s.connect)
 	mux.HandleFunc("POST /v1/remotes/{name}/disconnect", s.disconnect)
 	s.setupRoutes(mux)
+	s.keyRoutes(mux)
 	mux.HandleFunc("/v1/remotes/{name}/api/{rest...}", s.apiProxy)
 	mux.HandleFunc("DELETE /v1/remotes/{name}", func(w http.ResponseWriter, r *http.Request) {
 		s.stopTunnel(r.PathValue("name"))
@@ -200,7 +206,7 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request) {
 	// key should show now.
 	rep, err := s.Probe(r.Context(), t)
 	if err != nil {
-		fail(w, http.StatusBadGateway, err.Error())
+		failErr(w, http.StatusBadGateway, err)
 		return
 	}
 	now := time.Now().UTC()
@@ -245,6 +251,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.remotes[i].Checked = time.Now().UTC()
+	s.remotes[i].LockedKeys = lockedKeys(perr)
 	if perr != nil {
 		s.remotes[i].Error = perr.Error()
 	} else {
@@ -265,6 +272,24 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func fail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// failErr is fail, naming the locked keys when one is why SSH refused.
+func failErr(w http.ResponseWriter, code int, err error) {
+	if keys := lockedKeys(err); len(keys) > 0 {
+		writeJSON(w, code, map[string]any{"error": err.Error(), "lockedKeys": keys})
+		return
+	}
+	fail(w, code, err.Error())
+}
+
+// lockedKeys are the keys a refused login needs unlocked, if that's the cause.
+func lockedKeys(err error) []string {
+	var locked *remote.LockedKeyError
+	if errors.As(err, &locked) {
+		return locked.Keys
+	}
+	return nil
 }
 
 // ErrRunning means a daemon already answers on the socket.

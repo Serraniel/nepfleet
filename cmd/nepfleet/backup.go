@@ -45,10 +45,14 @@ type stringList []string
 func (s *stringList) String() string     { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
-// cmdKey: nepfleet key backup --out FILE [--recipient age1…]
+// cmdKey: nepfleet key backup --out FILE [--recipient age1…], and
+// nepfleet key unlock [~/.ssh/key …] for SSH keys with a passphrase.
 func cmdKey(args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "unlock" {
+		return cmdKeyUnlock(args, stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "backup" {
-		return errors.New("usage: nepfleet key backup --out FILE [--recipient age1…]")
+		return errors.New("usage: nepfleet key backup --out FILE [--recipient age1…]\n       nepfleet key unlock [~/.ssh/key …]")
 	}
 	var c common
 	fs := flag.NewFlagSet("key backup", flag.ContinueOnError)

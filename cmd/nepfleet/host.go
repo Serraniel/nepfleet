@@ -71,7 +71,8 @@ func cmdHost(args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	ssh := remote.SSH{ConfigFile: *config}
-	r, err := remote.Probe(ctx, ssh.Run, t)
+	r, stopAgent, err := probeUnlocking(ctx, ssh, t, stdout)
+	defer stopAgent()
 	if err != nil {
 		return err
 	}
@@ -184,7 +185,8 @@ func cmdHostApply(args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 	ssh := remote.SSH{ConfigFile: *config}
-	r, err := remote.Probe(ctx, ssh.Run, t)
+	r, stopAgent, err := probeUnlocking(ctx, ssh, t, stdout)
+	defer stopAgent()
 	if err != nil {
 		return err
 	}

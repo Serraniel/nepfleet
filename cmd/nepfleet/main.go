@@ -39,6 +39,7 @@ import (
 	"github.com/Serraniel/nepfleet/internal/doctor"
 	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/fleet"
+	"github.com/Serraniel/nepfleet/internal/remote"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
 
@@ -107,6 +108,11 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
+	// ssh-add runs SSH_ASKPASS with its prompt as the only argument, so the
+	// askpass helper is told by its environment, not by a command name.
+	if os.Getenv(remote.AskpassOnceEnv) != "" {
+		return cmdAskpass(stdout)
+	}
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return errors.New("no command given")
