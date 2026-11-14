@@ -117,6 +117,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprint(stderr, usage)
 		return errors.New("no command given")
 	}
+	keepGoingWhenOutputCloses(args)
 	switch args[0] {
 	case "version", "--version":
 		fmt.Fprintf(stdout, "nepfleet %s (%s)\n", version, commit)
