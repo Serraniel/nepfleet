@@ -32,6 +32,16 @@ type Fleet struct {
 // Spec holds the settings that apply to every stack.
 type Spec struct {
 	TemplateSources []Source `yaml:"templateSources"`
+	// Sync: what the server's git sync (serve --sync, webhooks) accepts.
+	Sync struct {
+		// RequireSigned: every commit sync brings in must carry an SSH
+		// signature by one of AllowedSigners, as the fleet repository had
+		// them before the pull; otherwise sync stops.
+		RequireSigned bool `yaml:"requireSigned"`
+		// AllowedSigners in git's allowed-signers format:
+		// "<principal> <key type> <public key>", e.g. "me@example.org ssh-ed25519 AAAA…".
+		AllowedSigners []string `yaml:"allowedSigners"`
+	} `yaml:"sync"`
 	Secrets         struct {
 		// Age recipients (public keys) that every secret file is encrypted to.
 		Age []string `yaml:"age"`
@@ -428,6 +438,9 @@ func Load(dir string) (*Fleet, error) {
 			return nil, fmt.Errorf("fleet.yaml: notifications.routes[%d]: minSeverity is info, warning or error", i)
 		}
 	}
+	if err := checkSync(&f); err != nil {
+		return nil, err
+	}
 	if err := checkStorage(&f); err != nil {
 		return nil, err
 	}
@@ -626,4 +639,21 @@ func (f *Fleet) ResolvePath(v string) (string, error) {
 		return "", fmt.Errorf("@%s is not defined in fleet.yaml spec.paths", name)
 	}
 	return p, nil
+}
+
+// allowedSignerRe is one line of git's allowed-signers file: principals,
+// optional options are not supported, a key type and a base64 key.
+var allowedSignerRe = regexp.MustCompile(`^[^\s"#]+ (ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,2}$`)
+
+func checkSync(f *Fleet) error {
+	s := f.Spec.Sync
+	if s.RequireSigned && len(s.AllowedSigners) == 0 {
+		return errors.New("fleet.yaml: sync.requireSigned needs sync.allowedSigners (\"<email> ssh-ed25519 AAAA…\")")
+	}
+	for i, a := range s.AllowedSigners {
+		if !allowedSignerRe.MatchString(a) {
+			return fmt.Errorf("fleet.yaml: sync.allowedSigners[%d]: write \"<email> <key type> <public key>\", as one line of git's allowed signers", i)
+		}
+	}
+	return nil
 }

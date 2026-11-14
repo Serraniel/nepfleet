@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -123,6 +124,14 @@ func pullFleet(ctx context.Context, e *env) (pulled, error) {
 	}
 	if _, err := git("merge-base", "--is-ancestor", "HEAD", "@{u}"); err != nil {
 		return pulled{from: from}, errDiverged
+	}
+	// With requireSigned, every incoming commit needs a signature by a key
+	// the repository allowed before this pull: a pushed commit can't
+	// switch the check off or add its own key without one.
+	if e.fleet.Spec.Sync.RequireSigned {
+		if err := verifyIncoming(dir, e.fleet.Spec.Sync.AllowedSigners, from, to); err != nil {
+			return pulled{from: from}, err
+		}
 	}
 	if _, err := git("merge", "--ff-only", "--quiet", "@{u}"); err != nil {
 		return pulled{from: from}, err
@@ -247,3 +256,59 @@ func short(commit string) string {
 	}
 	return commit
 }
+
+// verifyIncoming checks that every commit in from..to carries an SSH
+// signature by one of signers (git's allowed-signers lines).
+func verifyIncoming(dir string, signers []string, from, to string) error {
+	f, err := os.CreateTemp("", "nepfleet-allowed-signers-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(f.Name()) }()
+	if _, err := f.WriteString(strings.Join(signers, "\n") + "\n"); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	list, err := gitOut(dir, "rev-list", from+".."+to)
+	if err != nil {
+		return err
+	}
+	for _, c := range strings.Fields(list) {
+		short := c
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		// SSH signatures only: verify-commit would check an OpenPGP or X.509
+		// signature against the machine's own keyring, not allowedSigners.
+		raw, err := gitOut(dir, "cat-file", "commit", c)
+		if err != nil {
+			return err
+		}
+		if !sshSigned(raw) {
+			return fmt.Errorf("%w: commit %s has no SSH signature", errUnsigned, short)
+		}
+		if _, err := gitOut(dir, "-c", "gpg.ssh.allowedSignersFile="+f.Name(), "verify-commit", c); err != nil {
+			return fmt.Errorf("%w: commit %s isn't signed by a key in sync.allowedSigners", errUnsigned, short)
+		}
+	}
+	return nil
+}
+
+// sshSigned says whether a raw commit's signature header is an SSH signature.
+func sshSigned(commit string) bool {
+	head, _, _ := strings.Cut(commit, "\n\n") // headers end at the first blank line
+	for _, line := range strings.Split(head, "\n") {
+		if v, ok := strings.CutPrefix(line, "gpgsig "); ok {
+			return strings.TrimSpace(v) == "-----BEGIN SSH SIGNATURE-----"
+		}
+		if v, ok := strings.CutPrefix(line, "gpgsig-sha256 "); ok {
+			return strings.TrimSpace(v) == "-----BEGIN SSH SIGNATURE-----"
+		}
+	}
+	return false
+}
+
+var errUnsigned = errors.New("sync stopped: fleet.yaml requires signed commits")
