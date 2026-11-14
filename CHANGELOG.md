@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/Serraniel/nepfleet/compare/v0.3.2...v0.3.3) (2026-11-14)
+
+
+### Bug Fixes
+
+* changing commands finish when their output pipe closes ([#316](https://github.com/Serraniel/nepfleet/issues/316)) ([60009e9](https://github.com/Serraniel/nepfleet/commit/60009e94295545644a651246be9d6f77164153ca))
+
 ## [0.3.2](https://github.com/Serraniel/nepfleet/compare/v0.3.1...v0.3.2) (2026-11-14)
 
 
