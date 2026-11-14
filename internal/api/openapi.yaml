@@ -634,6 +634,38 @@ paths:
         "403": { description: "An API token, not a person; or `{\"verify\": true}`" }
         "409": { description: "The key isn't a file on the server (SOPS_AGE_KEY or SOPS_AGE_KEY_CMD)" }
         "422": { description: Not an age or SSH public key }
+  /api/v1/mirror:
+    get:
+      tags: [server]
+      operationId: mirrorStatus
+      summary: How the last push to each of spec.mirrors went (admin scope)
+      description: Passwords and tokens in mirror URLs and errors are removed.
+      responses:
+        "200":
+          description: One entry per mirror
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MirrorStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+    post:
+      tags: [server]
+      operationId: mirrorNow
+      summary: Push the fleet repository to its mirrors now, as nepfleet mirror (admin scope)
+      description: A failed push shows in its mirror's entry, not as an error.
+      responses:
+        "200":
+          description: One entry per mirror, after pushing
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MirrorStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+        "503": { description: Another operation runs; try again }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1245,6 +1277,13 @@ components:
       required: [recipients]
       properties:
         recipients: { type: array, items: { type: string }, maxItems: 10, description: "age1… or ssh-ed25519/ssh-rsa public keys" }
+    MirrorStatus:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, description: Without passwords or tokens }
+        ok: { type: string, format: date-time, description: The last successful push }
+        error: { type: string, description: Why the last push failed }
     RenderedFile:
       type: object
       required: [path, content]

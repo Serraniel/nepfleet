@@ -482,6 +482,7 @@ func serve(args []string, stderr io.Writer) error {
 		KeyBackup: func(ctx context.Context, recipients []string, by string) ([]byte, error) {
 			return keyBackupAPI(ctx, c, recipients, by)
 		},
+		Mirror: func(_ context.Context, run bool) ([]api.MirrorStatus, error) { return mirrorAPI(c, run) },
 		StartUpdates: func(_ context.Context, now bool, by string) (func(io.Writer) error, error) {
 			return startUpdates(applyCtx, c, now, by)
 		},

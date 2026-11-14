@@ -765,3 +765,34 @@ func TestUpdatesRunEndpoint(t *testing.T) {
 		t.Errorf("read: %d", rec.Code)
 	}
 }
+
+func TestMirrorEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	edit, _, _ := store.Create("e", auth.ScopeEdit, nil, time.Hour)
+	admin, _, _ := store.Create("a", auth.ScopeAdmin, nil, time.Hour)
+	ran := false
+	h := Handler(Options{Tokens: store, Mirror: func(_ context.Context, run bool) ([]MirrorStatus, error) {
+		ran = ran || run
+		return []MirrorStatus{
+			{URL: "https://bot:s3cr3t@git.example.org/fleet.git", Error: `fatal: unable to access 'https://bot:s3cr3t@git.example.org/fleet.git/': 403`},
+			{URL: "git@backup.example.org:fleet.git", OK: time.Unix(1, 0)},
+		}, nil
+	}})
+	do := func(method, token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/api/v1/mirror", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("GET", edit); rec.Code != http.StatusForbidden {
+		t.Errorf("edit: %d", rec.Code)
+	}
+	rec := do("GET", admin)
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "s3cr3t") || !strings.Contains(rec.Body.String(), "git@backup.example.org:fleet.git") || ran {
+		t.Errorf("status: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("POST", admin); rec.Code != 200 || !ran || strings.Contains(rec.Body.String(), "s3cr3t") {
+		t.Errorf("run: %d %s", rec.Code, rec.Body)
+	}
+}

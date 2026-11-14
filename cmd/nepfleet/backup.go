@@ -171,6 +171,12 @@ func cmdMirror(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	return runMirror(c, stdout)
+}
+
+// runMirror pushes the fleet repository to every spec.mirrors, as nepfleet
+// mirror, and records how each went.
+func runMirror(c common, stdout io.Writer) error {
 	e, err := c.open()
 	if err != nil {
 		return err
@@ -356,4 +362,31 @@ func keyBackupAPI(ctx context.Context, c common, recipients []string, by string)
 	e.emit(n, io.Discard, notify.Event{Name: "key.backup", Severity: notify.Warning,
 		Title: "the age key was backed up", Message: by + " downloaded the fleet's age key, encrypted to " + prints + ". If that wasn't you, rotate the key and end their sessions."})
 	return out.Bytes(), nil
+}
+
+// mirrorAPI is GET and POST /api/v1/mirror: each mirror's last push, after
+// pushing when run. A failed push is in its status, not an error.
+func mirrorAPI(c common, run bool) ([]api.MirrorStatus, error) {
+	if run {
+		if !apiMu.TryLock() {
+			return nil, api.ErrBusy
+		}
+		defer apiMu.Unlock()
+	}
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	if run && len(e.fleet.Spec.Mirrors) > 0 {
+		_ = runMirror(c, io.Discard) // each mirror's outcome is in the state
+	}
+	state := mirrorState{}
+	if raw, err := os.ReadFile(filepath.Join(c.stateDir, mirrorFile)); err == nil {
+		_ = json.Unmarshal(raw, &state)
+	}
+	out := make([]api.MirrorStatus, 0, len(e.fleet.Spec.Mirrors))
+	for _, m := range e.fleet.Spec.Mirrors {
+		out = append(out, api.MirrorStatus{URL: m, OK: state[m].OK, Error: state[m].Error})
+	}
+	return out, nil
 }

@@ -124,3 +124,28 @@ func TestSBOMAPI(t *testing.T) {
 		t.Errorf("fleet document: %s", raw)
 	}
 }
+
+func TestMirrorAPI(t *testing.T) {
+	c, dir, _ := rollbackFleet(t)
+	bare := filepath.Join(t.TempDir(), "mirror.git")
+	tgit(t, filepath.Dir(bare), "init", "-q", "--bare", bare)
+	fy := filepath.Join(dir, "fleet.yaml")
+	raw, _ := os.ReadFile(fy) //nolint:gosec // the test's fleet
+	raw = []byte(strings.Replace(string(raw), "spec:\n", "spec:\n  mirrors: ["+bare+"]\n", 1))
+	if err := os.WriteFile(fy, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tgit(t, dir, "commit", "-qam", "mirror", "--no-verify")
+	st, err := mirrorAPI(c, false)
+	if err != nil || len(st) != 1 || !st[0].OK.IsZero() {
+		t.Fatalf("before: %+v %v", st, err)
+	}
+	st, err = mirrorAPI(c, true)
+	if err != nil || len(st) != 1 || st[0].OK.IsZero() || st[0].Error != "" {
+		t.Fatalf("after: %+v %v", st, err)
+	}
+	branch := strings.TrimSpace(tgit(t, dir, "branch", "--show-current"))
+	if head := strings.TrimSpace(tgit(t, bare, "rev-parse", "refs/heads/"+branch)); head != strings.TrimSpace(tgit(t, dir, "rev-parse", "HEAD")) {
+		t.Errorf("mirror at %s", head)
+	}
+}
