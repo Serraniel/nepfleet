@@ -61,7 +61,7 @@ Once Docker runs there, install NepFleet as a container, as [Install](install.md
 nepfleet host install ssh://me@server --name server
 ```
 
-**The image is verified first.** Before anything happens on the machine, the image `ghcr.io/serraniel/nepfleet:<version>` is resolved to its digest, and its cosign signature is checked against Sigstore: it must come from NepFleet's release workflow (`Serraniel/nepfleet/.github/workflows/release.yml`, GitHub's OIDC issuer). compose.yaml pins that digest, so the machine runs exactly the image that was checked. If the check fails (unsigned, signed by someone else, Sigstore or the registry unreachable), nothing is installed. Updates from the app check the new version the same way.
+**The image is verified first.** Before anything happens on the machine, the image `ghcr.io/serraniel/nepfleet:<version>` is resolved to its digest, and its cosign signature is checked against Sigstore: it must come from NepFleet's release workflow (`Serraniel/nepfleet/.github/workflows/release.yml`, GitHub's OIDC issuer). The image's own version label must match the tag too, so an older signed image put under a newer tag is refused. compose.yaml pins that digest, so the machine runs exactly the image that was checked. If the check fails (unsigned, signed by someone else, Sigstore or the registry unreachable), nothing is installed. Updates from the app check the new version the same way.
 
 It probes the machine and shows a plan, then asks:
 
