@@ -51,7 +51,18 @@ type Input struct {
 	// DockerGID is the group of the host's Docker socket, for
 	// ${NEPFLEET_DOCKER_GID}; empty when unknown.
 	DockerGID string
+	// APIURL is NepFleet's API as stacks on its network reach it, for
+	// ${NEPFLEET_API_URL}; DefaultAPIURL when empty.
+	APIURL string
 }
+
+// APINetwork is the network NepFleet's API joins, as "nepfleet", for the
+// stacks that talk to it (${NEPFLEET_API_NETWORK}). It is internal: it only
+// connects them to the API, never to the outside.
+const APINetwork = "nepfleet_api"
+
+// DefaultAPIURL is the API on APINetwork with the server's default port.
+const DefaultAPIURL = "http://nepfleet:7480"
 
 // Output is the rendered stack.
 type Output struct {
@@ -60,6 +71,9 @@ type Output struct {
 	// Generated holds values created by this render; persist them to the
 	// secrets file before deploying, or they change on every render.
 	Generated map[string]string
+	// Tokens are the Generated values that are API tokens, with their
+	// scope: register them (auth.Store.Register) before deploying.
+	Tokens map[string]string
 	// Keep are files written only when missing from the working directory:
 	// the app owns them once it runs (see template.File.Keep).
 	Keep map[string]bool
@@ -77,7 +91,11 @@ const (
 
 // Render produces the stack's files. It never writes to disk.
 func Render(in Input) (*Output, error) {
-	out := &Output{Files: map[string][]byte{}, Generated: map[string]string{}, Secret: map[string]bool{}, Keep: map[string]bool{}}
+	out := &Output{Files: map[string][]byte{}, Generated: map[string]string{}, Tokens: map[string]string{}, Secret: map[string]bool{}, Keep: map[string]bool{}}
+	apiURL := in.APIURL
+	if apiURL == "" {
+		apiURL = DefaultAPIURL
+	}
 	env := map[string]string{
 		"NEPFLEET_STACK":           in.Stack.Metadata.Name,
 		"NEPFLEET_INGRESS_NETWORK": in.Fleet.Spec.IngressNetwork,
@@ -86,6 +104,8 @@ func Render(in Input) (*Output, error) {
 		"NEPFLEET_AGE_RECIPIENTS":    strings.Join(in.Fleet.Spec.Secrets.Age, ","),
 		"NEPFLEET_NO_BACKUP_VOLUMES": noBackupPattern(in.NoBackupVolumes),
 		"NEPFLEET_DOCKER_GID":        in.DockerGID,
+		"NEPFLEET_API_URL":           apiURL,
+		"NEPFLEET_API_NETWORK":       APINetwork,
 	}
 	var compose []byte
 	var err error
@@ -300,6 +320,9 @@ func values(in Input, env map[string]string, out *Output) error {
 				return err
 			}
 			out.Generated[g.Name] = v
+			if g.Kind == template.KindNotifyToken {
+				out.Tokens[g.Name] = "notify"
+			}
 		}
 		env[g.Name] = v
 	}

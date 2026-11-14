@@ -85,23 +85,31 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-// Create makes a token and returns its secret, shown once.
-func (s *Store) Create(name, scope string, stacks []string, ttl time.Duration) (secret string, t Token, err error) {
+// checkNew validates what a new token is made of.
+func checkNew(name, scope string, stacks []string, ttl time.Duration) error {
 	if !ValidScope(scope) {
-		return "", t, fmt.Errorf("scope is %s, %s, %s, %s or %s", ScopeRead, ScopeApply, ScopeEdit, ScopeAdmin, ScopeNotify)
+		return fmt.Errorf("scope is %s, %s, %s, %s or %s", ScopeRead, ScopeApply, ScopeEdit, ScopeAdmin, ScopeNotify)
 	}
 	if scope == ScopeNotify && len(stacks) > 0 {
-		return "", t, errors.New("a notify token cannot be limited to stacks: it reads none")
+		return errors.New("a notify token cannot be limited to stacks: it reads none")
 	}
 	if name == "" || strings.ContainsAny(name, "\n\r") {
-		return "", t, errors.New("a token needs a name")
+		return errors.New("a token needs a name")
 	}
 	if ttl <= 0 {
-		return "", t, errors.New("a token needs an expiry")
+		return errors.New("a token needs an expiry")
 	}
 	if scope == ScopeAdmin && len(stacks) > 0 {
 		// Admin covers fleet-wide actions (tokens, settings) a stack limit cannot bound.
-		return "", t, errors.New("an admin token cannot be limited to stacks; use scope apply")
+		return errors.New("an admin token cannot be limited to stacks; use scope apply")
+	}
+	return nil
+}
+
+// Create makes a token and returns its secret, shown once.
+func (s *Store) Create(name, scope string, stacks []string, ttl time.Duration) (secret string, t Token, err error) {
+	if err := checkNew(name, scope, stacks, ttl); err != nil {
+		return "", t, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -131,6 +139,78 @@ func (s *Store) Create(name, scope string, stacks []string, ttl time.Duration) (
 	}
 	all = append(all, t)
 	return secret, t, s.save(all)
+}
+
+// RenewGrace is how long a stack's previous token stays valid after a new one
+// is registered: a failed apply rolls back to the files holding the old one.
+const RenewGrace = 7 * 24 * time.Hour
+
+// Register stores a token whose secret was made elsewhere: generated for a
+// stack and kept in its encrypted secrets. Earlier tokens of the same name
+// end within RenewGrace, so a renewed one doesn't leave the old one valid
+// for long, while a rollback to it still works. It is never admin: a
+// stack's container must not hold the keys to the fleet.
+func (s *Store) Register(name, scope, secret string, ttl time.Duration) (Token, error) {
+	if err := checkNew(name, scope, nil, ttl); err != nil {
+		return Token{}, err
+	}
+	if scope == ScopeAdmin {
+		return Token{}, errors.New("a stack's token cannot be admin")
+	}
+	if !strings.HasPrefix(secret, Prefix) || len(secret) < len(Prefix)+40 || len(secret) > 128 {
+		return Token{}, errors.New("not a NepFleet token secret")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return Token{}, err
+	}
+	defer unlock()
+	key, err := s.key(true)
+	if err != nil {
+		return Token{}, err
+	}
+	id := make([]byte, 4)
+	if _, err := rand.Read(id); err != nil {
+		return Token{}, err
+	}
+	now := s.now().UTC().Truncate(time.Second)
+	t := Token{ID: hex.EncodeToString(id), Name: name, Hash: mac(key, secret), Scope: scope, Created: now, Expires: now.Add(ttl)}
+	all, err := s.load()
+	if err != nil {
+		return Token{}, err
+	}
+	all = slices.DeleteFunc(all, func(o Token) bool { return o.Name == name && !now.Before(o.Expires) })
+	for i := range all {
+		if all[i].Name == name && all[i].Expires.After(now.Add(RenewGrace)) {
+			all[i].Expires = now.Add(RenewGrace)
+		}
+	}
+	return t, s.save(append(all, t))
+}
+
+// ValidFor reports whether secret is a token of this store that stays valid
+// for at least d. known is false when the store can't be read (no key yet,
+// or it belongs to another user): then nothing can be said either way.
+func (s *Store) ValidFor(secret string, d time.Duration) (valid, known bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key, err := s.key(false)
+	if err != nil {
+		return false, false
+	}
+	all, err := s.load()
+	if err != nil {
+		return false, false
+	}
+	h := mac(key, secret)
+	for _, t := range all {
+		if hmac.Equal([]byte(t.Hash), []byte(h)) {
+			return s.now().Add(d).Before(t.Expires), true
+		}
+	}
+	return false, true
 }
 
 // List returns the tokens, oldest first.

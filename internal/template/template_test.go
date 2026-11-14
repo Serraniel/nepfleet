@@ -303,3 +303,55 @@ func TestBotCheckOwnServiceValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestNotifyTokenValidation(t *testing.T) {
+	tpl, err := Load("testdata/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := tpl.Spec.Generate
+	tpl.Spec.Generate = append(base, Generate{Name: "ALERTS", Kind: KindNotifyToken})
+	if err := tpl.Validate(); err != nil {
+		t.Fatalf("a notify-token without length rejected: %v", err)
+	}
+	tpl.Spec.Generate = append(base, Generate{Name: "ALERTS", Kind: KindNotifyToken, Length: 32})
+	if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), "no length or encoding") {
+		t.Errorf("a notify-token with a length: %v", err)
+	}
+	tpl.Spec.Generate = append(base, Generate{Name: "PW", Kind: "secret"})
+	if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), "length") {
+		t.Errorf("a secret without a length: %v", err)
+	}
+	v, err := Generate{Name: "ALERTS", Kind: KindNotifyToken}.Value()
+	if err != nil || !strings.HasPrefix(v, "nft_") || len(v) != 4+43 {
+		t.Errorf("token value %q, %v", v, err)
+	}
+}
+
+func TestAPINetworkImpostor(t *testing.T) {
+	dir := copyDemo(t)
+	compose := filepath.Join(dir, "compose.yaml")
+	raw, err := os.ReadFile(compose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ svc, want string }{
+		{"  nepfleet:\n    image: nginx:1.29\n    networks: [api]\n", "must not be called nepfleet"},
+		{"  other:\n    image: nginx:1.29\n    networks:\n      api: {aliases: [nepfleet]}\n", "no aliases"},
+	} {
+		doc := strings.Replace(string(raw), "services:\n", "services:\n"+c.svc, 1) + "  api:\n    name: ${NEPFLEET_API_NETWORK}\n    external: true\n"
+		if !strings.Contains(string(raw), "\nnetworks:\n") {
+			doc = strings.Replace(string(raw), "services:\n", "services:\n"+c.svc, 1) + "networks:\n  api:\n    name: ${NEPFLEET_API_NETWORK}\n    external: true\n"
+		}
+		if err := os.WriteFile(compose, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tpl, err := Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("want %q, got %v", c.want, err)
+		}
+	}
+}

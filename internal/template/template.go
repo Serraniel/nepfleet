@@ -25,7 +25,7 @@ import (
 const APIVersion = "nepfleet/v1alpha1"
 
 // Builtins are variables NepFleet always provides to a compose file.
-var Builtins = []string{"NEPFLEET_STACK", "NEPFLEET_INGRESS_NETWORK", "TZ", "NEPFLEET_AGE_RECIPIENTS", "NEPFLEET_NO_BACKUP_VOLUMES", "NEPFLEET_URL", "NEPFLEET_DOCKER_GID"}
+var Builtins = []string{"NEPFLEET_STACK", "NEPFLEET_INGRESS_NETWORK", "TZ", "NEPFLEET_AGE_RECIPIENTS", "NEPFLEET_NO_BACKUP_VOLUMES", "NEPFLEET_URL", "NEPFLEET_DOCKER_GID", "NEPFLEET_API_URL", "NEPFLEET_API_NETWORK"}
 
 // Template is the parsed template.yaml.
 type Template struct {
@@ -162,11 +162,17 @@ type Input struct {
 	Pattern     string   `yaml:"pattern" json:"pattern,omitempty"`
 }
 
+// KindNotifyToken generates an API token of scope notify for the stack.
+const KindNotifyToken = "notify-token"
+
 // Generate is a value NepFleet creates once at install time.
 type Generate struct {
-	Name     string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$" json:"name,omitempty"`
-	Kind     string `yaml:"kind" schema:"required;enum=secret" json:"kind,omitempty"` // secret
-	Length   int    `yaml:"length" schema:"required;minimum=16;maximum=256" json:"length,omitempty"`
+	Name string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$" json:"name,omitempty"`
+	// Kind secret is random text of Length; notify-token is an API token of
+	// scope notify, which NepFleet registers when the stack is applied and
+	// renews before it expires. It needs no length or encoding.
+	Kind     string `yaml:"kind" schema:"required;enum=secret|notify-token" json:"kind,omitempty"`
+	Length   int    `yaml:"length" schema:"minimum=16;maximum=256" json:"length,omitempty"`
 	Encoding string `yaml:"encoding" schema:"enum=base64url|hex|alnum" json:"encoding,omitempty"`
 }
 
@@ -221,7 +227,7 @@ var (
 	encodings     = []string{"", "base64url", "hex", "alnum"}
 	tracks        = []string{"patch", "minor", "major"}
 	tiers         = []string{"system", "app"}
-	generateKinds = []string{"secret"}
+	generateKinds = []string{"secret", KindNotifyToken}
 	backups       = []string{"required", "recommended", "none"}
 	rollbacks     = []string{"restore", "revert"}
 )
@@ -320,7 +326,13 @@ func (t *Template) Validate() error {
 	for _, g := range s.Generate {
 		declare("spec.generate", g.Name)
 		if !slices.Contains(generateKinds, g.Kind) {
-			bad("spec.generate %q: kind must be secret", g.Name)
+			bad("spec.generate %q: kind must be secret or notify-token", g.Name)
+		}
+		if g.Kind == KindNotifyToken {
+			if g.Length != 0 || g.Encoding != "" {
+				bad("spec.generate %q: a notify-token has no length or encoding", g.Name)
+			}
+			continue
 		}
 		if g.Length < 16 || g.Length > 256 {
 			bad("spec.generate %q: length must be between 16 and 256", g.Name)
@@ -403,9 +415,10 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 	}
 	var doc struct {
 		Services map[string]struct {
-			Image    string `yaml:"image"`
-			Labels   any    `yaml:"labels"`
-			Networks any    `yaml:"networks"`
+			Image         string `yaml:"image"`
+			Labels        any    `yaml:"labels"`
+			Networks      any    `yaml:"networks"`
+			ContainerName string `yaml:"container_name"`
 		} `yaml:"services"`
 		Networks map[string]struct {
 			Name string `yaml:"name"`
@@ -470,6 +483,25 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 	for _, i := range t.Spec.Images {
 		if i.Name != "" && !used[i.Name] {
 			errs = append(errs, fmt.Errorf("spec.images %q is not used by %s", i.Name, t.Spec.Compose))
+		}
+	}
+
+	// On NepFleet's API network, "nepfleet" is the API: a stack that also
+	// answered to it would receive other stacks' tokens.
+	for _, name := range slices.Sorted(maps.Keys(doc.Services)) {
+		svc := doc.Services[name]
+		for _, n := range serviceNetworks(svc.Networks) {
+			if doc.Networks[n].Name != "${NEPFLEET_API_NETWORK}" {
+				continue
+			}
+			if name == "nepfleet" || svc.ContainerName == "nepfleet" {
+				errs = append(errs, fmt.Errorf("%s: service %s is on NepFleet's API network and must not be called nepfleet", t.Spec.Compose, name))
+			}
+			if m, ok := svc.Networks.(map[string]any); ok {
+				if cfg, ok := m[n].(map[string]any); ok && cfg["aliases"] != nil {
+					errs = append(errs, fmt.Errorf("%s: service %s: no aliases on NepFleet's API network", t.Spec.Compose, name))
+				}
+			}
 		}
 	}
 

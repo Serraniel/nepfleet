@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/Serraniel/nepfleet/internal/auth"
 	"math/big"
 )
 
@@ -15,6 +16,15 @@ const alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 // Value produces the generated value. Length is the length of the result in
 // characters, not of the entropy behind it.
 func (g Generate) Value() (string, error) {
+	if g.Kind == KindNotifyToken {
+		// The shape of an API token: NepFleet registers it when the stack
+		// is applied (auth.Store.Register).
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			return "", err
+		}
+		return auth.Prefix + base64.RawURLEncoding.EncodeToString(b), nil
+	}
 	switch g.Encoding {
 	case "hex":
 		b := make([]byte, (g.Length+1)/2)
