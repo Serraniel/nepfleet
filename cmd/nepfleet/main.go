@@ -276,6 +276,7 @@ func serve(args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("listen", "127.0.0.1:7480", "address to listen on")
+	syncEvery := fs.Duration("sync", 0, "pull the fleet repository from its origin this often (e.g. 5m) and apply changed stacks set to apply: auto; 0: only on webhooks, if NEPFLEET_SYNC_SECRET is set")
 	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
 	stateDir := fs.String("state", envOr("NEPFLEET_STATE", defaultState()), "state directory (API tokens live in <state>/api)")
 	name := fs.String("name", hostname(), "name shown to frontends")
@@ -341,6 +342,14 @@ func serve(args []string, stderr io.Writer) error {
 		}
 	}
 	c := common{fleetDir: *fleetDir, stateDir: *stateDir, host: *host}
+	// Git sync: on a timer, on forges' webhooks, or both.
+	var gitSync *syncer
+	var syncStatus func() api.SyncStatus
+	var syncNow func()
+	if *syncEvery > 0 || os.Getenv("NEPFLEET_SYNC_SECRET") != "" {
+		gitSync = newSyncer(c, *syncEvery, stderr)
+		syncStatus, syncNow = gitSync.Status, gitSync.Now
+	}
 	accounts, err := serveAccounts(*rpID, *rpOrigins, *stateDir, stderr)
 	if err != nil {
 		return err
@@ -364,6 +373,9 @@ func serve(args []string, stderr io.Writer) error {
 		Tokens:         tokenStore(*stateDir),
 		TrustedProxies: trustedNets,
 		Accounts:       accounts,
+		SyncStatus:     syncStatus,
+		SyncNow:        syncNow,
+		SyncSecret:     os.Getenv("NEPFLEET_SYNC_SECRET"),
 		Stacks: func() ([]api.StackInfo, error) {
 			// Without Docker, stacks are listed without a state.
 			cs, _ := composeContainers(context.Background())
@@ -456,6 +468,9 @@ func serve(args []string, stderr io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if gitSync != nil {
+		go gitSync.run(ctx)
+	}
 	errc := make(chan error, 1)
 	srv.TLSConfig = tlsConfig
 	go func() {

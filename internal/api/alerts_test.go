@@ -5,6 +5,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -246,5 +249,62 @@ func TestEditCapsFiles(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("%d files: %d", len(files), rec.Code)
+	}
+}
+
+func TestSyncEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	apply, _, _ := store.Create("ci", auth.ScopeApply, nil, time.Hour)
+	read, _, _ := store.Create("r", auth.ScopeRead, nil, time.Hour)
+	kicks := 0
+	o := Options{Tokens: store, SyncSecret: "s3cret", SyncNow: func() { kicks++ },
+		SyncStatus: func() SyncStatus { return SyncStatus{Enabled: true, Commit: "abc"} }}
+	h := Handler(o)
+	sign := func(body string) string {
+		m := hmac.New(sha256.New, []byte("s3cret"))
+		m.Write([]byte(body))
+		return hex.EncodeToString(m.Sum(nil))
+	}
+	do := func(hdr map[string]string, body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", strings.NewReader(body))
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	body := `{"ref":"refs/heads/main"}`
+	for name, c := range map[string]struct {
+		hdr  map[string]string
+		want int
+	}{
+		"github":      {map[string]string{"X-Hub-Signature-256": "sha256=" + sign(body)}, 202},
+		"forgejo":     {map[string]string{"X-Forgejo-Signature": sign(body)}, 202},
+		"gitea":       {map[string]string{"X-Gitea-Signature": sign(body)}, 202},
+		"wrong":       {map[string]string{"X-Hub-Signature-256": "sha256=" + sign("other")}, 401},
+		"unsigned":    {map[string]string{}, 401},
+		"apply token": {map[string]string{"Authorization": "Bearer " + apply}, 202},
+		"read token":  {map[string]string{"Authorization": "Bearer " + read}, 403},
+	} {
+		if got := do(c.hdr, body); got != c.want {
+			t.Errorf("%s: %d, want %d", name, got, c.want)
+		}
+	}
+	if kicks != 4 {
+		t.Errorf("syncs started: %d", kicks)
+	}
+	// Without a secret, no signature counts.
+	o.SyncSecret = ""
+	h = Handler(o)
+	if got := do(map[string]string{"X-Hub-Signature-256": "sha256=" + sign(body)}, body); got != 401 {
+		t.Errorf("no secret: %d", got)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+read)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"commit":"abc"`) {
+		t.Errorf("status: %d %s", rec.Code, rec.Body)
 	}
 }

@@ -107,6 +107,7 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"StackEgress":       reflect.TypeFor[StackEgress](),
 		"StackFile":         reflect.TypeFor[StackFile](),
 		"EditResult":        reflect.TypeFor[EditResult](),
+		"SyncStatus":        reflect.TypeFor[SyncStatus](),
 	} {
 		s, ok := schemas[name]
 		if !ok {
