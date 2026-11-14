@@ -303,6 +303,9 @@ func serve(args []string, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Before anything renders (git sync, apply handlers): stacks reach the
+	// API on its network with the port this serve listens on.
+	servedAPIURL = apiURLFor(*addr)
 	var oidcConfig *api.OIDC
 	if *oidcIssuer != "" {
 		oidcConfig = &api.OIDC{Issuer: *oidcIssuer, ClientID: *oidcClient, ClientSecret: os.Getenv("NEPFLEET_OIDC_CLIENT_SECRET"),
@@ -526,8 +529,7 @@ func serve(args []string, stderr io.Writer) error {
 	}()
 	fmt.Fprintf(stderr, "nepfleet API listening on %s\n", *addr)
 	// After a reboot, emulators are gone until the binfmt stack runs again.
-	servedAPIURL = apiURLFor(*addr)
-	go joinAPINetwork(ctx, stderr)
+	go joinAPINetwork(ctx, *addr, stderr)
 	go func() {
 		if e, err := c.open(); err == nil {
 			reregisterBinfmt(ctx, e.fleet, *host, doctor.Host(), startProject, stderr)

@@ -57,9 +57,13 @@ func TestAPINetworkHelpers(t *testing.T) {
 	if got := apiURLFor("nonsense"); got != render.DefaultAPIURL {
 		t.Errorf("apiURLFor(nonsense) = %q", got)
 	}
-	id := strings.Repeat("ab", 32)
-	line := "612 600 0:44 /var/lib/docker/containers/" + id + "/hostname /etc/hostname rw,relatime - ext4 /dev/vda1 rw\n"
-	if m := containerIDRe.FindStringSubmatch(line); m == nil || m[1] != id {
-		t.Errorf("container ID from mountinfo: %v", m)
+	own, other := strings.Repeat("ab", 32), strings.Repeat("cd", 32)
+	mounts := "600 590 0:44 /var/lib/docker/containers/" + other + "/hostname /logs/other rw - ext4 /dev/vda1 rw\n" +
+		"612 600 0:44 /var/lib/docker/containers/" + own + "/hostname /etc/hostname rw,relatime - ext4 /dev/vda1 rw\n"
+	if got := containerFromMounts(mounts); got != own {
+		t.Errorf("container from mountinfo = %q, want the /etc/hostname one", got)
+	}
+	if got := containerFromMounts("1 0 0:1 / / rw - overlay overlay rw\n"); got != "" {
+		t.Errorf("not in a container: %q", got)
 	}
 }

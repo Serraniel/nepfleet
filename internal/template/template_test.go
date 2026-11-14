@@ -327,3 +327,31 @@ func TestNotifyTokenValidation(t *testing.T) {
 		t.Errorf("token value %q, %v", v, err)
 	}
 }
+
+func TestAPINetworkImpostor(t *testing.T) {
+	dir := copyDemo(t)
+	compose := filepath.Join(dir, "compose.yaml")
+	raw, err := os.ReadFile(compose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ svc, want string }{
+		{"  nepfleet:\n    image: nginx:1.29\n    networks: [api]\n", "must not be called nepfleet"},
+		{"  other:\n    image: nginx:1.29\n    networks:\n      api: {aliases: [nepfleet]}\n", "no aliases"},
+	} {
+		doc := strings.Replace(string(raw), "services:\n", "services:\n"+c.svc, 1) + "  api:\n    name: ${NEPFLEET_API_NETWORK}\n    external: true\n"
+		if !strings.Contains(string(raw), "\nnetworks:\n") {
+			doc = strings.Replace(string(raw), "services:\n", "services:\n"+c.svc, 1) + "networks:\n  api:\n    name: ${NEPFLEET_API_NETWORK}\n    external: true\n"
+		}
+		if err := os.WriteFile(compose, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tpl, err := Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tpl.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("want %q, got %v", c.want, err)
+		}
+	}
+}

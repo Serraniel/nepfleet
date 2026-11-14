@@ -33,17 +33,28 @@ func TestRegister(t *testing.T) {
 		t.Errorf("unknown token: valid %v known %v", valid, known)
 	}
 
-	// A renewal replaces the old token of the same name.
+	// A renewal: the old token of the same name ends within the grace period
+	// (a rollback to the files that hold it still works meanwhile).
 	renewed := Prefix + strings.Repeat("B", 43)
-	if _, err := s.Register("stack:dozzle/T", ScopeNotify, renewed, time.Hour); err != nil {
+	if _, err := s.Register("stack:dozzle/T", ScopeNotify, renewed, 365*24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Check(stackSecret); err == nil {
-		t.Error("the replaced token still works")
+	if _, err := s.Check(stackSecret); err != nil {
+		t.Error("the previous token stopped at once; a rollback would break")
 	}
-	all, _ := s.List()
-	if len(all) != 1 {
-		t.Errorf("tokens = %d, want 1", len(all))
+	now = now.Add(RenewGrace)
+	if _, err := s.Check(stackSecret); err == nil {
+		t.Error("the previous token outlived the grace period")
+	}
+	if _, err := s.Check(renewed); err != nil {
+		t.Errorf("the renewed token: %v", err)
+	}
+	// The next registration drops tokens of that name that have ended.
+	if _, err := s.Register("stack:dozzle/T", ScopeNotify, Prefix+strings.Repeat("C", 43), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := s.List(); len(all) != 2 {
+		t.Errorf("tokens = %d, want 2 (the renewed one in its grace, and the new one)", len(all))
 	}
 
 	for _, bad := range []struct{ scope, secret string }{

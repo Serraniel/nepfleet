@@ -415,9 +415,10 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 	}
 	var doc struct {
 		Services map[string]struct {
-			Image    string `yaml:"image"`
-			Labels   any    `yaml:"labels"`
-			Networks any    `yaml:"networks"`
+			Image         string `yaml:"image"`
+			Labels        any    `yaml:"labels"`
+			Networks      any    `yaml:"networks"`
+			ContainerName string `yaml:"container_name"`
 		} `yaml:"services"`
 		Networks map[string]struct {
 			Name string `yaml:"name"`
@@ -482,6 +483,25 @@ func (t *Template) checkCompose(declared map[string]bool) []error {
 	for _, i := range t.Spec.Images {
 		if i.Name != "" && !used[i.Name] {
 			errs = append(errs, fmt.Errorf("spec.images %q is not used by %s", i.Name, t.Spec.Compose))
+		}
+	}
+
+	// On NepFleet's API network, "nepfleet" is the API: a stack that also
+	// answered to it would receive other stacks' tokens.
+	for _, name := range slices.Sorted(maps.Keys(doc.Services)) {
+		svc := doc.Services[name]
+		for _, n := range serviceNetworks(svc.Networks) {
+			if doc.Networks[n].Name != "${NEPFLEET_API_NETWORK}" {
+				continue
+			}
+			if name == "nepfleet" || svc.ContainerName == "nepfleet" {
+				errs = append(errs, fmt.Errorf("%s: service %s is on NepFleet's API network and must not be called nepfleet", t.Spec.Compose, name))
+			}
+			if m, ok := svc.Networks.(map[string]any); ok {
+				if cfg, ok := m[n].(map[string]any); ok && cfg["aliases"] != nil {
+					errs = append(errs, fmt.Errorf("%s: service %s: no aliases on NepFleet's API network", t.Spec.Compose, name))
+				}
+			}
 		}
 	}
 

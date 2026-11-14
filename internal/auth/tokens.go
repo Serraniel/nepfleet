@@ -141,10 +141,15 @@ func (s *Store) Create(name, scope string, stacks []string, ttl time.Duration) (
 	return secret, t, s.save(all)
 }
 
+// RenewGrace is how long a stack's previous token stays valid after a new one
+// is registered: a failed apply rolls back to the files holding the old one.
+const RenewGrace = 7 * 24 * time.Hour
+
 // Register stores a token whose secret was made elsewhere: generated for a
-// stack and kept in its encrypted secrets. Tokens of the same name are
-// replaced, so a renewed one doesn't leave the old one valid. It is never
-// admin: a stack's container must not hold the keys to the fleet.
+// stack and kept in its encrypted secrets. Earlier tokens of the same name
+// end within RenewGrace, so a renewed one doesn't leave the old one valid
+// for long, while a rollback to it still works. It is never admin: a
+// stack's container must not hold the keys to the fleet.
 func (s *Store) Register(name, scope, secret string, ttl time.Duration) (Token, error) {
 	if err := checkNew(name, scope, nil, ttl); err != nil {
 		return Token{}, err
@@ -176,7 +181,12 @@ func (s *Store) Register(name, scope, secret string, ttl time.Duration) (Token, 
 	if err != nil {
 		return Token{}, err
 	}
-	all = slices.DeleteFunc(all, func(o Token) bool { return o.Name == name })
+	all = slices.DeleteFunc(all, func(o Token) bool { return o.Name == name && !now.Before(o.Expires) })
+	for i := range all {
+		if all[i].Name == name && all[i].Expires.After(now.Add(RenewGrace)) {
+			all[i].Expires = now.Add(RenewGrace)
+		}
+	}
 	return t, s.save(append(all, t))
 }
 

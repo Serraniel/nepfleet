@@ -23,9 +23,9 @@ func apiURLFor(listen string) string {
 	return render.DefaultAPIURL
 }
 
-// containerIDRe finds this container's ID in its mounts: Docker bind-mounts
-// /etc/hostname and friends from its directory for the container.
-var containerIDRe = regexp.MustCompile(`/containers/([0-9a-f]{64})/`)
+// containerIDRe finds this container's ID in the mount of its /etc/hostname,
+// which Docker bind-mounts from the container's own directory.
+var containerIDRe = regexp.MustCompile(`/containers/([0-9a-f]{64})/hostname$`)
 
 // ownContainer is the ID of the container this process runs in, or "".
 func ownContainer() string {
@@ -33,8 +33,20 @@ func ownContainer() string {
 	if err != nil {
 		return ""
 	}
-	if m := containerIDRe.FindSubmatch(raw); m != nil {
-		return string(m[1])
+	return containerFromMounts(string(raw))
+}
+
+// containerFromMounts reads /proc/self/mountinfo: only the mount on
+// /etc/hostname counts, never another container's directory mounted in.
+func containerFromMounts(mountinfo string) string {
+	for _, line := range strings.Split(mountinfo, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 5 || f[4] != "/etc/hostname" {
+			continue
+		}
+		if m := containerIDRe.FindStringSubmatch(f[3]); m != nil {
+			return m[1]
+		}
 	}
 	return ""
 }
@@ -43,10 +55,15 @@ func ownContainer() string {
 // "nepfleet", so stacks that use the API (log alerts, widgets) reach it
 // there. The network is internal: it connects them to the API and nothing
 // else. Done at start, since a self-update replaces only the image.
-func joinAPINetwork(ctx context.Context, stderr io.Writer) {
+func joinAPINetwork(ctx context.Context, listen string, stderr io.Writer) {
 	id := ownContainer()
 	if id == "" {
 		return // not in a container: stacks reach the API some other way
+	}
+	if host, _, err := net.SplitHostPort(listen); err == nil {
+		if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			fmt.Fprintf(stderr, "nepfleet: listening on %s, so stacks on %s can't reach the API; listen on :<port> inside the container\n", listen, render.APINetwork)
+		}
 	}
 	docker := func(args ...string) (string, error) {
 		out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput() //nolint:gosec // fixed arguments, a 64-hex container ID
