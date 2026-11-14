@@ -124,6 +124,9 @@ type Options struct {
 	SyncStatus func() SyncStatus
 	SyncNow    func()
 	SyncSecret string
+	// NewStack creates and commits a stack from a template, without applying
+	// it. Errors: ErrStackExists, InvalidError, ErrBusy.
+	NewStack func(ctx context.Context, req NewStack, by string) (NewStackResult, error)
 	// StackFiles lists a stack's editable files, without encrypted values (edit scope:
 	// files/ may hold plain configuration a read token shouldn't see).
 	StackFiles func(ctx context.Context, stack string) ([]StackFile, error)
@@ -290,6 +293,7 @@ func Handler(o Options) http.Handler {
 	registerMaintenance(mux, o, l)
 	registerEdit(mux, o, l)
 	registerSync(mux, o, l)
+	registerNewStack(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))

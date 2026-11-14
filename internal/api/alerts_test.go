@@ -308,3 +308,54 @@ func TestSyncEndpoints(t *testing.T) {
 		t.Errorf("status: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestNewStackEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	tok := map[string]string{}
+	for _, s := range []string{auth.ScopeApply, auth.ScopeEdit} {
+		secret, _, _ := store.Create(s, s, nil, time.Hour)
+		tok[s] = secret
+	}
+	onlyWeb, _, _ := store.Create("web-only", auth.ScopeEdit, []string{"web"}, time.Hour)
+	next := error(nil)
+	var got NewStack
+	h := Handler(Options{Tokens: store, NewStack: func(_ context.Context, req NewStack, _ string) (NewStackResult, error) {
+		got = req
+		return NewStackResult{Name: req.Name, Commit: "c1"}, next
+	}})
+	do := func(token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/stacks", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	body := `{"template":"hello","name":"web","values":{"GREETING":"hi"}}`
+	if rec := do(tok[auth.ScopeApply], body); rec.Code != http.StatusForbidden {
+		t.Errorf("apply token: %d", rec.Code)
+	}
+	if rec := do(tok[auth.ScopeEdit], body); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"commit":"c1"`) {
+		t.Errorf("edit token: %d %s", rec.Code, rec.Body)
+	}
+	if got.Values["GREETING"] != "hi" {
+		t.Errorf("values: %+v", got)
+	}
+	if rec := do(onlyWeb, body); rec.Code != http.StatusCreated {
+		t.Errorf("a token for web creates web: %d", rec.Code)
+	}
+	if rec := do(onlyWeb, `{"template":"hello","name":"db"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("a token for web creates db: %d", rec.Code)
+	}
+	for err, want := range map[error]int{ErrStackExists: 409, InvalidError{Reason: "x"}: 422, ErrBusy: 409} {
+		next = err
+		if rec := do(tok[auth.ScopeEdit], body); rec.Code != want {
+			t.Errorf("%v: %d, want %d", err, rec.Code, want)
+		}
+	}
+	next = nil
+	for _, b := range []string{`{}`, `{"template":""}`, `{"template":"x","extra":1}`, `nope`} {
+		if rec := do(tok[auth.ScopeEdit], b); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", b, rec.Code)
+		}
+	}
+}

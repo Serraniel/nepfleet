@@ -71,6 +71,32 @@ paths:
                 items: { $ref: "#/components/schemas/StackInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/TooManyAttempts" }
+    post:
+      tags: [stacks]
+      operationId: createStack
+      summary: Create a stack from a template, in one commit
+      description: >-
+        As nepfleet new: checks the name, the values against the template's inputs, and that
+        the stack renders; secret inputs are stored encrypted. Commits as the person or token,
+        without applying: plan and apply afterwards. Needs the edit scope; a token limited to
+        stacks creates only those, and a person needs a sign-in or passkey verification within
+        5 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewStack" }
+      responses:
+        "201":
+          description: Created and committed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewStackResult" }
+        "400": { description: Not a request this endpoint takes }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, the token doesn't cover that name, or `{\"verify\": true}`" }
+        "409": { description: A stack of that name exists, or another operation runs }
+        "422": { description: The template or the values don't fit; nothing was written }
   /api/v1/templates:
     get:
       tags: [stacks]
@@ -805,6 +831,24 @@ components:
         applied: { type: array, items: { type: string } }
         failed: { type: array, items: { type: string } }
         pending: { type: array, items: { type: string } }
+    NewStack:
+      type: object
+      required: [template]
+      properties:
+        template: { type: string }
+        source: { type: string, description: "A template source of fleet.yaml; default official" }
+        name: { type: string, description: "Default: the template's name" }
+        target: { type: string, description: "The host; default local" }
+        access: { type: string, enum: [domain, port], description: "Behind Caddy (default), or a LAN port" }
+        port: { type: integer, description: "For access port; 0 picks a free one" }
+        values: { type: object, additionalProperties: { type: string }, description: "The template's inputs; secret ones are stored encrypted" }
+    NewStackResult:
+      type: object
+      required: [name, commit]
+      properties:
+        name: { type: string }
+        commit: { type: string }
+        port: { type: integer }
     StackFile:
       type: object
       required: [path, content, revision]
