@@ -31,7 +31,9 @@ const postgresCompose = `services:
       PGDATA: /var/lib/postgresql/data/%VERSION%
     volumes: ["data:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "app"]
+      # Over TCP: the server the entrypoint runs while it initialises listens
+      # on the socket only, and is shut down again right after.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "app"]
       interval: 1s
       timeout: 3s
       retries: 60
