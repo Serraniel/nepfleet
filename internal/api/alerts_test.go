@@ -403,6 +403,7 @@ func TestSecretEndpoints(t *testing.T) {
 		{"PUT", "/api/v1/stacks/web/secrets/DB_PASSWORD", tok[auth.ScopeApply], `{"value":"s"}`, 403},
 		{"PUT", "/api/v1/stacks/web/secrets/DB_PASSWORD", tok[auth.ScopeEdit], `{"value":"s3cret-value"}`, 200},
 		{"PUT", "/api/v1/stacks/web/secrets/1BAD", tok[auth.ScopeEdit], `{"value":"s"}`, 400},
+		{"PUT", "/api/v1/stacks/web/secrets/sops", tok[auth.ScopeEdit], `{"value":"s"}`, 400},
 		{"PUT", "/api/v1/stacks/web/secrets/OK", tok[auth.ScopeEdit], `{"value":"s","x":1}`, 400},
 		{"PUT", "/api/v1/stacks/web/secrets/OK", tok[auth.ScopeEdit], `{"value":"` + strings.Repeat("a", maxSecret+1) + `"}`, 400},
 		{"PUT", "/api/v1/stacks/db/secrets/OK", onlyWeb, `{"value":"s"}`, 404},

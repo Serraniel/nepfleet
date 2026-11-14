@@ -323,7 +323,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "The scope isn't edit, or `{\"verify\": true}`: a person must verify first" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { description: Another operation runs }
+        "409": { description: "Another operation runs, or the file has uncommitted changes on the server" }
     delete:
       tags: [stacks]
       operationId: removeStackSecret
@@ -341,7 +341,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "The scope isn't edit, or `{\"verify\": true}`" }
         "404": { description: No such stack, or no secret of that key }
-        "409": { description: Another operation runs }
+        "409": { description: "Another operation runs, or the file has uncommitted changes on the server" }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -377,7 +377,7 @@ paths:
         "400": { description: "Not a variable name, or no value (at most 64 KiB)" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
-        "409": { description: Another operation runs }
+        "409": { description: "Another operation runs, or the file has uncommitted changes on the server" }
     delete:
       tags: [server]
       operationId: removeFleetSecret
@@ -393,7 +393,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
         "404": { description: No secret of that key }
-        "409": { description: Another operation runs }
+        "409": { description: "Another operation runs, or the file has uncommitted changes on the server" }
   /api/v1/sync:
     get:
       tags: [server]

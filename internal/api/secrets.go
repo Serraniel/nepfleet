@@ -35,6 +35,10 @@ type SecretResult struct {
 // ErrNoSecret means there is no secret of that key to remove.
 var ErrNoSecret = errors.New("no secret of that key")
 
+// ErrUncommitted means the file has changes on the server that aren't
+// committed: they stay, and nothing is saved.
+var ErrUncommitted = errors.New("the secrets file has uncommitted changes on the server; commit or discard them first")
+
 // secretKey is a name a compose file can use as a variable.
 var secretKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 
@@ -62,8 +66,8 @@ func registerSecrets(mux *http.ServeMux, o Options, l *limiter) {
 			return
 		}
 		key := r.PathValue("key")
-		if !secretKey.MatchString(key) {
-			http.Error(w, "a key is a variable name: letters, digits and _, not starting with a digit", http.StatusBadRequest)
+		if !secretKey.MatchString(key) || key == "sops" {
+			http.Error(w, "a key is a variable name: letters, digits and _, not starting with a digit (and not sops)", http.StatusBadRequest)
 			return
 		}
 		t, _ := TokenFrom(r.Context())
@@ -89,7 +93,7 @@ func registerSecrets(mux *http.ServeMux, o Options, l *limiter) {
 		case errors.Is(err, ErrNoSecret):
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
-		case errors.Is(err, ErrBusy):
+		case errors.Is(err, ErrBusy), errors.Is(err, ErrUncommitted):
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		case writeErr(w, err):
@@ -104,7 +108,7 @@ func registerSecrets(mux *http.ServeMux, o Options, l *limiter) {
 			verb = "removed"
 		}
 		// The key only: never the value.
-		log.Printf("api: %s %s secret %s of %s in %s (token %s)", t.Name, verb, key, where, commit, t.ID) //nolint:gosec // checked key and stack names
+		log.Printf("api: %q %s secret %s of %s in %s (token %s)", t.Name, verb, key, where, commit, t.ID) //nolint:gosec // %q escapes the name; checked key and stack names
 		writeJSON(w, SecretResult{Commit: commit})
 	}
 

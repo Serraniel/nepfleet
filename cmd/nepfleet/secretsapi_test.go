@@ -88,7 +88,7 @@ func TestSecretsAPI(t *testing.T) {
 	if err := os.WriteFile(path, []byte("hand edit\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := setSecretAPI(c, "web", "K", new("v"), "ci"); err == nil || !strings.Contains(err.Error(), "uncommitted") {
+	if _, err := setSecretAPI(c, "web", "K", new("v"), "ci"); !errors.Is(err, api.ErrUncommitted) {
 		t.Errorf("dirty file: %v", err)
 	}
 }

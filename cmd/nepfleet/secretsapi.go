@@ -74,8 +74,12 @@ func setSecretAPI(c common, stack, key string, value *string, by string) (string
 		return "", err
 	}
 	rel := relTo(e.fleet.Dir, path)
-	if st, _ := gitOut(e.fleet.Dir, "status", "--porcelain", "--", rel); strings.TrimSpace(st) != "" {
-		return "", errors.New(rel + " has uncommitted changes on the server; commit or discard them first")
+	st, err := gitOut(e.fleet.Dir, "status", "--porcelain", "--", rel)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(st) != "" {
+		return "", api.ErrUncommitted
 	}
 	values, err := e.store.Load(path)
 	if err != nil {
