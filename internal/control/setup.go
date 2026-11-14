@@ -60,8 +60,11 @@ type SetupJob struct {
 type Setup struct {
 	// Run runs a script on a remote, as root steps expect (remote.SSH.Run).
 	Run func(ctx context.Context, t remote.Target, script string) ([]byte, error)
-	// Compose is the compose.yaml an install writes, pinned to a version.
-	Compose []byte
+	// Compose is the compose.yaml an install or update writes, pinned to a
+	// version; ComposeFor, if set, makes it when a plan needs it (checking
+	// the image's signature) and wins.
+	Compose    []byte
+	ComposeFor func(ctx context.Context) ([]byte, error)
 	// Ingress is the ingress network bootstrap creates.
 	Ingress string
 	// Mounts plans a machine's mounts (nil: the daemon can't); run reaches
@@ -133,13 +136,20 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 	}
 	s.mu.Unlock()
 	var steps []remote.Step
+	compose := s.Setup.Compose
+	if s.Setup.ComposeFor != nil && (kind == SetupInstall || kind == SetupUpdate) {
+		if compose, err = s.Setup.ComposeFor(ctx); err != nil {
+			p := &SetupPlan{Kind: kind, Steps: []remote.Step{}, Error: err.Error()}
+			return p, rep, t, nil
+		}
+	}
 	switch kind {
 	case SetupBootstrap:
 		steps, err = remote.BootstrapPlan(rep, s.Setup.Ingress)
 	case SetupInstall:
-		steps, err = remote.InstallPlan(rep, name, s.Setup.Compose, false)
+		steps, err = remote.InstallPlan(rep, name, compose, false)
 	case SetupUpdate:
-		steps, err = remote.UpdatePlan(rep, s.Setup.Compose, s.Version)
+		steps, err = remote.UpdatePlan(rep, compose, s.Version)
 	case SetupStart:
 		steps, err = remote.StartPlan(rep)
 	case SetupMounts:
