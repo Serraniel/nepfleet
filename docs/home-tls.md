@@ -5,7 +5,7 @@ Services at home can have real, trusted certificates without being reachable fro
 ## What you need
 
 - **A domain you own,** for example `example.org`. Home services can use a subdomain such as `home.example.org`.
-- **An API token for the domain's DNS:** Cloudflare, Hetzner and deSEC are supported by the NepFleet Caddy image. Give the token as little access as possible: edit DNS records of that one zone only.
+- **An API token for the domain's DNS:** Cloudflare, Hetzner and deSEC are supported by the NepFleet Caddy image. Give the token as little access as possible; see [DNS API tokens](#dns-api-tokens) for the minimum per provider.
 - **A DNS record that points the names at the host,** for devices on the LAN only (see below).
 
 ## Set up Caddy
@@ -48,3 +48,30 @@ The certificate is public, but the address should only be known on your LAN. Two
 - **Wildcards:** DNS-01 is the only way to get wildcard certificates, so the wildcard needs a DNS provider. Without one, Caddy issues a certificate per name, and each name shows up in the public logs.
 - **Rate limits:** Let's Encrypt allows 50 certificates per registered domain per week. For many services or frequent rebuilds, keep Caddy's `data` volume (it holds the certificates) in backups so it doesn't request them again.
 - **Public services:** services reachable from the internet need nothing special; DNS-01 works for them too.
+
+## DNS API tokens
+
+Caddy only creates and removes the temporary `_acme-challenge` TXT records that prove you own the domain. Its token needs nothing more. The minimum per provider:
+
+**Cloudflare** (My Profile → API Tokens → Create Token → *Edit zone DNS*):
+- **Permissions:**
+  - **Zone → DNS → Edit**: comes with the template.
+  - **Zone → Zone → Read**: add it. Caddy looks up the zone with it.
+- **Zone resources:** **Include → Specific zone → your domain**, not all zones.
+- **Expiration:** a year, with a reminder to renew it. When it lapses, renewals fail and Caddy reports it, before the certificates themselves run out.
+- **Client IP address filtering:** the host's public IP if it is fixed (a VPS). Leave it empty for a host at home whose address changes.
+- Nothing else: no Workers, account or "read all resources" permissions.
+
+**Hetzner** (Hetzner Console, the Cloud DNS API):
+- **Token:** a project API token with **Read & Write** (Project → Security → API tokens).
+- **Scope:** Hetzner can't limit a token to one zone, so it can change every resource of the project. Keep the DNS zone in a project of its own, with no servers in it.
+
+**deSEC** (Token management):
+- **Token:** a new token without *manage tokens* and without *create/delete domains* (`perm_manage_tokens`, `perm_create_domain` and `perm_delete_domain` off). A token that may manage tokens can lift its own limits.
+- **Limits:** give it token policies that only allow TXT records of your domain:
+  1. A default policy that denies writing: domain, subname and type empty, *write* off.
+  2. One that allows TXT: your domain, subname empty, type `TXT`, *write* on.
+- **Optional:** set *allowed subnets* to the host's public IP if it is fixed.
+
+The token goes into the Caddy stack's `DNS_API_TOKEN`, stored encrypted (`nepfleet secret set caddy DNS_API_TOKEN`, or the app's Secrets on the stack's edit page). To replace it, set the new one there and apply the stack; then revoke the old one at the provider.
+
