@@ -685,6 +685,11 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		if usesBuiltin(p.tpl, "NEPFLEET_API_NETWORK") {
 			opts.APINetwork = render.APINetwork
 		}
+		// One line per phase: the CLI shows it, and the API reads the last
+		// one of a job's log as its progress (api.ProgressFrom).
+		opts.Progress = func(step, steps int, text string) {
+			fmt.Fprintf(stdout, "%s: step %d/%d: %s\n", name, step, steps, text)
+		}
 		if p.tpl != nil {
 			opts.Template, opts.TemplateVersion = p.tpl.Metadata.Name, p.tpl.Spec.Version
 		}

@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -394,5 +396,27 @@ func TestKeptFiles(t *testing.T) {
 	}
 	if p, _ = PlanStack("app", "compose", dir, out(), nil); p.Empty() {
 		t.Error("a missing kept file must be written again")
+	}
+}
+
+func TestApplyProgress(t *testing.T) {
+	dir := t.TempDir()
+	r := &fakeRunner{}
+	ctx := context.Background()
+	v1 := output("services:\n  web: {image: 'nginx:1'}\n", "PASSWORD='one'\n")
+	p, err := PlanStack("app", "compose", dir, v1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	o := Options{IngressNetwork: "ingress", Progress: func(step, steps int, text string) {
+		seen = append(seen, fmt.Sprintf("%d/%d %s", step, steps, text))
+	}}
+	if _, err := Apply(ctx, r, p, v1, o); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1/4 networks", "2/4 write the files", "3/4 pull, start and wait until healthy", "4/4 record what runs"}
+	if !slices.Equal(seen, want) {
+		t.Errorf("progress = %q, want %q", seen, want)
 	}
 }

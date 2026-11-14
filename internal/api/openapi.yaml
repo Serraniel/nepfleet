@@ -1370,6 +1370,14 @@ components:
         error: { type: string }
         log: { type: string }
         by: { type: string }
+        progress:
+          type: object
+          description: The phase a running apply is in. Steps is known from the start, so step only grows.
+          required: [step, steps, text]
+          properties:
+            step: { type: integer, minimum: 1 }
+            steps: { type: integer, minimum: 1 }
+            text: { type: string }
     StackEgress:
       type: object
       required: [mode, sidecars, hosts, addresses, lookedUp]
