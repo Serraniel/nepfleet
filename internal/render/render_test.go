@@ -457,3 +457,47 @@ func TestNotifyTokenGenerated(t *testing.T) {
 		t.Errorf("NEPFLEET_API_URL = %q", got)
 	}
 }
+
+func TestForSwarmOneShots(t *testing.T) {
+	in := []byte(`services:
+  app:
+    image: app:1
+    depends_on:
+      setup: { condition: service_completed_successfully }
+      db: { condition: service_healthy }
+  setup:
+    image: app:1
+    restart: "no"
+  custom:
+    image: app:1
+    restart: "no"
+    deploy:
+      restart_policy: { condition: none }
+  db:
+    image: postgres:18
+    depends_on: [other]
+`)
+	out, err := ForSwarm(in)
+	must(t, err)
+	var doc struct {
+		Services map[string]struct {
+			DependsOn any `yaml:"depends_on"`
+			Deploy    struct {
+				RestartPolicy map[string]string `yaml:"restart_policy"`
+			} `yaml:"deploy"`
+		} `yaml:"services"`
+	}
+	must(t, yaml.Unmarshal(out, &doc))
+	if got, ok := doc.Services["app"].DependsOn.([]any); !ok || len(got) != 2 || got[0] != "setup" || got[1] != "db" {
+		t.Errorf("app depends_on = %#v, want [setup db]", doc.Services["app"].DependsOn)
+	}
+	if got, ok := doc.Services["db"].DependsOn.([]any); !ok || len(got) != 1 {
+		t.Errorf("a list stays a list: %#v", doc.Services["db"].DependsOn)
+	}
+	if got := doc.Services["setup"].Deploy.RestartPolicy["condition"]; got != "on-failure" {
+		t.Errorf("one-shot restart_policy = %q, want on-failure", got)
+	}
+	if got := doc.Services["custom"].Deploy.RestartPolicy["condition"]; got != "none" {
+		t.Errorf("the template's own policy was replaced: %q", got)
+	}
+}

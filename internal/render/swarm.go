@@ -45,6 +45,8 @@ func ForSwarm(compose []byte) ([]byte, error) {
 	for i := 1; i < len(services.Content); i += 2 {
 		svc := services.Content[i]
 		updateDefaults(svc)
+		swarmDependsOn(svc)
+		swarmOneShot(svc)
 		labels := mapGet(svc, "labels")
 		if labels == nil {
 			continue
@@ -85,6 +87,43 @@ func ForSwarm(compose []byte) ([]byte, error) {
 		dl.Content = append(dl.Content, move...)
 	}
 	return yaml.Marshal(&doc)
+}
+
+// swarmDependsOn turns depends_on's long form (conditions) into the list
+// docker stack accepts. Swarm doesn't order services by it either way.
+func swarmDependsOn(svc *yaml.Node) {
+	deps := mapGet(svc, "depends_on")
+	if deps == nil || deps.Kind != yaml.MappingNode {
+		return
+	}
+	list := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+	for j := 0; j+1 < len(deps.Content); j += 2 {
+		list.Content = append(list.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: deps.Content[j].Value})
+	}
+	mapSet(svc, "depends_on", list)
+}
+
+// swarmOneShot gives a one-shot (restart: "no") the swarm restart policy
+// on-failure: once it succeeded it stays done, and one that ran before
+// what it waits for was up (swarm doesn't order by depends_on) tries again.
+// A restart_policy the template sets wins.
+func swarmOneShot(svc *yaml.Node) {
+	r := mapGet(svc, "restart")
+	if r == nil || r.Value != "no" {
+		return
+	}
+	deploy := mapGet(svc, "deploy")
+	if deploy == nil {
+		deploy = &yaml.Node{Kind: yaml.MappingNode}
+		mapSet(svc, "deploy", deploy)
+	}
+	if mapGet(deploy, "restart_policy") != nil {
+		return
+	}
+	policy := &yaml.Node{Kind: yaml.MappingNode}
+	mapSet(policy, "condition", &yaml.Node{Kind: yaml.ScalarNode, Value: "on-failure"})
+	mapSet(policy, "delay", &yaml.Node{Kind: yaml.ScalarNode, Value: "10s"})
+	mapSet(deploy, "restart_policy", policy)
 }
 
 // updateDefaults fills what a service's deploy.update_config and
