@@ -105,6 +105,7 @@ func Render(in Input) (*Output, error) {
 		"NEPFLEET_NO_BACKUP_VOLUMES": noBackupPattern(in.NoBackupVolumes),
 		"NEPFLEET_DOCKER_GID":        in.DockerGID,
 		"NEPFLEET_API_URL":           apiURL,
+		"NEPFLEET_API_HOST":          strings.TrimPrefix(apiURL, "http://"),
 		"NEPFLEET_API_NETWORK":       APINetwork,
 	}
 	var compose []byte

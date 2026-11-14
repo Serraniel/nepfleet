@@ -24,6 +24,11 @@ type Alert struct {
 	Host string `json:"host,omitempty"`
 	// Detail is what matched, e.g. the log line.
 	Detail string `json:"detail,omitempty"`
+	// Title and Message are what shoutrrr's generic webhook sends
+	// (template=json), so tools that notify through shoutrrr URLs can
+	// alert here too: they stand for Rule and Detail.
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // Lengths alerts are cut to: they end up in chat messages and on phones.
@@ -46,6 +51,13 @@ func clip(s string, n int) string {
 }
 
 func (a *Alert) clean() {
+	if a.Rule == "" {
+		a.Rule = a.Title
+	}
+	if a.Detail == "" {
+		a.Detail = a.Message
+	}
+	a.Title, a.Message = "", ""
 	a.Source = strings.TrimSpace(clip(strings.ReplaceAll(a.Source, "\n", " "), alertShort))
 	a.Rule = strings.TrimSpace(clip(strings.ReplaceAll(a.Rule, "\n", " "), alertShort))
 	a.Container = strings.TrimSpace(clip(strings.ReplaceAll(a.Container, "\n", " "), alertShort))
@@ -64,10 +76,18 @@ func handleAlert(o Options) http.HandlerFunc {
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&a); err != nil {
-			http.Error(w, `send {"source", "rule", "container", "host", "detail"}`, http.StatusBadRequest)
+			http.Error(w, `send {"source", "rule", "container", "host", "detail"} (or shoutrrr's {"title", "message"})`, http.StatusBadRequest)
 			return
 		}
 		a.clean()
+		// A stack's own token (stack:<stack>/<NAME>) names its source when
+		// the tool doesn't.
+		t, _ := TokenFrom(r.Context())
+		if a.Source == "" {
+			if rest, ok := strings.CutPrefix(t.Name, "stack:"); ok {
+				a.Source, _, _ = strings.Cut(rest, "/")
+			}
+		}
 		if a.Rule == "" && a.Detail == "" {
 			http.Error(w, "an alert needs a rule or a detail", http.StatusBadRequest)
 			return
@@ -75,7 +95,6 @@ func handleAlert(o Options) http.HandlerFunc {
 		if writeErr(w, o.Alert(r.Context(), a)) {
 			return
 		}
-		t, _ := TokenFrom(r.Context())
 		logf("api: alert %q from %s via %s (token %s)", a.Rule, a.Source, t.Name, t.ID)
 		w.WriteHeader(http.StatusAccepted)
 	}

@@ -442,6 +442,9 @@ func TestNotifyTokenGenerated(t *testing.T) {
 		t.Errorf("Tokens = %v, want only ALERTS (notify)", out.Tokens)
 	}
 	env := EnvValues(out.Files[EnvFile])
+	if env["NEPFLEET_API_HOST"] != "nepfleet:7480" {
+		t.Errorf("NEPFLEET_API_HOST = %q", env["NEPFLEET_API_HOST"])
+	}
 	if env["NEPFLEET_API_URL"] != DefaultAPIURL || env["NEPFLEET_API_NETWORK"] != APINetwork {
 		t.Errorf("API built-ins: %q %q", env["NEPFLEET_API_URL"], env["NEPFLEET_API_NETWORK"])
 	}

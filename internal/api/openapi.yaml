@@ -1651,6 +1651,8 @@ components:
         container: { type: string, description: Where it happened, maxLength: 120 }
         host: { type: string, description: The Docker host the tool runs on, maxLength: 120 }
         detail: { type: string, description: "What matched, e.g. the log line", maxLength: 2000 }
+        title: { type: string, description: "shoutrrr's generic webhook (template=json): stands for rule" }
+        message: { type: string, description: "shoutrrr's generic webhook (template=json): stands for detail" }
     Plan:
       type: object
       description: The `nepfleet plan --json` format, plus its id.
