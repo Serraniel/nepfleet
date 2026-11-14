@@ -127,6 +127,12 @@ type Options struct {
 	// NewStack creates and commits a stack from a template, without applying
 	// it. Errors: ErrStackExists, InvalidError, ErrBusy.
 	NewStack func(ctx context.Context, req NewStack, by string) (NewStackResult, error)
+	// SecretKeys lists the keys of a stack's encrypted values, or of the
+	// fleet's with stack "". SetSecret stores one encrypted and commits it as
+	// by; a nil value removes it (ErrNoSecret when there is none). Values are
+	// never read back.
+	SecretKeys func(ctx context.Context, stack string) ([]string, error)
+	SetSecret  func(ctx context.Context, stack, key string, value *string, by string) (commit string, err error)
 	// StackFiles lists a stack's editable files, without encrypted values (edit scope:
 	// files/ may hold plain configuration a read token shouldn't see).
 	StackFiles func(ctx context.Context, stack string) ([]StackFile, error)
@@ -294,6 +300,7 @@ func Handler(o Options) http.Handler {
 	registerEdit(mux, o, l)
 	registerSync(mux, o, l)
 	registerNewStack(mux, o, l)
+	registerSecrets(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))

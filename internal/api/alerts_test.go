@@ -359,3 +359,73 @@ func TestNewStackEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	tok := map[string]string{}
+	for _, s := range []string{auth.ScopeApply, auth.ScopeEdit, auth.ScopeAdmin} {
+		secret, _, _ := store.Create(s, s, nil, time.Hour)
+		tok[s] = secret
+	}
+	onlyWeb, _, _ := store.Create("web-only", auth.ScopeEdit, []string{"web"}, time.Hour)
+	type call struct {
+		stack, key string
+		value      *string
+	}
+	var calls []call
+	h := Handler(Options{Tokens: store,
+		SecretKeys: func(_ context.Context, stack string) ([]string, error) {
+			if stack == "" {
+				return []string{"FLEET_KEY"}, nil
+			}
+			return []string{"DB_PASSWORD"}, nil
+		},
+		SetSecret: func(_ context.Context, stack, key string, value *string, _ string) (string, error) {
+			calls = append(calls, call{stack, key, value})
+			if key == "MISSING" {
+				return "", ErrNoSecret
+			}
+			return "c1", nil
+		}})
+	do := func(method, path, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, c := range []struct {
+		method, path, token, body string
+		want                      int
+	}{
+		{"GET", "/api/v1/stacks/web/secrets", tok[auth.ScopeApply], "", 403},
+		{"GET", "/api/v1/stacks/web/secrets", tok[auth.ScopeEdit], "", 200},
+		{"PUT", "/api/v1/stacks/web/secrets/DB_PASSWORD", tok[auth.ScopeApply], `{"value":"s"}`, 403},
+		{"PUT", "/api/v1/stacks/web/secrets/DB_PASSWORD", tok[auth.ScopeEdit], `{"value":"s3cret-value"}`, 200},
+		{"PUT", "/api/v1/stacks/web/secrets/1BAD", tok[auth.ScopeEdit], `{"value":"s"}`, 400},
+		{"PUT", "/api/v1/stacks/web/secrets/sops", tok[auth.ScopeEdit], `{"value":"s"}`, 400},
+		{"PUT", "/api/v1/stacks/web/secrets/OK", tok[auth.ScopeEdit], `{"value":"s","x":1}`, 400},
+		{"PUT", "/api/v1/stacks/web/secrets/OK", tok[auth.ScopeEdit], `{"value":"` + strings.Repeat("a", maxSecret+1) + `"}`, 400},
+		{"PUT", "/api/v1/stacks/db/secrets/OK", onlyWeb, `{"value":"s"}`, 404},
+		{"DELETE", "/api/v1/stacks/web/secrets/DB_PASSWORD", tok[auth.ScopeEdit], "", 200},
+		{"DELETE", "/api/v1/stacks/web/secrets/MISSING", tok[auth.ScopeEdit], "", 404},
+		{"GET", "/api/v1/secrets", tok[auth.ScopeEdit], "", 403},
+		{"GET", "/api/v1/secrets", tok[auth.ScopeAdmin], "", 200},
+		{"PUT", "/api/v1/secrets/FLEET_KEY", tok[auth.ScopeEdit], `{"value":"s"}`, 403},
+		{"PUT", "/api/v1/secrets/FLEET_KEY", tok[auth.ScopeAdmin], `{"value":"s"}`, 200},
+	} {
+		rec := do(c.method, c.path, c.token, c.body)
+		if rec.Code != c.want {
+			t.Errorf("%s %s: %d, want %d (%s)", c.method, c.path, rec.Code, c.want, rec.Body)
+		}
+		if strings.Contains(rec.Body.String(), "s3cret-value") {
+			t.Errorf("%s %s echoed the value", c.method, c.path)
+		}
+	}
+	if len(calls) != 4 || calls[0].stack != "web" || *calls[0].value != "s3cret-value" || calls[1].value != nil || calls[3].stack != "" {
+		t.Errorf("calls: %+v", calls)
+	}
+	if rec := do("GET", "/api/v1/stacks/web/secrets", tok[auth.ScopeEdit], ""); !strings.Contains(rec.Body.String(), `"keys":["DB_PASSWORD"]`) {
+		t.Errorf("keys: %s", rec.Body)
+	}
+}

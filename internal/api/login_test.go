@@ -534,6 +534,10 @@ func TestEditingNeedsRecentVerification(t *testing.T) {
 		EditStack: func(context.Context, string, StackEdit, string, []string) (EditResult, error) {
 			saved++
 			return EditResult{Commit: "c1"}, nil
+		},
+		SetSecret: func(context.Context, string, string, *string, string) (string, error) {
+			saved++
+			return "c2", nil
 		}})
 	session := l.setup()
 	edit := `{"files":{"compose.yaml":"services: {}\n"},"base":{}}`
@@ -544,5 +548,9 @@ func TestEditingNeedsRecentVerification(t *testing.T) {
 	rec := l.do(http.MethodPut, "/api/v1/stacks/web/files", edit, session, testOrigin)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) || saved != 1 {
 		t.Errorf("an old sign-in must verify first: %d %s (saved %d)", rec.Code, rec.Body, saved)
+	}
+	rec = l.do(http.MethodPut, "/api/v1/stacks/web/secrets/KEY", `{"value":"v"}`, session, testOrigin)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) || saved != 1 {
+		t.Errorf("setting a secret with an old sign-in: %d %s (saved %d)", rec.Code, rec.Body, saved)
 	}
 }
