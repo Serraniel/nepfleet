@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/Serraniel/nepfleet/compare/v0.3.0...v0.3.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **api:** one log line per entry, whatever names and requests hold ([#302](https://github.com/Serraniel/nepfleet/issues/302)) ([07c6d92](https://github.com/Serraniel/nepfleet/commit/07c6d92a62db8cd966efa0c7544a3d66f13e6f4c))
+* **deps:** golang.org/x/crypto v0.59.0 (GO-2026-5932) ([#301](https://github.com/Serraniel/nepfleet/issues/301)) ([6bef54c](https://github.com/Serraniel/nepfleet/commit/6bef54c4f768bee14fd7061978a8bdd34a5bc761))
+
 ## [0.3.0](https://github.com/Serraniel/nepfleet/compare/v0.2.0...v0.3.0) (2026-11-14)
 
 
