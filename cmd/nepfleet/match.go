@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/Serraniel/neptide/pkg/registry"
 
+	"github.com/Serraniel/nepfleet/internal/api"
+	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/render"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
@@ -61,42 +64,14 @@ func cmdTemplateMatch(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "%s already uses the template %s/%s\n", s.Metadata.Name, s.Spec.Template.Source, s.Spec.Template.Name)
 		return nil
 	}
-	raw, err := os.ReadFile(filepath.Join(s.Dir, render.ComposeFile))
+	matches, raw, err := e.templateMatches(s, *src)
 	if err != nil {
 		return err
-	}
-	stackImages := imageTags(raw)
-	if len(stackImages) == 0 {
-		return fmt.Errorf("%s: no images found in its compose file", s.Metadata.Name)
-	}
-	res, err := e.resolver.Resolve(*src)
-	if err != nil {
-		return err
-	}
-	dirs, err := findTemplates([]string{filepath.Join(res.Dir, "system"), filepath.Join(res.Dir, "apps")})
-	if err != nil {
-		return err
-	}
-	var matches []templateMatch
-	for _, d := range dirs {
-		t, err := template.Load(d)
-		if err != nil {
-			continue
-		}
-		tplRaw, err := os.ReadFile(filepath.Join(d, t.Spec.Compose))
-		if err != nil {
-			continue
-		}
-		if m, ok := matchImages(stackImages, imageTags(tplRaw)); ok {
-			m.Template, m.compose = t, tplRaw
-			matches = append(matches, m)
-		}
 	}
 	if len(matches) == 0 {
 		fmt.Fprintf(stdout, "no template in %s runs the images of %s\n", *src, s.Metadata.Name)
 		return nil
 	}
-	sort.SliceStable(matches, func(i, j int) bool { return len(matches[i].Same) > len(matches[j].Same) })
 	for _, m := range matches {
 		printMatch(stdout, s.Metadata.Name, *src, m)
 		if *withDiff {
@@ -198,4 +173,85 @@ func imageTags(compose []byte) map[string]string {
 		out[r.Name()] = r.Tag
 	}
 	return out
+}
+
+// templateMatches finds the templates of source src that run a plain stack's
+// images, best first, with the stack's compose file.
+func (e *env) templateMatches(s *fleet.Stack, src string) ([]templateMatch, []byte, error) {
+	raw, err := os.ReadFile(filepath.Join(s.Dir, render.ComposeFile))
+	if err != nil {
+		return nil, nil, err
+	}
+	stackImages := imageTags(raw)
+	if len(stackImages) == 0 {
+		return nil, nil, fmt.Errorf("%s: no images found in its compose file", s.Metadata.Name)
+	}
+	res, err := e.resolver.Resolve(src)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A source may have apps only, or system stacks only.
+	var roots []string
+	for _, r := range []string{filepath.Join(res.Dir, "system"), filepath.Join(res.Dir, "apps")} {
+		if fi, err := os.Stat(r); err == nil && fi.IsDir() {
+			roots = append(roots, r)
+		}
+	}
+	dirs, err := findTemplates(roots)
+	if err != nil {
+		return nil, nil, err
+	}
+	var matches []templateMatch
+	for _, d := range dirs {
+		t, err := template.Load(d)
+		if err != nil {
+			continue
+		}
+		tplRaw, err := os.ReadFile(filepath.Join(d, t.Spec.Compose))
+		if err != nil {
+			continue
+		}
+		if m, ok := matchImages(stackImages, imageTags(tplRaw)); ok {
+			m.Template, m.compose = t, tplRaw
+			matches = append(matches, m)
+		}
+	}
+	sort.SliceStable(matches, func(i, j int) bool { return len(matches[i].Same) > len(matches[j].Same) })
+	return matches, raw, nil
+}
+
+// matchAPI is GET /api/v1/stacks/{name}/match.
+func matchAPI(c common, stack, src string) (api.TemplateMatches, error) {
+	if !apiMu.TryLock() {
+		return api.TemplateMatches{}, api.ErrBusy
+	}
+	defer apiMu.Unlock()
+	e, err := c.open()
+	if err != nil {
+		return api.TemplateMatches{}, err
+	}
+	s, err := e.fleet.LoadStack(stack)
+	if err != nil {
+		return api.TemplateMatches{}, api.ErrNotFound
+	}
+	if t := s.Spec.Template; t != nil {
+		return api.TemplateMatches{Template: t.Source + "/" + t.Name}, nil
+	}
+	if !slices.ContainsFunc(e.fleet.Spec.TemplateSources, func(ts fleet.Source) bool { return ts.Name == src }) {
+		return api.TemplateMatches{}, api.InvalidError{Reason: "fleet.yaml has no template source " + src}
+	}
+	matches, _, err := e.templateMatches(s, src)
+	if err != nil {
+		return api.TemplateMatches{}, api.InvalidError{Reason: cleanReason(err, e.fleet.Dir)}
+	}
+	out := api.TemplateMatches{Matches: []api.TemplateMatch{}}
+	for _, m := range matches {
+		am := api.TemplateMatch{Source: src, Name: m.Template.Metadata.Name, Title: m.Template.Metadata.Title, Version: m.Template.Spec.Version,
+			Same: []api.MatchedImage{}, OnlyStack: append([]string{}, m.OnlyStack...), OnlyTemplate: append([]string{}, m.OnlyTemplate...)}
+		for _, n := range slices.Sorted(maps.Keys(m.Same)) {
+			am.Same = append(am.Same, api.MatchedImage{Image: n, Stack: m.Same[n][0], Template: m.Same[n][1]})
+		}
+		out.Matches = append(out.Matches, am)
+	}
+	return out, nil
 }

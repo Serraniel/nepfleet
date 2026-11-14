@@ -796,3 +796,26 @@ func TestMirrorEndpoints(t *testing.T) {
 		t.Errorf("run: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestMatchEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	read, _, _ := store.Create("r", auth.ScopeRead, nil, time.Hour)
+	var src string
+	h := Handler(Options{Tokens: store, Match: func(_ context.Context, _, source string) (TemplateMatches, error) {
+		src = source
+		return TemplateMatches{}, nil
+	}})
+	get := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+read)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("/api/v1/stacks/web/match"); rec.Code != 200 || src != "official" || !strings.Contains(rec.Body.String(), `"matches":[]`) {
+		t.Errorf("default: %d %s %q", rec.Code, rec.Body, src)
+	}
+	if rec := get("/api/v1/stacks/web/match?source=../x"); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad source: %d", rec.Code)
+	}
+}

@@ -125,6 +125,8 @@ type Options struct {
 	// StartUpdates runs updates apply (now: also outside the update window);
 	// like StartApply, it answers the run to start as a job.
 	StartUpdates func(ctx context.Context, now bool, by string) (func(log io.Writer) error, error)
+	// Match is which templates of a source run a plain stack's images.
+	Match func(ctx context.Context, stack, source string) (TemplateMatches, error)
 	// Render is what a stack renders to, secrets masked, as nepfleet render.
 	Render func(ctx context.Context, stack string) ([]RenderedFile, error)
 	// EgressAllow adds to a stack's egress allow list and commits it as by,
@@ -367,6 +369,7 @@ func Handler(o Options) http.Handler {
 	registerDoctor(mux, o, l)
 	registerUsers(mux, o, l)
 	registerRender(mux, o, l)
+	registerMatch(mux, o, l)
 	registerKeyBackup(mux, o, l)
 	registerMirror(mux, o, l)
 	registerEgress(mux, o, l)

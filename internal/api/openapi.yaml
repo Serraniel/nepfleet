@@ -666,6 +666,28 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: The scope isn't admin }
         "503": { description: Another operation runs; try again }
+  /api/v1/stacks/{name}/match:
+    get:
+      tags: [stacks]
+      operationId: templateMatch
+      summary: Which templates run a plain stack's images, as nepfleet template match
+      description: >-
+        Needs the read scope. For a stack that uses a template already, template
+        names it and matches is empty.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+        - { name: source, in: query, schema: { type: string }, description: "A template source of fleet.yaml; default official" }
+      responses:
+        "200":
+          description: The matches, best first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateMatches" }
+        "400": { description: Not a source name }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "No such source, or the stack's compose file has no images" }
+        "503": { description: Another operation runs; try again }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1284,6 +1306,30 @@ components:
         url: { type: string, description: Without passwords or tokens }
         ok: { type: string, format: date-time, description: The last successful push }
         error: { type: string, description: Why the last push failed }
+    TemplateMatches:
+      type: object
+      required: [matches]
+      properties:
+        template: { type: string, description: "source/name, when the stack uses a template already" }
+        matches: { type: array, items: { $ref: "#/components/schemas/TemplateMatch" } }
+    TemplateMatch:
+      type: object
+      required: [source, name, version, same, onlyStack, onlyTemplate]
+      properties:
+        source: { type: string }
+        name: { type: string }
+        title: { type: string }
+        version: { type: string }
+        same: { type: array, items: { $ref: "#/components/schemas/MatchedImage" } }
+        onlyStack: { type: array, items: { type: string } }
+        onlyTemplate: { type: array, items: { type: string } }
+    MatchedImage:
+      type: object
+      required: [image, stack, template]
+      properties:
+        image: { type: string }
+        stack: { type: string, description: The stack's tag }
+        template: { type: string, description: The template's tag }
     RenderedFile:
       type: object
       required: [path, content]

@@ -435,6 +435,9 @@ func serve(args []string, stderr io.Writer) error {
 		EditStack: func(_ context.Context, stack string, e api.StackEdit, by string, stacks []string) (api.EditResult, error) {
 			return editStack(c, stack, e, by, stacks)
 		},
+		Match: func(_ context.Context, stack, source string) (api.TemplateMatches, error) {
+			return matchAPI(c, stack, source)
+		},
 		Render: func(_ context.Context, stack string) ([]api.RenderedFile, error) {
 			return renderAPI(c, stack)
 		},
