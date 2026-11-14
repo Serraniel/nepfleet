@@ -91,3 +91,13 @@ func TestLockedKeyError(t *testing.T) {
 		t.Error("errors.As")
 	}
 }
+
+func TestAcceptedRe(t *testing.T) {
+	out := "debug1: Offering public key: /home/me/.ssh/id_rsa RSA SHA256:x\n" +
+		"debug1: Server accepts key: /home/me/.ssh/id_rsa RSA SHA256:x\n" +
+		"debug1: Offering public key: /home/me/.ssh/id_ed25519 ED25519 SHA256:y\n"
+	m := acceptedRe.FindAllStringSubmatch(out, -1)
+	if len(m) != 1 || m[0][1] != "/home/me/.ssh/id_rsa" {
+		t.Errorf("%v", m)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -180,7 +181,41 @@ func (s SSH) lockedKeys(ctx context.Context, t Target) []string {
 			locked = append(locked, f)
 		}
 	}
+	// As ssh in a terminal does: only the keys the machine would take. The
+	// others' passphrases would be asked for nothing.
+	if len(locked) > 1 {
+		if ok := s.acceptedKeys(ctx, t); len(ok) > 0 {
+			if taken := slices.DeleteFunc(slices.Clone(locked), func(f string) bool { return !slices.Contains(ok, f) }); len(taken) > 0 {
+				return taken
+			}
+		}
+	}
 	return locked
+}
+
+// acceptedRe is ssh -v's note that the server would take a public key, which
+// it asks before any private key (or passphrase) is needed.
+var acceptedRe = regexp.MustCompile(`(?m)^debug1: Server accepts key: (\S+)`)
+
+// acceptedKeys are the key files t accepts for its user, as ssh -v reports
+// them while trying; none when that can't be told.
+func (s SSH) acceptedKeys(ctx context.Context, t Target) []string {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	args := s.Args(t)
+	// The command at the end (sh -s) goes: nothing runs, only the login is tried.
+	args = append([]string{"-v"}, args[:len(args)-2]...)
+	args = append(args, "true")
+	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // names checked in ParseTarget, after "--"
+	cmd.Stdin = nil
+	var stderr bytes.Buffer
+	cmd.Stderr = &limitWriter{w: &stderr, n: 64 << 10}
+	_ = cmd.Run()
+	var out []string
+	for _, m := range acceptedRe.FindAllStringSubmatch(stderr.String(), -1) {
+		out = append(out, m[1])
+	}
+	return out
 }
 
 // UnlockableKey checks that path is a private key in the user's ~/.ssh, the
