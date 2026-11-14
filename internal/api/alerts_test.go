@@ -77,6 +77,27 @@ func TestAlertEndpoint(t *testing.T) {
 	}
 }
 
+func TestAlertFromShoutrrr(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	secret := auth.Prefix + strings.Repeat("N", 43)
+	if _, err := store.Register("stack:neptide/NOTIFY_TOKEN", auth.ScopeNotify, secret, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var got []Alert
+	h := Handler(Options{Tokens: store, Alert: func(_ context.Context, a Alert) error { got = append(got, a); return nil }})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", strings.NewReader(`{"title":"update rolled back","message":"web: health check failed"}`))
+	req.Header.Set("Authorization", "Bearer "+secret)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted || len(got) != 1 {
+		t.Fatalf("shoutrrr alert: %d, %+v", rec.Code, got)
+	}
+	a := got[0]
+	if a.Rule != "update rolled back" || a.Detail != "web: health check failed" || a.Source != "neptide" || a.Title != "" || a.Message != "" {
+		t.Errorf("alert = %+v", a)
+	}
+}
+
 func TestUpdatesEndpoint(t *testing.T) {
 	store := &auth.Store{Dir: t.TempDir()}
 	all, _, _ := store.Create("all", auth.ScopeRead, nil, time.Hour)
