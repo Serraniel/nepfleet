@@ -4,10 +4,16 @@ package remote
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/Serraniel/neptide/pkg/registry"
 )
 
 const goodDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -58,5 +64,57 @@ func TestSigstoreVerifierLive(t *testing.T) {
 	}
 	if _, err := SigstoreVerifier()(context.Background(), "ghcr.io/serraniel/nepfleet-caddy:2.11"); err == nil {
 		t.Error("an image signed by another workflow passed as NepFleet's release")
+	}
+}
+
+// fakeRegistry serves one image: an index naming an attestation and a Linux
+// manifest, whose config carries version. tamper changes the manifest it
+// serves without changing the digests the index names.
+func fakeRegistry(t *testing.T, version string, tamper bool) (*registry.Client, registry.Ref) {
+	t.Helper()
+	sum := func(b []byte) string { s := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(s[:]) }
+	config := []byte(`{"config":{"Labels":{"org.opencontainers.image.version":"` + version + `"}}}`)
+	manifest := []byte(`{"config":{"digest":"` + sum(config) + `"}}`)
+	attestation := []byte(`{"config":{"digest":"sha256:` + strings.Repeat("0", 64) + `"}}`)
+	index := []byte(`{"manifests":[{"digest":"` + sum(attestation) + `","platform":{"os":"unknown"}},{"digest":"` + sum(manifest) + `","platform":{"os":"linux"}}]}`)
+	blobs := map[string][]byte{sum(index): index, sum(manifest): manifest, sum(attestation): attestation, sum(config): config}
+	if tamper {
+		blobs[sum(manifest)] = []byte(`{"config":{"digest":"sha256:` + strings.Repeat("1", 64) + `"}}`)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		b, ok := blobs[d]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(b)
+	}))
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	return registry.New(), registry.Ref{Host: host, Repo: "serraniel/nepfleet", Tag: "0.4.0", Digest: sum(index)}
+}
+
+func TestImageVersion(t *testing.T) {
+	reg, ref := fakeRegistry(t, "0.4.0", false)
+	if v, err := imageVersion(context.Background(), reg, ref); err != nil || v != "0.4.0" {
+		t.Errorf("version = %q, %v", v, err)
+	}
+	if err := checkVersion(context.Background(), reg, ref); err != nil {
+		t.Errorf("matching version refused: %v", err)
+	}
+	// An older image under the tag is refused.
+	reg, ref = fakeRegistry(t, "0.3.1", false)
+	if err := checkVersion(context.Background(), reg, ref); err == nil || !strings.Contains(err.Error(), `version "0.3.1" inside, not 0.4.0`) {
+		t.Errorf("older image under the tag: %v", err)
+	}
+	ref.Tag = "latest"
+	if err := checkVersion(context.Background(), reg, ref); err != nil {
+		t.Errorf("latest has no version to compare: %v", err)
+	}
+	// A manifest that doesn't match its digest is refused.
+	reg, ref = fakeRegistry(t, "0.4.0", true)
+	if _, err := imageVersion(context.Background(), reg, ref); err == nil || !strings.Contains(err.Error(), "doesn't match its digest") {
+		t.Errorf("tampered manifest: %v", err)
 	}
 }

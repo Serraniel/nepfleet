@@ -4,6 +4,9 @@ package remote
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -46,8 +49,103 @@ func SigstoreVerifier() ImageVerifier {
 		if err := chk.Verify(ctx, ref, sigcheck.Policy{Identity: ReleaseIdentity, Issuer: sigcheck.GitHubActions}); err != nil {
 			return "", err
 		}
+		// The signature names the workflow, not the version: an older signed
+		// image under a newer tag would pass. The version label (in the
+		// config, which the digest covers) must be the tag's.
+		if err := checkVersion(ctx, reg, ref); err != nil {
+			return "", err
+		}
 		return digest, nil
 	}
+}
+
+// checkVersion refuses an image whose version label isn't its tag's, for
+// version tags (latest has nothing to compare).
+func checkVersion(ctx context.Context, reg *registry.Client, ref registry.Ref) error {
+	if !releaseRe.MatchString(ref.Tag) {
+		return nil
+	}
+	got, err := imageVersion(ctx, reg, ref)
+	if err != nil {
+		return fmt.Errorf("reading %s's version: %w", ref.String(), err)
+	}
+	if want := strings.TrimPrefix(ref.Tag, "v"); strings.TrimPrefix(got, "v") != want {
+		return fmt.Errorf("%s is version %q inside, not %s: refusing a different (perhaps older) image under this tag", ref.String(), got, want)
+	}
+	return nil
+}
+
+// manifestTypes are the manifests an image digest may name.
+const manifestTypes = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, " +
+	"application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+
+// imageVersion reads org.opencontainers.image.version from the image's
+// config: the index, a Linux manifest and the config, each checked against
+// the digest that names it, starting from ref's (signed) digest.
+func imageVersion(ctx context.Context, reg *registry.Client, ref registry.Ref) (string, error) {
+	type manifest struct {
+		Manifests []struct {
+			Digest   string `json:"digest"`
+			Platform struct {
+				OS string `json:"os"`
+			} `json:"platform"`
+		} `json:"manifests"`
+		Config struct {
+			Digest string `json:"digest"`
+		} `json:"config"`
+	}
+	fetch := func(digest string) (manifest, error) {
+		var m manifest
+		r := ref
+		r.Digest = digest
+		raw, err := reg.Manifest(ctx, r, manifestTypes)
+		if err != nil {
+			return m, err
+		}
+		if sum := sha256.Sum256(raw); "sha256:"+hex.EncodeToString(sum[:]) != digest {
+			return m, fmt.Errorf("manifest %s doesn't match its digest", digest)
+		}
+		return m, json.Unmarshal(raw, &m)
+	}
+	m, err := fetch(ref.Digest)
+	if err != nil {
+		return "", err
+	}
+	if len(m.Manifests) > 0 { // an index: any Linux image of it (not an attestation)
+		next := ""
+		for _, d := range m.Manifests {
+			if d.Platform.OS == "linux" {
+				next = d.Digest
+				break
+			}
+		}
+		if next == "" {
+			return "", errors.New("the index has no Linux image")
+		}
+		if m, err = fetch(next); err != nil {
+			return "", err
+		}
+	}
+	if m.Config.Digest == "" {
+		return "", errors.New("no image config")
+	}
+	raw, err := reg.Blob(ctx, ref, m.Config.Digest, 1<<20)
+	if err != nil {
+		return "", err
+	}
+	var cfg struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", err
+	}
+	v := cfg.Config.Labels["org.opencontainers.image.version"]
+	if v == "" {
+		return "", errors.New("the image has no org.opencontainers.image.version label")
+	}
+	return v, nil
 }
 
 // VerifiedCompose sets compose.yaml's image to this NepFleet's release (the
