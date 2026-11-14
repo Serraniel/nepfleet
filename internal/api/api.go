@@ -116,6 +116,9 @@ type Options struct {
 	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
 	// instances.
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
+	// KeyBackup encrypts the server's age key to recipients (age --armor) and
+	// records the backup, as nepfleet key backup. ErrNoKeyFile when it can't.
+	KeyBackup func(ctx context.Context, recipients []string, by string) ([]byte, error)
 	// StartUpdates runs updates apply (now: also outside the update window);
 	// like StartApply, it answers the run to start as a job.
 	StartUpdates func(ctx context.Context, now bool, by string) (func(log io.Writer) error, error)
@@ -361,6 +364,7 @@ func Handler(o Options) http.Handler {
 	registerDoctor(mux, o, l)
 	registerUsers(mux, o, l)
 	registerRender(mux, o, l)
+	registerKeyBackup(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))

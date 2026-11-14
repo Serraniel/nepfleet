@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/doctor"
+	"github.com/Serraniel/nepfleet/internal/notify"
 )
 
 // keyBackup records that a copy of the age key was made (in the state
@@ -307,4 +311,41 @@ func cmdErr(err error) error {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// keyBackupAPI is POST /api/v1/key/backup: the age key, encrypted to the
+// recipients the person gave, recorded like nepfleet key backup so doctor
+// stops reminding. The plaintext key never leaves age.
+func keyBackupAPI(ctx context.Context, c common, recipients []string, by string) ([]byte, error) {
+	key := ageKeyFile()
+	if fi, err := os.Stat(key); err != nil || !fi.Mode().IsRegular() {
+		return nil, api.ErrNoKeyFile
+	}
+	pub, err := exec.CommandContext(ctx, "age-keygen", "-y", "--", key).Output()
+	if err != nil {
+		return nil, fmt.Errorf("reading the age key: %w", cmdErr(err))
+	}
+	args := []string{"--armor"}
+	for _, r := range recipients {
+		args = append(args, "--recipient", r)
+	}
+	var out, errOut bytes.Buffer
+	cmd := exec.CommandContext(ctx, "age", append(args, "--", key)...) //nolint:gosec // checked public keys and the key file
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("age: %w: %s", err, strings.TrimSpace(errOut.String()))
+	}
+	rec, err := json.MarshalIndent(keyBackup{Created: time.Now().UTC(), File: "downloaded by " + by + " through the API", Method: "recipients", PublicKey: strings.TrimSpace(string(pub))}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := writeState(c.stateDir, keyBackupFile, rec); err != nil {
+		return nil, err
+	}
+	if e, err := c.open(); err == nil {
+		n, _ := e.notifier()
+		e.emit(n, io.Discard, notify.Event{Name: "key.backup", Severity: notify.Warning, Host: e.host,
+			Title: "the age key was backed up", Message: by + " downloaded the fleet's age key, encrypted to " + fmt.Sprint(len(recipients)) + " recipient(s). If that wasn't you, rotate the key."})
+	}
+	return out.Bytes(), nil
 }

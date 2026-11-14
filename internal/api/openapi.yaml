@@ -605,6 +605,33 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "The scope isn't apply, or the token is limited to stacks" }
         "409": { description: Another operation runs }
+  /api/v1/key/backup:
+    post:
+      tags: [server]
+      operationId: keyBackup
+      summary: Download the fleet's age key, encrypted to your public keys
+      description: >-
+        As nepfleet key backup --recipient: the server's age key, which opens every
+        secret, encrypted with age to the given age or SSH public keys (no
+        passphrase travels), and recorded so doctor stops reminding. Only a person
+        signed in, who confirmed with a passkey within 5 minutes; API tokens are
+        refused. The fleet's notification channels hear of every backup.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KeyBackupRequest" }
+      responses:
+        "200":
+          description: The age-armored backup
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400": { description: Not the expected body }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "An API token, not a person; or `{\"verify\": true}`" }
+        "409": { description: "The key isn't a file on the server (SOPS_AGE_KEY or SOPS_AGE_KEY_CMD)" }
+        "422": { description: Not an age or SSH public key }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1211,6 +1238,11 @@ components:
         template: { type: string }
         what: { type: string }
         stacks: { type: array, items: { type: string }, description: "name@target" }
+    KeyBackupRequest:
+      type: object
+      required: [recipients]
+      properties:
+        recipients: { type: array, items: { type: string }, maxItems: 10, description: "age1… or ssh-ed25519/ssh-rsa public keys" }
     RenderedFile:
       type: object
       required: [path, content]
