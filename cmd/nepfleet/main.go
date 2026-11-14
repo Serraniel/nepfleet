@@ -415,7 +415,11 @@ func serve(args []string, stderr io.Writer) error {
 		NewStack: func(_ context.Context, req api.NewStack, by string) (api.NewStackResult, error) {
 			return newStackAPI(c, req, by)
 		},
-		Features:   func() ([]api.Feature, error) { return featureList(c) },
+		Features: func() ([]api.Feature, error) { return featureList(c) },
+		Channels: func() ([]string, error) { return channelNames(c) },
+		TestChannel: func(_ context.Context, name string) error {
+			return testChannel(c, name)
+		},
 		SecretKeys: func(_ context.Context, stack string) ([]string, error) { return secretKeys(c, stack) },
 		SetSecret: func(_ context.Context, stack, key string, value *string, by string) (string, error) {
 			return setSecretAPI(c, stack, key, value, by)

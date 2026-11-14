@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/events"
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/notify"
@@ -187,4 +188,35 @@ func cmdNotify(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "sent a test message to %s\n", pos[0])
 	return nil
+}
+
+// channelNames lists fleet.yaml's notification channels, sorted.
+func channelNames(c common) ([]string, error) {
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(e.fleet.Spec.Notifications.Channels))
+	for n := range e.fleet.Spec.Notifications.Channels {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
+// testChannel sends one channel a test message, as nepfleet notify test.
+func testChannel(c common, name string) error {
+	e, err := c.open()
+	if err != nil {
+		return err
+	}
+	if _, ok := e.fleet.Spec.Notifications.Channels[name]; !ok {
+		return api.ErrNoChannel
+	}
+	n, err := e.notifier()
+	if err != nil {
+		return err
+	}
+	return n.SendTo([]string{name}, notify.Event{Name: "notify.test", Severity: notify.Info, Host: e.host, Title: "test message",
+		Message: "If you read this, NepFleet's channel " + name + " works. Sent from the app."})
 }

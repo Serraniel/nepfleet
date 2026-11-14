@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -452,5 +453,45 @@ func TestFeaturesEndpoint(t *testing.T) {
 	}
 	if b := get(onlyWeb); !strings.Contains(b, `"stacks":["web@nas"]`) {
 		t.Errorf("a token for web sees only web: %s", b)
+	}
+}
+
+func TestChannelEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	read, _, _ := store.Create("r", auth.ScopeRead, nil, time.Hour)
+	admin, _, _ := store.Create("a", auth.ScopeAdmin, nil, time.Hour)
+	h := Handler(Options{Tokens: store,
+		Channels: func() ([]string, error) { return []string{"discord", "ntfy"}, nil },
+		TestChannel: func(_ context.Context, name string) error {
+			switch name {
+			case "discord":
+				return nil
+			case "ntfy":
+				return errors.New(`channel ntfy: Post "https://ntfy.example.org/topic?auth=tok3n": 401 Unauthorized`)
+			}
+			return ErrNoChannel
+		}})
+	do := func(method, path, token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("GET", "/api/v1/notifications/channels", read); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"channels":["discord","ntfy"]`) {
+		t.Errorf("list: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("POST", "/api/v1/notifications/channels/discord/test", read); rec.Code != http.StatusForbidden {
+		t.Errorf("read sends a test: %d", rec.Code)
+	}
+	if rec := do("POST", "/api/v1/notifications/channels/discord/test", admin); rec.Code != http.StatusNoContent {
+		t.Errorf("test: %d", rec.Code)
+	}
+	rec := do("POST", "/api/v1/notifications/channels/ntfy/test", admin)
+	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "tok3n") || !strings.Contains(rec.Body.String(), "401 Unauthorized") {
+		t.Errorf("failure: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("POST", "/api/v1/notifications/channels/nope/test", admin); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown: %d", rec.Code)
 	}
 }
