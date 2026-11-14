@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/Serraniel/nepfleet/compare/v0.3.1...v0.3.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **control:** desktop connections get an admin token, so the app can edit ([#309](https://github.com/Serraniel/nepfleet/issues/309)) ([9ac7e07](https://github.com/Serraniel/nepfleet/commit/9ac7e070fbd4285d88fa51148fe27a2b6cdf2b3c))
+
 ## [0.3.1](https://github.com/Serraniel/nepfleet/compare/v0.3.0...v0.3.1) (2026-11-14)
 
 
