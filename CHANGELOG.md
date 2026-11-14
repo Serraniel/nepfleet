@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.3.0](https://github.com/Serraniel/nepfleet/compare/v0.2.0...v0.3.0) (2026-11-14)
+
+
+### Features
+
+* **api:** a stack's rendered files, secrets masked ([#275](https://github.com/Serraniel/nepfleet/issues/275)) ([97eab73](https://github.com/Serraniel/nepfleet/commit/97eab735804a691ab4f2ab60a3a7ac64aa9900b8))
+* **api:** allow egress to hosts from the app ([#274](https://github.com/Serraniel/nepfleet/issues/274)) ([ab6bd03](https://github.com/Serraniel/nepfleet/commit/ab6bd033380625abec519a476ca897ca0be4eb81))
+* **api:** back up the age key to your public keys ([#277](https://github.com/Serraniel/nepfleet/issues/277)) ([00e688e](https://github.com/Serraniel/nepfleet/commit/00e688e66079da4988c957190ea2ec6f4c5536ac))
+* **api:** create a stack from a template (POST /api/v1/stacks) ([#265](https://github.com/Serraniel/nepfleet/issues/265)) ([da05a53](https://github.com/Serraniel/nepfleet/commit/da05a53799c067e599265c0eafd6d278a898664a))
+* **api:** download SBOMs per stack and for the fleet ([#271](https://github.com/Serraniel/nepfleet/issues/271)) ([759b577](https://github.com/Serraniel/nepfleet/commit/759b5778b6d781fd894c6bc6a127c0281b16d797))
+* **api:** import a Compose project of the host ([#282](https://github.com/Serraniel/nepfleet/issues/282)) ([5876d1b](https://github.com/Serraniel/nepfleet/commit/5876d1b1bc7f3b1ba94dd912aa9fb52729f0d0c0))
+* **api:** list notification channels and send a test message ([#270](https://github.com/Serraniel/nepfleet/issues/270)) ([5da5336](https://github.com/Serraniel/nepfleet/commit/5da5336e21407675c819dab2efea5ea26a47ac3e))
+* **api:** list the features nepfleet enable offers ([#268](https://github.com/Serraniel/nepfleet/issues/268)) ([258fe7c](https://github.com/Serraniel/nepfleet/commit/258fe7c53f9fe9d1f82682a702aa7734913cd627))
+* **api:** manage API tokens over the API ([#269](https://github.com/Serraniel/nepfleet/issues/269)) ([6f868de](https://github.com/Serraniel/nepfleet/commit/6f868de7f4f58101630deb6c73a5ce5ad6162f9f))
+* **api:** manage people and their passkeys ([#273](https://github.com/Serraniel/nepfleet/issues/273)) ([40dbeeb](https://github.com/Serraniel/nepfleet/commit/40dbeebd9fb237640f80affa907a416231233217))
+* **api:** mirror status and push now ([#278](https://github.com/Serraniel/nepfleet/issues/278)) ([261b04f](https://github.com/Serraniel/nepfleet/commit/261b04fb80014576eb462f18e500c45619db8bda))
+* **api:** restore a stack's volumes from a backup ([#281](https://github.com/Serraniel/nepfleet/issues/281)) ([f1ea0a8](https://github.com/Serraniel/nepfleet/commit/f1ea0a83331c6fc9cb375f819ccb13a6fcfb14e0))
+* **api:** run the fleet's updates now, as a job ([#276](https://github.com/Serraniel/nepfleet/issues/276)) ([b058883](https://github.com/Serraniel/nepfleet/commit/b058883a55b14a60b8fe24676ba28cbdd9a563ec))
+* **api:** the host's doctor and security checks ([#272](https://github.com/Serraniel/nepfleet/issues/272)) ([ec5be7a](https://github.com/Serraniel/nepfleet/commit/ec5be7a6a903124b309c7e28a6f479ebd0d8e104))
+* **api:** which templates fit a plain stack ([#280](https://github.com/Serraniel/nepfleet/issues/280)) ([2c35420](https://github.com/Serraniel/nepfleet/commit/2c35420722a2c6f9470a25780de199b31a5a3d36))
+* **api:** write-only secrets over the API ([#267](https://github.com/Serraniel/nepfleet/issues/267)) ([c333ee7](https://github.com/Serraniel/nepfleet/commit/c333ee7efd7d6f4b6ef1af9f1514ff8f041ba8bc))
+* **control:** set up a machine's network mounts from the app ([#283](https://github.com/Serraniel/nepfleet/issues/283)) ([04651e0](https://github.com/Serraniel/nepfleet/commit/04651e0ac88dc5645b64675aada33cc51a37dfc8))
+* Git sync: pull the fleet repository and apply changed auto stacks ([#266](https://github.com/Serraniel/nepfleet/issues/266)) ([f1ce3f6](https://github.com/Serraniel/nepfleet/commit/f1ce3f693f233b619389da824acba08e03f32123))
+* **remote:** ask for the sudo password instead of requiring passwordless sudo ([#256](https://github.com/Serraniel/nepfleet/issues/256)) ([8a831f4](https://github.com/Serraniel/nepfleet/commit/8a831f479dc710da6e97aa63e8f7c6a3751c69f0))
+* **remote:** unlock SSH keys with a passphrase from the app and the CLI ([#264](https://github.com/Serraniel/nepfleet/issues/264)) ([e5b8cca](https://github.com/Serraniel/nepfleet/commit/e5b8cca2771d92d89ae2c2561a12b8f8db855c60))
+
+
+### Bug Fixes
+
+* **control:** a setup job reads as done only after the new state is saved ([#279](https://github.com/Serraniel/nepfleet/issues/279)) ([27e8761](https://github.com/Serraniel/nepfleet/commit/27e876128c4fde0c3dccf2082e0bf95021ab8963))
+* **control:** derive a valid name for a remote added by IP address ([#251](https://github.com/Serraniel/nepfleet/issues/251)) ([bea5259](https://github.com/Serraniel/nepfleet/commit/bea5259811c03b4e024a2fb1b3e886c63944f58d))
+* **control:** refuse Connect while the machine has no NepFleet ([#254](https://github.com/Serraniel/nepfleet/issues/254)) ([77dc4bb](https://github.com/Serraniel/nepfleet/commit/77dc4bb27b76a74d899b8d3d7d6f901e852e80aa))
+
 ## [0.2.0](https://github.com/Serraniel/nepfleet/compare/v0.1.0...v0.2.0) (2026-11-13)
 
 
