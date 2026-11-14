@@ -21,7 +21,7 @@ printf '%s' 'alice:$2y$05$abcdefghijklmnopqrstuv' | "$NF" secret set --state "$T
 grep -q alice stacks/registry/values.secret.yaml && fail "secret stored in plaintext"
 git add -A && git commit -qm init
 
-"$NF" plan --state "$T/state" | grep -q "HTPASSWD='••••••" || fail "secret not masked in plan"
+"$NF" plan --state "$T/state" | grep "HTPASSWD='••••••" >/dev/null || fail "secret not masked in plan"
 "$NF" apply --yes --state "$T/state" | grep -c '✓ applied' | grep -qx 2 || fail "apply"
 grep -q HTTP_SECRET <(SOPS_AGE_KEY_FILE=$T/key.txt sops decrypt stacks/registry/values.secret.yaml) || fail "generated secret not saved"
 git add -A && git commit -qm "lock and generated secrets"
@@ -31,8 +31,8 @@ sed -i 's#"http://127.0.0.1/"#"http://127.0.0.1:9/"#' stacks/web/compose.yaml &&
 out=$("$NF" apply --state "$T/state" --wait 15s web 2>&1) && fail "apply of an unhealthy stack must exit non-zero"
 grep -q "rolled back" <<<"$out" || fail "no rollback on unhealthy apply"
 [ "$(docker compose -p web ps --format '{{.Health}}')" = healthy ] || fail "web not healthy after rollback"
-"$NF" history --state "$T/state" web | grep -q '▶ .* init' || fail "history does not mark the applied version"
+"$NF" history --state "$T/state" web | grep '▶ .* init' >/dev/null || fail "history does not mark the applied version"
 
-"$NF" rollback --state "$T/state" --yes web | grep -q 'up to date' || fail "git rollback"
+"$NF" rollback --state "$T/state" --yes web | grep 'up to date' >/dev/null || fail "git rollback"
 git log -1 --format=%s | grep -q '^revert(web)' || fail "rollback commit missing"
 echo PASS

@@ -22,7 +22,7 @@ printf 'services:\n  app:\n    image: %s\n' $IMG > stacks/$P/compose.yaml
 A() { "$NF" apply --yes --state "$T/state" "$@" $P; }
 
 push v1; docker rmi $IMG >/dev/null   # force resolution through the registry
-A | grep -q 'digests pinned' || fail "lock.yaml not written"
+A | grep 'digests pinned' >/dev/null || fail "lock.yaml not written"
 d1=$(grep -o 'sha256:[0-9a-f]*' stacks/$P/lock.yaml)
 git add -A && git commit -qm "v1"
 [ "$(running)" = v1 ] || fail "v1 not running"
@@ -31,7 +31,7 @@ push v2   # same tag, new digest
 A >/dev/null
 [ "$(running)" = v1 ] || fail "moved tag changed a pinned deployment"
 
-A --update-lock | grep -q 'digests pinned' || fail "--update-lock did not move the pin"
+A --update-lock | grep 'digests pinned' >/dev/null || fail "--update-lock did not move the pin"
 [ "$(running)" = v2 ] || fail "v2 not running after --update-lock"
 [ "$(grep -o 'sha256:[0-9a-f]*' stacks/$P/lock.yaml)" != "$d1" ] || fail "lock unchanged"
 git commit -qam "v2"
