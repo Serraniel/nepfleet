@@ -24,15 +24,30 @@ func TestSettings(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest(method, "/v1/settings", strings.NewReader(body)))
 		return rec
 	}
-	fleet := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	home, _ := os.UserHomeDir()
+	fleet := filepath.Join(home, "fleet")
+	if err := os.Mkdir(fleet, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "fleet.yaml"), []byte("kind: Fleet\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	put := func(dir string) string {
+		raw, _ := json.Marshal(Settings{FleetDir: dir})
+		return string(raw)
+	}
 	if err := os.WriteFile(filepath.Join(fleet, "fleet.yaml"), []byte("kind: Fleet\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for body, want := range map[string]int{
-		`{"fleetDir":"relative/path"}`:       422,
-		`{"fleetDir":"` + t.TempDir() + `"}`: 422,
-		`{"fleetDir":"` + fleet + `/"}`:      200,
-		`{"other":1}`:                        400,
+		put("relative/path"):                    422,
+		put(filepath.Join(home, "empty")):       422,
+		put(outside):                            422,
+		put(fleet + string(filepath.Separator)): 200,
+		`{"other":1}`:                           400,
 	} {
 		if rec := do(http.MethodPut, body); rec.Code != want {
 			t.Errorf("%s: %d, want %d (%s)", body, rec.Code, want, rec.Body)

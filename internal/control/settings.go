@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -56,6 +57,15 @@ func checkFleetDir(dir string) (string, error) {
 		return "", errors.New("give the folder's full path")
 	}
 	dir = filepath.Clean(dir)
+	// A copy of your own: in your home folder, where this daemon runs as you.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	home = filepath.Clean(home)
+	if dir != home && !strings.HasPrefix(dir, home+string(filepath.Separator)) {
+		return "", errors.New("choose a folder in your home folder")
+	}
 	if fi, err := os.Stat(filepath.Join(dir, "fleet.yaml")); err != nil || !fi.Mode().IsRegular() {
 		return "", errors.New("that folder has no fleet.yaml: choose the folder of your fleet repository")
 	}

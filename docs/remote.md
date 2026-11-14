@@ -97,7 +97,7 @@ nepfleet control status
   - `GET /v1/remotes/<name>/setup/job` follows it: state and log.
   - A setup goes on when the window closes, and one runs per remote at a time.
 - **Network mounts from the app:** `kind=mounts` does what `nepfleet host apply <name>` does: it makes the machine's NFS, SMB and SSHFS mounts match `hosts/<name>.yaml`, and they stay after a reboot.
-  - It plans from a local clone of the fleet repository, chosen once with `PUT /v1/settings {"fleetDir": "/path/to/fleet"}` (the app's Settings). Share passwords are decrypted from `fleet.secret.yaml` with this computer's age key, as on the command line.
+  - It plans from a local clone of the fleet repository in your home folder, chosen once with `PUT /v1/settings {"fleetDir": "/home/you/fleet"}` (the app's Fleets page). Share passwords are decrypted from `fleet.secret.yaml` with this computer's age key, as on the command line.
   - The passwords go only to the machine, over SSH. They are in no plan, job, log or answer, and the NepFleet server never sees them.
 
 ## Connecting
