@@ -419,3 +419,12 @@ func TestAccessPortMode(t *testing.T) {
 		t.Error("port mode without spec.web must fail")
 	}
 }
+
+func TestDockerGIDBuiltin(t *testing.T) {
+	f, tpl := setup(t)
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, DockerGID: "972"})
+	must(t, err)
+	if got := EnvValues(out.Files[EnvFile])["NEPFLEET_DOCKER_GID"]; got != "972" {
+		t.Errorf("NEPFLEET_DOCKER_GID = %q, want 972", got)
+	}
+}

@@ -49,6 +49,25 @@ func HostHardware(root string) Hardware {
 	return hw
 }
 
+// DockerGID is the group of the Docker socket this process uses (DOCKER_HOST
+// when it's a unix socket, else the default), as a number ("" without one):
+// stacks that talk to Docker as a non-root user need it, and it differs
+// between hosts. root prefixes the default path, for tests.
+func DockerGID(root string) string {
+	paths := []string{"var/run/docker.sock", "run/docker.sock"}
+	if h, ok := strings.CutPrefix(os.Getenv("DOCKER_HOST"), "unix://"); ok && h != "" {
+		paths = []string{strings.TrimPrefix(h, "/")}
+	}
+	for _, p := range paths {
+		if fi, err := os.Stat(filepath.Join(root, p)); err == nil {
+			if gid := fileGID(fi); gid != "" {
+				return gid
+			}
+		}
+	}
+	return ""
+}
+
 // RenderGID is the group of the host's first /dev/dri render node, as a
 // number ("" without one): containers need it in group_add to use the GPU
 // as a non-root user, and group names differ between distributions.

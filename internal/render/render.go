@@ -48,6 +48,9 @@ type Input struct {
 	// RenderGID is the group of the host's /dev/dri render nodes, added to
 	// services that get an intel or amd GPU, so non-root images can use it.
 	RenderGID string
+	// DockerGID is the group of the host's Docker socket, for
+	// ${NEPFLEET_DOCKER_GID}; empty when unknown.
+	DockerGID string
 }
 
 // Output is the rendered stack.
@@ -82,6 +85,7 @@ func Render(in Input) (*Output, error) {
 		// Backups encrypted to these can be read with the fleet's key.
 		"NEPFLEET_AGE_RECIPIENTS":    strings.Join(in.Fleet.Spec.Secrets.Age, ","),
 		"NEPFLEET_NO_BACKUP_VOLUMES": noBackupPattern(in.NoBackupVolumes),
+		"NEPFLEET_DOCKER_GID":        in.DockerGID,
 	}
 	var compose []byte
 	var err error
