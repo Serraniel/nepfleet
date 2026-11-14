@@ -1549,13 +1549,33 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	if *security {
 		return localSecurity(c, *asJSON, *notifyNew, stdout)
 	}
-	e, err := c.open()
+	checks, n, err := doctorChecks(c)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(stdout, "Host %s, %d stack(s) planned here\n\n", c.host, n)
+	for _, ch := range checks {
+		fmt.Fprintf(stdout, " %s %-20s %s\n", ch.Status, ch.Name, ch.Detail)
+		if ch.Fix != "" && ch.Status != doctor.OK {
+			fmt.Fprintf(stdout, "   %-20s → %s\n", "", ch.Fix)
+		}
+	}
+	if doctor.Failed(checks) {
+		return errors.New("some checks failed")
+	}
+	return nil
+}
+
+// doctorChecks runs nepfleet doctor's checks of this host against the stacks
+// planned here, and says how many those are.
+func doctorChecks(c common) ([]doctor.Check, int, error) {
+	e, err := c.open()
+	if err != nil {
+		return nil, 0, err
+	}
 	stacks, err := e.selectStacks(nil)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	var cycleErr error
 	if ordered, err := fleet.OrderByRefs(stacks); err != nil {
@@ -1670,17 +1690,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	for _, err := range renderErrs {
 		checks = append(checks, doctor.Check{Name: "Stacks", Status: doctor.Fail, Detail: err.Error(), Fix: "fix the stack, then run doctor again"})
 	}
-	fmt.Fprintf(stdout, "Host %s, %d stack(s) planned here\n\n", c.host, len(stacks))
-	for _, ch := range checks {
-		fmt.Fprintf(stdout, " %s %-20s %s\n", ch.Status, ch.Name, ch.Detail)
-		if ch.Fix != "" && ch.Status != doctor.OK {
-			fmt.Fprintf(stdout, "   %-20s → %s\n", "", ch.Fix)
-		}
-	}
-	if doctor.Failed(checks) {
-		return errors.New("some checks failed")
-	}
-	return nil
+	return checks, len(stacks), nil
 }
 
 // hostPort returns the published host port of a compose ports entry, in
@@ -1814,4 +1824,32 @@ func portFix(port int, stubListens func() bool) string {
 			"then link /etc/resolv.conf to /run/systemd/resolve/resolv.conf)"
 	}
 	return "stop what holds it (ss -ltnp), or change the stack's port"
+}
+
+// doctorAPI is GET /api/v1/doctor: doctor's checks and the security ones.
+func doctorAPI(ctx context.Context, c common) (api.DoctorReport, error) {
+	if !apiMu.TryLock() {
+		return api.DoctorReport{}, api.ErrBusy
+	}
+	defer apiMu.Unlock()
+	checks, n, err := doctorChecks(c)
+	if err != nil {
+		return api.DoctorReport{}, err
+	}
+	rep := api.DoctorReport{Host: c.host, Stacks: n}
+	for _, ch := range checks {
+		rep.Checks = append(rep.Checks, api.DoctorCheck{Name: ch.Name, Status: [...]string{"ok", "warn", "fail"}[ch.Status], Detail: ch.Detail, Fix: ch.Fix})
+	}
+	e, err := c.open()
+	if err != nil {
+		return rep, err
+	}
+	findings, err := securityFindings(ctx, c, e)
+	if err != nil {
+		rep.SecurityError = err.Error()
+	}
+	for _, f := range findings {
+		rep.Security = append(rep.Security, api.SecurityFinding(f))
+	}
+	return rep, nil
 }

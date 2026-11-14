@@ -417,6 +417,7 @@ func serve(args []string, stderr io.Writer) error {
 		},
 		Features: func() ([]api.Feature, error) { return featureList(c) },
 		Channels: func() ([]string, error) { return channelNames(c) },
+		Doctor:   func(ctx context.Context) (api.DoctorReport, error) { return doctorAPI(ctx, c) },
 		TestChannel: func(_ context.Context, name string) error {
 			return testChannel(c, name)
 		},

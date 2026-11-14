@@ -589,3 +589,26 @@ func TestSBOMEndpoints(t *testing.T) {
 		t.Errorf("a token for web reads db: %d", rec.Code)
 	}
 }
+
+func TestDoctorEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	edit, _, _ := store.Create("e", auth.ScopeEdit, nil, time.Hour)
+	admin, _, _ := store.Create("a", auth.ScopeAdmin, nil, time.Hour)
+	h := Handler(Options{Tokens: store, Doctor: func(context.Context) (DoctorReport, error) {
+		return DoctorReport{Host: "nas", Checks: []DoctorCheck{{Name: "Docker", Status: "ok", Detail: "29.1"}}, SecurityError: "no sh"}, nil
+	}})
+	get := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/doctor", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get(edit); rec.Code != http.StatusForbidden {
+		t.Errorf("edit: %d", rec.Code)
+	}
+	rec := get(admin)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"security":[]`) || !strings.Contains(rec.Body.String(), `"status":"ok"`) {
+		t.Errorf("admin: %d %s", rec.Code, rec.Body)
+	}
+}

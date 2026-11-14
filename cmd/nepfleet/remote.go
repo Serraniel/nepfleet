@@ -130,27 +130,13 @@ func localSecurity(c common, asJSON, notifyNew bool, stdout io.Writer) error {
 	defer cancel()
 	// A fleet is optional here: a host can be checked before it joins one.
 	e, openErr := c.open()
-	var managed []string
-	if openErr == nil {
-		stacks, err := e.fleet.Stacks()
-		if err != nil {
-			return err
-		}
-		managed = []string{}
-		for _, s := range stacks {
-			if s.Spec.Target == c.host || s.Spec.Target == "local" {
-				managed = append(managed, s.Metadata.Name)
-			}
-		}
+	if openErr != nil {
+		e = nil
 	}
 	if notifyNew && openErr != nil {
 		return fmt.Errorf("--notify needs a fleet: %w", openErr)
 	}
-	findings, err := remote.CheckSecurityFor(ctx, func(ctx context.Context, script string) ([]byte, error) {
-		cmd := exec.CommandContext(ctx, "sh", "-s")
-		cmd.Stdin = strings.NewReader(script)
-		return cmd.Output()
-	}, managed)
+	findings, err := securityFindings(ctx, c, e)
 	if err != nil {
 		return err
 	}
@@ -195,4 +181,27 @@ func (e *env) notifySecurity(findings []remote.Finding, stdout io.Writer) error 
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600)
+}
+
+// securityFindings checks this host's security, as doctor --security. With a
+// fleet (e not nil), the stacks planned here count as managed.
+func securityFindings(ctx context.Context, c common, e *env) ([]remote.Finding, error) {
+	var managed []string
+	if e != nil {
+		stacks, err := e.fleet.Stacks()
+		if err != nil {
+			return nil, err
+		}
+		managed = []string{}
+		for _, s := range stacks {
+			if s.Spec.Target == c.host || s.Spec.Target == "local" {
+				managed = append(managed, s.Metadata.Name)
+			}
+		}
+	}
+	return remote.CheckSecurityFor(ctx, func(ctx context.Context, script string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "sh", "-s")
+		cmd.Stdin = strings.NewReader(script)
+		return cmd.Output()
+	}, managed)
 }
