@@ -21,6 +21,7 @@ import (
 
 	"github.com/Serraniel/neptide/pkg/registry"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/lock"
 	"github.com/Serraniel/nepfleet/internal/notify"
 	"github.com/Serraniel/nepfleet/internal/sbom"
@@ -270,4 +271,57 @@ func cmdSBOM(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("%d stack(s) are missing or incomplete", failed)
 	}
 	return nil
+}
+
+// sbomAPI is GET /api/v1/stacks/{name}/sbom (stack set) and GET /api/v1/sbom
+// (stack "": the fleet's stacks allow lets through). With contents, it also
+// lists what's inside the images, as sbom --contents.
+func sbomAPI(ctx context.Context, c common, stack string, allow func(string) bool, contents bool) (any, error) {
+	if !apiMu.TryLock() {
+		return nil, api.ErrBusy
+	}
+	defer apiMu.Unlock()
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	all, err := e.fleet.Stacks()
+	if err != nil {
+		return nil, err
+	}
+	var look sbom.Contents
+	if contents {
+		_, err := exec.LookPath("syft")
+		look = sbom.CachedContents(filepath.Join(e.stateDir, "sbom"), imageContents(attestedContents, syftContents, err == nil))
+	}
+	now := time.Now()
+	docs := map[string]*sbom.Document{}
+	for _, s := range all {
+		name := s.Metadata.Name
+		if (stack != "" && name != stack) || !allow(name) {
+			continue
+		}
+		p, err := e.prepare(s)
+		if err != nil {
+			if stack != "" {
+				return nil, err
+			}
+			continue // the fleet's document lists what renders
+		}
+		refs, _ := composeImages(p.out)
+		pins, _ := lock.Load(s.Dir)
+		doc, err := sbom.ForStack(ctx, name, imagesOf(refs, pins), look, now)
+		if err != nil && doc == nil {
+			return nil, err
+		}
+		docs[name] = doc
+	}
+	if stack != "" {
+		doc, ok := docs[stack]
+		if !ok {
+			return nil, api.ErrNotFound
+		}
+		return doc, nil
+	}
+	return sbom.Aggregate(e.host, docs, now), nil
 }

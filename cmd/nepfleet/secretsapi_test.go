@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -101,5 +102,25 @@ func TestFeatureList(t *testing.T) {
 	}
 	if len(fs) != len(features) || fs[0].Name != "ingress" || fs[0].Stacks == nil {
 		t.Errorf("features: %+v", fs)
+	}
+}
+
+func TestSBOMAPI(t *testing.T) {
+	c, _, _ := rollbackFleet(t)
+	yes := func(string) bool { return true }
+	doc, err := sbomAPI(t.Context(), c, "web", yes, false)
+	if err != nil || doc == nil {
+		t.Fatalf("stack: %v", err)
+	}
+	if _, err := sbomAPI(t.Context(), c, "web", func(string) bool { return false }, false); !errors.Is(err, api.ErrNotFound) {
+		t.Errorf("a stack the token doesn't see: %v", err)
+	}
+	fleetDoc, err := sbomAPI(t.Context(), c, "", yes, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(fleetDoc)
+	if !strings.Contains(string(raw), "nginx") {
+		t.Errorf("fleet document: %s", raw)
 	}
 }

@@ -436,6 +436,39 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
         "404": { description: No such token }
+  /api/v1/stacks/{name}/sbom:
+    get:
+      tags: [stacks]
+      operationId: stackSBOM
+      summary: The stack's software bill of materials (CycloneDX), as nepfleet sbom
+      description: Needs the read scope. With contents=true it also lists what's inside the images (slower).
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+        - { name: contents, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The CycloneDX document
+          content:
+            application/vnd.cyclonedx+json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Another operation runs; try again }
+  /api/v1/sbom:
+    get:
+      tags: [server]
+      operationId: fleetSBOM
+      summary: The fleet's software bill of materials (CycloneDX), over the stacks the token sees
+      parameters:
+        - { name: contents, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The CycloneDX document
+          content:
+            application/vnd.cyclonedx+json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: Another operation runs; try again }
   /api/v1/secrets:
     get:
       tags: [server]

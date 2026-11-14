@@ -127,6 +127,10 @@ type Options struct {
 	// NewStack creates and commits a stack from a template, without applying
 	// it. Errors: ErrStackExists, InvalidError, ErrBusy.
 	NewStack func(ctx context.Context, req NewStack, by string) (NewStackResult, error)
+	// SBOM is a stack's CycloneDX document, or with stack "" the fleet's
+	// over the stacks allow lets through; contents also lists what's in the
+	// images (slower).
+	SBOM func(ctx context.Context, stack string, allow func(string) bool, contents bool) (any, error)
 	// Channels names fleet.yaml's notification channels; TestChannel sends
 	// one a test message (ErrNoChannel for an unknown name).
 	Channels    func() ([]string, error)
@@ -310,6 +314,7 @@ func Handler(o Options) http.Handler {
 	registerFeatures(mux, o, l)
 	registerChannels(mux, o, l)
 	registerTokens(mux, o, l)
+	registerSBOM(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))

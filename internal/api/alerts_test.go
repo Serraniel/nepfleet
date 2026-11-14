@@ -550,3 +550,42 @@ func TestTokenEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestSBOMEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	all, _, _ := store.Create("all", auth.ScopeRead, nil, time.Hour)
+	onlyWeb, _, _ := store.Create("web", auth.ScopeRead, []string{"web"}, time.Hour)
+	h := Handler(Options{Tokens: store, SBOM: func(_ context.Context, stack string, allow func(string) bool, contents bool) (any, error) {
+		var seen []string
+		for _, s := range []string{"web", "db"} {
+			if (stack == "" || s == stack) && allow(s) {
+				seen = append(seen, s)
+			}
+		}
+		if stack != "" && len(seen) == 0 {
+			return nil, ErrNotFound
+		}
+		return map[string]any{"bomFormat": "CycloneDX", "stacks": seen, "contents": contents, "purl": "pkg:a?x=1&y=2"}, nil
+	}})
+	get := func(path, token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := get("/api/v1/sbom", all)
+	if rec.Code != 200 || rec.Header().Get("Content-Type") != cycloneDX || !strings.Contains(rec.Body.String(), `"web",`) || !strings.Contains(rec.Body.String(), "&y=2") ||
+		!strings.Contains(rec.Header().Get("Content-Disposition"), "fleet.cdx.json") {
+		t.Errorf("fleet: %d %v %s", rec.Code, rec.Header(), rec.Body)
+	}
+	if rec := get("/api/v1/sbom", onlyWeb); strings.Contains(rec.Body.String(), `"db"`) {
+		t.Errorf("a token for web sees db: %s", rec.Body)
+	}
+	if rec := get("/api/v1/stacks/web/sbom?contents=true", onlyWeb); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"contents": true`) {
+		t.Errorf("stack: %d %s", rec.Code, rec.Body)
+	}
+	if rec := get("/api/v1/stacks/db/sbom", onlyWeb); rec.Code != http.StatusNotFound {
+		t.Errorf("a token for web reads db: %d", rec.Code)
+	}
+}
