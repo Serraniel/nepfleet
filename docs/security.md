@@ -47,6 +47,10 @@ nepfleet token revoke <id>
 - **API network:** the server joins the internal network `nepfleet_api` as `nepfleet` when it starts. Stacks that use the API join it too. It reaches only the API (and the other stacks on it), never the outside, and every request still needs a token. Stacks on the ingress network can't reach the API through it. Templates can't take the name `nepfleet` there (a service or container named so, or an alias), so stacks' tokens only go to the API. Keep `--trusted-proxies` to your proxy's own address: a range that covers Docker's networks would let a stack name any client address in `X-Forwarded-For` and lock it out. A renewed stack token leaves the previous one valid for 7 more days, so a rollback to the files that hold it still works.
 - **Open endpoints:** only `/healthz` and `/api/v1/info`. The endpoints are listed in [the API reference](api.md).
 
+## Server images
+
+NepFleet's release images are signed with cosign by its release workflow (keyless, GitHub's OIDC issuer), with an SBOM attached. `nepfleet host install` and the app's installs and updates check that signature with Sigstore before anything runs on the machine. They pin compose.yaml to the checked digest and refuse an image that doesn't verify. neptide checks the same signatures before it updates a container that asks for it (`neptide.verify.identity`).
+
 ## Threat model
 
 Reviewed against the code on 2026-11-07. It covers what exists: one server on one host, with the CLI and the token API. Agents and multi-host connections don't exist yet and need their own review ([#41](https://github.com/Serraniel/nepfleet/issues/41), [#42](https://github.com/Serraniel/nepfleet/issues/42)).

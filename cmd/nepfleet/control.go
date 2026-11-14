@@ -79,12 +79,16 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		return remote.Probe(ctx, remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}.Run, t)
 	}}
 	// Setting remotes up from clients: what host bootstrap and host install do.
-	compose, err := remote.PinCompose(nepfleet.Compose, version)
-	if err != nil {
-		return err
-	}
 	ssh := remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}
-	s.Setup.Run, s.Setup.Compose, s.Setup.Ingress = ssh.Run, compose, "nepfleet_ingress"
+	s.Setup.Run, s.Setup.Ingress = ssh.Run, "nepfleet_ingress"
+	// Installs and updates write the image pinned to a digest signed by
+	// NepFleet's release workflow, checked when they're planned.
+	verify := remote.SigstoreVerifier()
+	s.Setup.ComposeFor = func(ctx context.Context) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		return remote.VerifiedCompose(ctx, nepfleet.Compose, version, verify)
+	}
 	s.Doctor = func(ctx context.Context, t remote.Target) ([]remote.DoctorCheck, error) {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()

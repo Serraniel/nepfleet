@@ -197,3 +197,27 @@ func TestSetupUpdatePlan(t *testing.T) {
 		t.Errorf("update plan: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestSetupRefusesUnverifiedImage(t *testing.T) {
+	probe := func(_ context.Context, tg remote.Target) (*remote.Report, error) {
+		return &remote.Report{Kernel: "Linux", Target: tg.String(), NepFleetImage: "ghcr.io/serraniel/nepfleet:0.3.1", NepFleetRunning: true}, nil
+	}
+	s := &Server{Dir: t.TempDir(), Probe: probe, Version: "0.4.0"}
+	s.Setup.ComposeFor = func(context.Context) ([]byte, error) {
+		return nil, errors.New("the NepFleet image ghcr.io/serraniel/nepfleet:0.4.0 isn't verified, so it isn't installed: no valid signature")
+	}
+	h := s.Handler()
+	do := func(method, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(`{"address":"ssh://me@vps","name":"vps"}`)))
+		return rec
+	}
+	if rec := do(http.MethodPost, "/v1/remotes"); rec.Code != http.StatusCreated {
+		t.Fatalf("add: %d", rec.Code)
+	}
+	rec := do(http.MethodGet, "/v1/remotes/vps/setup?kind="+SetupUpdate)
+	var p SetupPlan
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &p) != nil || p.ID != "" || !strings.Contains(p.Error, "isn't verified") {
+		t.Errorf("an unverified image must not be planned: %d %s", rec.Code, rec.Body)
+	}
+}

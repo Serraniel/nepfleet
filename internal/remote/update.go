@@ -49,7 +49,7 @@ func UpdatePlan(r *Report, compose []byte, version string) ([]Step, error) {
 				"cp -p compose.yaml compose.yaml.previous\n"},
 		{Text: "write compose.yaml for NepFleet " + target + " (.env, the fleet repository and the data stay)",
 			Script: "cd " + InstallDir + "\ncat > compose.yaml <<'" + composeEOF + "'\n" + string(compose) + composeEOF + "\n"},
-		{Text: "pull the image",
+		{Text: pullText(compose),
 			Script: "cd " + InstallDir + "\ndocker compose pull -q\n"},
 		{Text: "restart it and wait until it's healthy; if it isn't, start " + current + " again",
 			Script: "cd " + InstallDir + "\n" +

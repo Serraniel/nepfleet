@@ -72,7 +72,7 @@ func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, 
 				"cat > compose.yaml <<'" + composeEOF + "'\n" + string(compose) + composeEOF + "\n" +
 				"umask 077\n" +
 				"printf 'NEPFLEET_UID=%s\\nNEPFLEET_GID=%s\\nDOCKER_GID=%s\\nNEPFLEET_HOST=%s\\n' \"$(id -u)\" \"$(id -g)\" \"$(getent group docker | cut -d: -f3)\" " + name + " > .env\n"},
-		{Text: "pull the image",
+		{Text: pullText(compose),
 			Script: "cd " + InstallDir + "\ndocker compose pull -q\n"},
 		{Text: "generate the fleet's age key on this machine (keep a copy elsewhere: without it, no secret can be read)",
 			Script: "cd " + InstallDir + "\n" +
@@ -106,3 +106,12 @@ func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, 
 }
 
 var hostNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+
+// pullText says what the pull step gets: an image whose signature this app
+// checked, pinned to its digest, or one it couldn't check.
+func pullText(compose []byte) string {
+	if Verified(compose) {
+		return "pull the image, pinned to the digest whose signature from NepFleet's release workflow was checked (Sigstore)"
+	}
+	return "pull the image (not verified: no signature was checked)"
+}

@@ -46,14 +46,16 @@ func cmdHostInstall(args []string, stdout, stderr io.Writer) error {
 	if !hostNameRe.MatchString(*name) {
 		return fmt.Errorf("%q cannot be a host's name; choose one with --name", *name)
 	}
-	compose, err := remote.PinCompose(nepfleet.Compose, version)
-	if err != nil {
-		return err
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
+	// The image is pinned to a digest signed by NepFleet's release workflow,
+	// checked here, before anything happens on the machine.
+	compose, err := remote.VerifiedCompose(ctx, nepfleet.Compose, version, remote.SigstoreVerifier())
+	if err != nil {
+		return err
+	}
 	ssh := remote.SSH{ConfigFile: *config}
 	r, stopAgent, err := probeUnlocking(ctx, ssh, t, stdout)
 	defer stopAgent()
