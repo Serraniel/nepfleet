@@ -51,7 +51,7 @@ jobs:
               -o "$out" ./cmd/nepfleet
           done
           # Source SBOMs (Go modules) in both common formats.
-          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest app -json -licenses \
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 app -json -licenses \
             -output "dist/nepfleet_${TAG#v}.cdx.json" -main cmd/nepfleet
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
