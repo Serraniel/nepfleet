@@ -408,6 +408,18 @@ func (s *Sessions) Verified(id string) {
 	}
 }
 
+// SpendVerification makes the next sensitive request prove it's them again:
+// one confirmation, one use, for actions such as handing out the age key.
+func (s *Sessions) SpendVerification(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := sha256.Sum256([]byte(id))
+	if v, ok := s.all[k]; ok {
+		v.verified = time.Time{}
+		s.all[k] = v
+	}
+}
+
 // RecentlyVerified reports whether the session's person proved it's them
 // within ReverifyWindow.
 func (s *Sessions) RecentlyVerified(id string) bool {

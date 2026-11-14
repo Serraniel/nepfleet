@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/doctor"
+	"github.com/Serraniel/nepfleet/internal/notify"
 )
 
 // keyBackup records that a copy of the age key was made (in the state
@@ -307,4 +311,49 @@ func cmdErr(err error) error {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// keyBackupAPI is POST /api/v1/key/backup: the age key, encrypted to the
+// recipients the person gave, recorded like nepfleet key backup so doctor
+// stops reminding. The plaintext key never leaves age.
+func keyBackupAPI(ctx context.Context, c common, recipients []string, by string) ([]byte, error) {
+	key := ageKeyFile()
+	if fi, err := os.Stat(key); err != nil || !fi.Mode().IsRegular() {
+		return nil, api.ErrNoKeyFile
+	}
+	// Announced before it's handed out: no backup the fleet doesn't hear of.
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	n, err := e.notifier()
+	if err != nil {
+		return nil, fmt.Errorf("the notification channels don't load, so the backup couldn't be announced: %w", err)
+	}
+	pub, err := exec.CommandContext(ctx, "age-keygen", "-y", "--", key).Output()
+	if err != nil {
+		return nil, errors.New("age-keygen couldn't read the age key")
+	}
+	args := []string{"--armor"}
+	for _, r := range recipients {
+		args = append(args, "--recipient", r)
+	}
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, "age", append(args, "--", key)...) //nolint:gosec // checked public keys and the key file
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		// age's own words stay out: they could quote the key file.
+		return nil, fmt.Errorf("age couldn't encrypt the key (%w)", err)
+	}
+	prints := api.RecipientPrints(recipients)
+	rec, err := json.MarshalIndent(keyBackup{Created: time.Now().UTC(), File: "downloaded by " + by + " through the API, for " + prints, Method: "recipients", PublicKey: strings.TrimSpace(string(pub))}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := writeState(c.stateDir, keyBackupFile, rec); err != nil {
+		return nil, err
+	}
+	e.emit(n, io.Discard, notify.Event{Name: "key.backup", Severity: notify.Warning,
+		Title: "the age key was backed up", Message: by + " downloaded the fleet's age key, encrypted to " + prints + ". If that wasn't you, rotate the key and end their sessions."})
+	return out.Bytes(), nil
 }

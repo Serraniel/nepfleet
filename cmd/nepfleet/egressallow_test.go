@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -85,5 +86,44 @@ func TestRenderAPI(t *testing.T) {
 	}
 	if _, err := renderAPI(c, "ghost"); !errors.Is(err, api.ErrNotFound) {
 		t.Errorf("unknown: %v", err)
+	}
+}
+
+func TestKeyBackupAPI(t *testing.T) {
+	for _, tool := range []string{"age", "age-keygen"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip(tool + " is not installed")
+		}
+	}
+	dir := t.TempDir()
+	key, mine := filepath.Join(dir, "key.txt"), filepath.Join(dir, "mine.txt")
+	for _, k := range []string{key, mine} {
+		if out, err := exec.Command("age-keygen", "-o", k).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	t.Setenv("SOPS_AGE_KEY_FILE", key)
+	pub, _ := exec.Command("age-keygen", "-y", mine).Output()
+	c, _, _ := rollbackFleet(t)
+	armored, err := keyBackupAPI(t.Context(), c, []string{strings.TrimSpace(string(pub))}, "Ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(armored), "-----BEGIN AGE ENCRYPTED FILE-----") || strings.Contains(string(armored), "AGE-SECRET-KEY") {
+		t.Fatalf("not an encrypted backup:\n%s", armored)
+	}
+	dec := exec.Command("age", "-d", "-i", mine)
+	dec.Stdin = strings.NewReader(string(armored))
+	plain, err := dec.Output()
+	orig, _ := os.ReadFile(key) //nolint:gosec // the test's key
+	if err != nil || string(plain) != string(orig) {
+		t.Errorf("the backup doesn't open to the key: %v", err)
+	}
+	if rec := readKeyBackup(c.stateDir); rec == nil || rec.Method != "recipients" || !keyMatches(rec.PublicKey) {
+		t.Errorf("not recorded: %+v", rec)
+	}
+	t.Setenv("SOPS_AGE_KEY_FILE", filepath.Join(dir, "none"))
+	if _, err := keyBackupAPI(t.Context(), c, []string{"age1x"}, "Ada"); !errors.Is(err, api.ErrNoKeyFile) {
+		t.Errorf("no key: %v", err)
 	}
 }

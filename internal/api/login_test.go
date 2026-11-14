@@ -558,3 +558,51 @@ func TestEditingNeedsRecentVerification(t *testing.T) {
 		t.Errorf("creating a token with an old sign-in: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestKeyBackupNeedsAFreshPerson(t *testing.T) {
+	l := newLoginHarness(t)
+	now := time.Now()
+	l.a.Sessions.Now = func() time.Time { return now }
+	store := &auth.Store{Dir: t.TempDir()}
+	admin, _, _ := store.Create("ci", auth.ScopeAdmin, nil, time.Hour)
+	var asked []string
+	l.h = Handler(Options{Accounts: l.a, AllowedOrigins: []string{testOrigin}, Tokens: store,
+		KeyBackup: func(_ context.Context, rs []string, _ string) ([]byte, error) {
+			asked = rs
+			return []byte("-----BEGIN AGE ENCRYPTED FILE-----\n"), nil
+		}})
+	session := l.setup()
+	good := `{"recipients":["age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/key/backup", strings.NewReader(good))
+	req.Header.Set("Authorization", "Bearer "+admin)
+	rec := httptest.NewRecorder()
+	l.h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || asked != nil {
+		t.Errorf("an admin token: %d %s", rec.Code, rec.Body)
+	}
+	for body, want := range map[string]int{
+		`{"recipients":["--help"]}`:                      422,
+		`{"recipients":["age1short"]}`:                   422,
+		`{"recipients":["ssh-ed25519 AAAA\n-o /etc/x"]}`: 422,
+		`{"recipients":[]}`:                              400,
+	} {
+		if rec := l.do(http.MethodPost, "/api/v1/key/backup", body, session, testOrigin); rec.Code != want {
+			t.Errorf("%s: %d, want %d (%s)", body, rec.Code, want, rec.Body)
+		}
+	}
+	if rec := l.do(http.MethodPost, "/api/v1/key/backup", good, session, testOrigin); rec.Code != 200 {
+		t.Errorf("good: %d %s", rec.Code, rec.Body)
+	}
+	if len(asked) != 1 {
+		t.Errorf("asked: %v", asked)
+	}
+	// One confirmation, one backup.
+	if rec := l.do(http.MethodPost, "/api/v1/key/backup", good, session, testOrigin); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) {
+		t.Errorf("a second backup on one confirmation: %d %s", rec.Code, rec.Body)
+	}
+	l.a.Sessions.Verified(session)
+	now = now.Add(auth.ReverifyWindow + time.Minute)
+	if rec := l.do(http.MethodPost, "/api/v1/key/backup", good, session, testOrigin); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) {
+		t.Errorf("an old sign-in: %d %s", rec.Code, rec.Body)
+	}
+}
