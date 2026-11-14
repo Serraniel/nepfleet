@@ -108,6 +108,9 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"StackFile":         reflect.TypeFor[StackFile](),
 		"EditResult":        reflect.TypeFor[EditResult](),
 		"SyncStatus":        reflect.TypeFor[SyncStatus](),
+		"SecretKeys":        reflect.TypeFor[SecretKeys](),
+		"SecretValue":       reflect.TypeFor[SecretValue](),
+		"SecretResult":      reflect.TypeFor[SecretResult](),
 		"NewStackResult":    reflect.TypeFor[NewStackResult](),
 	} {
 		s, ok := schemas[name]

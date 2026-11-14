@@ -279,6 +279,121 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "A file changed since it was read, or another operation runs" }
         "422": { description: The stack would no longer load or render; nothing was saved }
+  /api/v1/stacks/{name}/secrets:
+    get:
+      tags: [stacks]
+      operationId: stackSecretKeys
+      summary: The keys of the stack's encrypted values, never the values (edit scope)
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: The keys
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretKeys" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't edit }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/stacks/{name}/secrets/{key}:
+    put:
+      tags: [stacks]
+      operationId: setStackSecret
+      summary: Store one of the stack's secrets, encrypted, in one commit
+      description: >-
+        Write-only, like nepfleet secret set: the value is encrypted with SOPS into
+        values.secret.yaml and never returned or logged. Needs the edit scope; a
+        person also needs a sign-in or passkey verification within 5 minutes. It
+        doesn't apply: plan and apply afterwards.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+        - { $ref: "#/components/parameters/SecretKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecretValue" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "400": { description: "Not a variable name, or no value (at most 64 KiB)" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, or `{\"verify\": true}`: a person must verify first" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Another operation runs }
+    delete:
+      tags: [stacks]
+      operationId: removeStackSecret
+      summary: Remove one of the stack's secrets, in one commit
+      description: Needs the edit scope, and a recent verification for a person.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+        - { $ref: "#/components/parameters/SecretKey" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, or `{\"verify\": true}`" }
+        "404": { description: No such stack, or no secret of that key }
+        "409": { description: Another operation runs }
+  /api/v1/secrets:
+    get:
+      tags: [server]
+      operationId: fleetSecretKeys
+      summary: The keys of the fleet-wide encrypted values (admin scope)
+      description: fleet.secret.yaml, which every stack may reference.
+      responses:
+        "200":
+          description: The keys
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretKeys" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+  /api/v1/secrets/{key}:
+    put:
+      tags: [server]
+      operationId: setFleetSecret
+      summary: Store a fleet-wide secret, encrypted, in one commit (admin scope)
+      parameters:
+        - { $ref: "#/components/parameters/SecretKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecretValue" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "400": { description: "Not a variable name, or no value (at most 64 KiB)" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "409": { description: Another operation runs }
+    delete:
+      tags: [server]
+      operationId: removeFleetSecret
+      summary: Remove a fleet-wide secret, in one commit (admin scope)
+      parameters:
+        - { $ref: "#/components/parameters/SecretKey" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "404": { description: No secret of that key }
+        "409": { description: Another operation runs }
   /api/v1/sync:
     get:
       tags: [server]
@@ -717,6 +832,12 @@ components:
       in: path
       required: true
       schema: { type: string }
+    SecretKey:
+      name: key
+      in: path
+      required: true
+      description: A variable name
+      schema: { type: string, pattern: "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
     Ceremony:
       name: ceremony
       in: query
@@ -819,6 +940,21 @@ components:
         hosts: { type: array, items: { type: string }, description: Names looked up and then connected to (or refused) }
         addresses: { type: array, items: { type: string }, description: Addresses with no name seen }
         lookedUp: { type: array, items: { type: string }, description: Names looked up but never connected to }
+    SecretKeys:
+      type: object
+      required: [keys]
+      properties:
+        keys: { type: array, items: { type: string } }
+    SecretValue:
+      type: object
+      required: [value]
+      properties:
+        value: { type: string, maxLength: 65536 }
+    SecretResult:
+      type: object
+      required: [commit]
+      properties:
+        commit: { type: string }
     SyncStatus:
       type: object
       required: [enabled]
