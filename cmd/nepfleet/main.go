@@ -412,6 +412,9 @@ func serve(args []string, stderr io.Writer) error {
 		},
 		Alert:       func(_ context.Context, a api.Alert) error { return sendAlert(c, stderr, a) },
 		Maintenance: func(ctx context.Context) ([]api.KumaMaintenance, error) { return fleetMaintenance(ctx, c) },
+		NewStack: func(_ context.Context, req api.NewStack, by string) (api.NewStackResult, error) {
+			return newStackAPI(c, req, by)
+		},
 		StackFiles: func(_ context.Context, stack string) ([]api.StackFile, error) {
 			out, err := withStack(c, stack, func(_ *env, s *fleet.Stack) (any, error) { return stackFiles(s) })
 			if err != nil {
