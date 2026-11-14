@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 func TestAlertEndpoint(t *testing.T) {
@@ -610,5 +612,55 @@ func TestDoctorEndpoint(t *testing.T) {
 	rec := get(admin)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"security":[]`) || !strings.Contains(rec.Body.String(), `"status":"ok"`) {
 		t.Errorf("admin: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestUserEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	admin, _, _ := store.Create("a", auth.ScopeAdmin, nil, time.Hour)
+	edit, _, _ := store.Create("e", auth.ScopeEdit, nil, time.Hour)
+	users := &auth.UserStore{Dir: t.TempDir()}
+	for _, u := range []auth.User{
+		{ID: []byte("u1"), Name: "Ada", Credentials: []webauthn.Credential{{ID: []byte("passkey-one-id")}, {ID: []byte("passkey-two-id")}}},
+		{ID: []byte("u2"), Name: "Bob", Credentials: []webauthn.Credential{{ID: []byte("bobs-only-key")}}},
+	} {
+		if err := users.Add(&u, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := Handler(Options{Tokens: store, Accounts: &Accounts{Users: users}})
+	do := func(method, path, token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("GET", "/api/v1/users", edit); rec.Code != http.StatusForbidden {
+		t.Errorf("edit lists users: %d", rec.Code)
+	}
+	rec := do("GET", "/api/v1/users", admin)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"Ada"`) || strings.Contains(rec.Body.String(), "publicKey") {
+		t.Errorf("list: %d %s", rec.Code, rec.Body)
+	}
+	one := base64.RawURLEncoding.EncodeToString([]byte("passkey-one-id"))
+	if rec := do("DELETE", "/api/v1/users/Ada/passkeys/"+auth.CredentialName([]byte("passkey-one-id")), admin); rec.Code != http.StatusConflict {
+		t.Errorf("an ambiguous start: %d", rec.Code)
+	}
+	if rec := do("DELETE", "/api/v1/users/Ada/passkeys/"+one, admin); rec.Code != http.StatusNoContent {
+		t.Errorf("remove a passkey: %d %s", rec.Code, rec.Body)
+	}
+	bobs := base64.RawURLEncoding.EncodeToString([]byte("bobs-only-key"))
+	if rec := do("DELETE", "/api/v1/users/Bob/passkeys/"+bobs, admin); rec.Code != http.StatusConflict {
+		t.Errorf("remove the last way in: %d", rec.Code)
+	}
+	if rec := do("DELETE", "/api/v1/users/Bob", admin); rec.Code != http.StatusNoContent {
+		t.Errorf("remove a user: %d", rec.Code)
+	}
+	if rec := do("DELETE", "/api/v1/users/Bob", admin); rec.Code != http.StatusNotFound {
+		t.Errorf("remove a removed user: %d", rec.Code)
+	}
+	if all, _ := users.List(); len(all) != 1 || len(all[0].Credentials) != 1 {
+		t.Errorf("left: %+v", all)
 	}
 }

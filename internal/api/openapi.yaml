@@ -482,6 +482,53 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: The scope isn't admin }
         "503": { description: Another operation runs; try again }
+  /api/v1/users:
+    get:
+      tags: [server]
+      operationId: users
+      summary: The people who sign in, and their passkeys (admin scope)
+      responses:
+        "200":
+          description: The users
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/UserInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+        "503": { description: This server has no accounts }
+  /api/v1/users/{user}:
+    delete:
+      tags: [server]
+      operationId: removeUser
+      summary: Remove a person; their sessions end (admin scope)
+      description: A person can't remove themselves here, and needs a recent verification.
+      parameters:
+        - { name: user, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "404": { description: No such user }
+        "409": { description: That's you }
+  /api/v1/users/{user}/passkeys/{id}:
+    delete:
+      tags: [server]
+      operationId: removePasskey
+      summary: Remove one of a person's passkeys (admin scope)
+      description: >-
+        The passkey is named by its ID, or a start of it that fits only one. The
+        last way a person signs in can't be removed; remove the person instead.
+      parameters:
+        - { name: user, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "400": { description: Not a passkey ID }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "409": { description: "No such user or passkey, more than one fits, or it's the last way in" }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1088,6 +1135,24 @@ components:
         template: { type: string }
         what: { type: string }
         stacks: { type: array, items: { type: string }, description: "name@target" }
+    UserInfo:
+      type: object
+      required: [name, created, codes, passkeys]
+      properties:
+        name: { type: string }
+        created: { type: string, format: date-time }
+        external: { type: boolean }
+        codes: { type: boolean, description: Sign-in codes are on }
+        passkeys: { type: array, items: { $ref: "#/components/schemas/PasskeyInfo" } }
+    PasskeyInfo:
+      type: object
+      required: [id, name, synced, uses]
+      properties:
+        id: { type: string, description: The whole credential ID, base64url }
+        name: { type: string, description: Its start, as nepfleet user passkeys shows it }
+        synced: { type: boolean }
+        uses: { type: integer }
+        locked: { type: boolean, description: May have been copied; refused until removed }
     DoctorCheck:
       type: object
       required: [name, status, detail]
