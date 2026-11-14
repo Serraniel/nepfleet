@@ -699,3 +699,27 @@ func TestEgressAllowEndpoint(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestRenderEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	onlyWeb, _, _ := store.Create("w", auth.ScopeRead, []string{"web"}, time.Hour)
+	h := Handler(Options{Tokens: store, Render: func(_ context.Context, stack string) ([]RenderedFile, error) {
+		if stack == "broken" {
+			return nil, InvalidError{Reason: "compose.yaml: bad"}
+		}
+		return []RenderedFile{{Path: ".env", Content: "PW='••••••'\n"}}, nil
+	}})
+	get := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+onlyWeb)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("/api/v1/stacks/web/render"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"path":".env"`) {
+		t.Errorf("web: %d %s", rec.Code, rec.Body)
+	}
+	if rec := get("/api/v1/stacks/db/render"); rec.Code != http.StatusNotFound {
+		t.Errorf("db: %d", rec.Code)
+	}
+}

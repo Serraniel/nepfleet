@@ -435,6 +435,9 @@ func serve(args []string, stderr io.Writer) error {
 		EditStack: func(_ context.Context, stack string, e api.StackEdit, by string, stacks []string) (api.EditResult, error) {
 			return editStack(c, stack, e, by, stacks)
 		},
+		Render: func(_ context.Context, stack string) ([]api.RenderedFile, error) {
+			return renderAPI(c, stack)
+		},
 		EgressAllow: func(_ context.Context, stack string, add []string, by string) (api.EgressAllowResult, error) {
 			return egressAllowAPI(c, stack, add, by)
 		},

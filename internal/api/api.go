@@ -116,6 +116,8 @@ type Options struct {
 	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
 	// instances.
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
+	// Render is what a stack renders to, secrets masked, as nepfleet render.
+	Render func(ctx context.Context, stack string) ([]RenderedFile, error)
 	// EgressAllow adds to a stack's egress allow list and commits it as by,
 	// without applying. Errors: InvalidError, ErrBusy, ErrUncommitted.
 	EgressAllow func(ctx context.Context, stack string, add []string, by string) (EgressAllowResult, error)
@@ -322,6 +324,7 @@ func Handler(o Options) http.Handler {
 	registerSBOM(mux, o, l)
 	registerDoctor(mux, o, l)
 	registerUsers(mux, o, l)
+	registerRender(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))
