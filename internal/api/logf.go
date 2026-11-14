@@ -14,5 +14,5 @@ var logBreaks = strings.NewReplacer("\n", " ", "\r", " ")
 // logf logs one line: names of people and tokens, and texts from requests,
 // can't add lines of their own.
 func logf(format string, args ...any) {
-	log.Print(logBreaks.Replace(fmt.Sprintf(format, args...)))
+	log.Print(logBreaks.Replace(fmt.Sprintf(format, args...))) //nolint:gosec // this is the sanitiser: line breaks are removed here
 }
