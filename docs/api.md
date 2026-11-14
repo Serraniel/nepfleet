@@ -28,6 +28,8 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `GET /api/v1/stacks/{name}/files` | edit | the stack's editable files (`stack.yaml`, a plain stack's `compose.yaml`, `files/**`) with each one's git blob hash as `revision`; never encrypted values or `lock.yaml` |
 | `PUT /api/v1/stacks/{name}/files` | edit | changes files in one commit: `{"files": {path: content}, "base": {path: revision}, "message"}`. A changed file needs the revision it was read at (`409` otherwise). The stack must still load and render (`422` otherwise, nothing saved). It doesn't apply. At most 100 files per edit. A token limited to stacks can't add references (`from:`) to other stacks. People also need a sign-in or passkey verification within 5 minutes (`403 {"verify": true}`) |
 | `GET /api/v1/stacks/{name}/egress` | read | what the stack's egress sidecars on this host recorded (mode `log`) or refused (mode `enforce`), less what's allowed, as `nepfleet egress suggest`: `{mode, sidecars, hosts, addresses, lookedUp}` |
+| `GET /api/v1/sync` | read | where the fleet repository stands against its origin: last sync, commit, error, and the stacks the last pull applied, failed or left pending |
+| `POST /api/v1/sync` | apply, or a signed webhook | pulls now, in the background (`202`); see [Git sync](#git-sync) |
 | `GET /api/v1/maintenance` | read | the maintenance windows of each Uptime Kuma in `fleet.yaml` (title, status, next slot), or the error reading them; fleet-wide, so a token limited to stacks gets `403` |
 | `GET /api/v1/jobs/{id}` | read | a job's state (`running`, `succeeded`, `failed`), error and log |
 | `GET /api/v1/stacks/{name}/history?n=20` | read | the last `n` commits (at most 200) that touched the stack, newest first; `applied` marks the revision running now |
@@ -125,3 +127,13 @@ With TLS on, the server allows TLS 1.2 and newer and sends HSTS.
 ## Commits
 
 Changes over the API are commits in the fleet repository, authored by the token's name (`ci <ci@tokens.nepfleet.invalid>`). This covers rollbacks, and what an apply writes: `lock.yaml` and generated secrets. git's own identity stays the committer, and signing follows git's config, so a server set up to sign needs its key available, or the commit fails. A failed commit after an apply only warns in the job's log; the files are there to commit by hand.
+
+## Git sync
+
+`nepfleet serve --sync 5m` keeps the server's fleet repository at its origin: it fetches every 5 minutes and fast-forwards, never merging or forcing. Then:
+
+- **Stacks the new commits changed** with `apply: auto` are applied, health-gated and rolled back on failure, as `nepfleet apply` does. A change to `fleet.yaml` counts for every stack.
+- **Destructive plans and `apply: manual` stacks** wait for a person: they are listed as pending (`GET /api/v1/sync`), and a `sync.pending` notification says so.
+- **It stops** when the server's repository has uncommitted changes or commits origin doesn't have, with a `sync.failed` notification, until someone resolves it.
+
+**Webhooks** make it immediate: set `NEPFLEET_SYNC_SECRET` for `serve`, and add a push webhook in Forgejo, Gitea or GitHub to `https://<server>/api/v1/sync`, with that secret and the JSON content type. NepFleet checks the HMAC-SHA256 signature of each delivery (`X-Forgejo-Signature`, `X-Gitea-Signature` or `X-Hub-Signature-256`); failed checks count towards the lockout. With the secret and no `--sync`, only webhooks trigger a sync.

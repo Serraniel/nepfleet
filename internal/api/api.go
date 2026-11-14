@@ -118,6 +118,12 @@ type Options struct {
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
 	// Egress is what a stack's egress sidecars recorded or refused.
 	Egress func(ctx context.Context, stack string) (*StackEgress, error)
+	// SyncStatus is where the fleet repository stands against its origin;
+	// SyncNow starts a sync in the background (nil: sync is off). SyncSecret
+	// verifies forges' webhook signatures (empty: webhooks are refused).
+	SyncStatus func() SyncStatus
+	SyncNow    func()
+	SyncSecret string
 	// StackFiles lists a stack's editable files, without encrypted values (edit scope:
 	// files/ may hold plain configuration a read token shouldn't see).
 	StackFiles func(ctx context.Context, stack string) ([]StackFile, error)
@@ -283,6 +289,7 @@ func Handler(o Options) http.Handler {
 	registerUpdates(mux, o, l)
 	registerMaintenance(mux, o, l)
 	registerEdit(mux, o, l)
+	registerSync(mux, o, l)
 	registerEgress(mux, o, l)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, r *http.Request) {
 		job, ok := js.get(r.PathValue("id"))

@@ -253,6 +253,32 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "A file changed since it was read, or another operation runs" }
         "422": { description: The stack would no longer load or render; nothing was saved }
+  /api/v1/sync:
+    get:
+      tags: [server]
+      operationId: syncStatus
+      summary: Where the fleet repository stands against its origin
+      description: Needs the read scope.
+      responses:
+        "200":
+          description: The last sync
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [server]
+      operationId: syncNow
+      summary: Pull the fleet repository and apply changed stacks set to apply auto
+      description: >-
+        Starts a sync in the background. Takes a token with the apply scope, or a forge's
+        webhook signed with NEPFLEET_SYNC_SECRET (X-Hub-Signature-256, X-Forgejo-Signature or
+        X-Gitea-Signature, HMAC-SHA256 of the body). Only fast-forwards.
+      responses:
+        "202": { description: Started }
+        "401": { description: No token, and no valid signature }
+        "403": { description: The token's scope isn't apply }
+        "503": { description: Sync is off on this server }
   /api/v1/maintenance:
     get:
       tags: [server]
@@ -767,6 +793,18 @@ components:
         hosts: { type: array, items: { type: string }, description: Names looked up and then connected to (or refused) }
         addresses: { type: array, items: { type: string }, description: Addresses with no name seen }
         lookedUp: { type: array, items: { type: string }, description: Names looked up but never connected to }
+    SyncStatus:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        interval: { type: string }
+        last: { type: string, format: date-time }
+        commit: { type: string }
+        error: { type: string }
+        applied: { type: array, items: { type: string } }
+        failed: { type: array, items: { type: string } }
+        pending: { type: array, items: { type: string } }
     StackFile:
       type: object
       required: [path, content, revision]
