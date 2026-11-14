@@ -102,7 +102,7 @@ func registerTokens(mux *http.ServeMux, o Options, l *limiter) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(CreatedToken{Token: tokenInfo(t, time.Now()), Secret: secret})
+		_ = json.NewEncoder(w).Encode(CreatedToken{Token: tokenInfo(t, time.Now()), Secret: secret}) //nolint:gosec // the new token's secret, answered this once by design (no-store)
 	}))
 	mux.HandleFunc("DELETE /api/v1/tokens/{id}", requireAuth(o, l, auth.ScopeAdmin, func(w http.ResponseWriter, r *http.Request) {
 		if !mayChangeAccess(w, r, o) {
