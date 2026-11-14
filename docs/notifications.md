@@ -30,6 +30,10 @@ Channel URLs usually contain tokens. Store them in `fleet.secret.yaml`, which is
 
 Sent today: `apply.succeeded`, `apply.failed`, `apply.rolled_back`, `update.available` and `update.applied`, plus what `nepfleet watch` and `doctor --security --notify` report. The other events follow with their features.
 
+## From the app
+
+The app's Notifications page adds and removes channels. It stores a channel's URL encrypted as the fleet secret `NOTIFY_<NAME>`, writes the channel to `fleet.yaml` with a route of events at the chosen severity and above, and commits both (`PUT`/`DELETE /api/v1/notifications/channels/{name}`, admin). Send a test message afterwards to check it arrives. Routes edited by hand in `fleet.yaml` stay as they are.
+
 ## Events
 
 | Event | Severity |

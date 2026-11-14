@@ -3,6 +3,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -65,4 +66,75 @@ func registerChannels(mux *http.ServeMux, o Options, l *limiter) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
+	// Where every alert goes, and a URL with tokens: admin only, like tests.
+	mux.HandleFunc("PUT /api/v1/notifications/channels/{name}", requireAuth(o, l, auth.ScopeAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if o.SetChannel == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		name := r.PathValue("name")
+		if !channelName.MatchString(name) {
+			http.Error(w, "a channel name is 1 to 64 letters, digits, dots, dashes or underscores", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			URL         string `json:"url"`
+			MinSeverity string `json:"minSeverity"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil || req.URL == "" {
+			http.Error(w, `send {"url": "<shoutrrr URL>", "minSeverity": "info|warning|error"}`, http.StatusBadRequest)
+			return
+		}
+		if req.MinSeverity != "" && req.MinSeverity != "info" && req.MinSeverity != "warning" && req.MinSeverity != "error" {
+			http.Error(w, "minSeverity is info, warning or error", http.StatusBadRequest)
+			return
+		}
+		t, _ := TokenFrom(r.Context())
+		commit, err := o.SetChannel(r.Context(), name, req.URL, req.MinSeverity, t.Name)
+		if channelErr(w, err) {
+			return
+		}
+		logf("api: %s set notification channel %s (token %s)", t.Name, name, t.ID)
+		writeJSON(w, map[string]string{"commit": commit})
+	}))
+	mux.HandleFunc("DELETE /api/v1/notifications/channels/{name}", requireAuth(o, l, auth.ScopeAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if o.RemoveChannel == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		name := r.PathValue("name")
+		if !channelName.MatchString(name) {
+			http.Error(w, ErrNoChannel.Error(), http.StatusNotFound)
+			return
+		}
+		t, _ := TokenFrom(r.Context())
+		commit, err := o.RemoveChannel(r.Context(), name, t.Name)
+		if channelErr(w, err) {
+			return
+		}
+		logf("api: %s removed notification channel %s (token %s)", t.Name, name, t.ID)
+		writeJSON(w, map[string]string{"commit": commit})
+	}))
+}
+
+// channelErr answers a channel change's error; the reasons never carry the
+// URL (it holds tokens).
+func channelErr(w http.ResponseWriter, err error) bool {
+	var invalid InvalidError
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, ErrNoChannel):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, ErrBusy), errors.Is(err, ErrUncommitted):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.As(err, &invalid):
+		http.Error(w, redactURLs(err.Error()), http.StatusBadRequest)
+	default:
+		logf("api: channel: %s", redactURLs(err.Error()))
+		http.Error(w, "the channel couldn't be saved; see the server log", http.StatusInternalServerError)
+	}
+	return true
 }
