@@ -23,8 +23,8 @@ grep -q 'secrets (encrypted):.*DB_PASSWORD' ../import.log || fail "DB_PASSWORD n
 grep -q -e s3cr3t -e hardcoded stacks/$P/stack.yaml stacks/$P/compose.yaml stacks/$P/values.secret.yaml && fail "secret in plaintext"
 
 grep -q 'adopted' ../import.log || fail "running state not adopted"
-"$NF" plan --state "$T/state" $P | grep -q 'up to date' || fail "first plan after import is not empty"
-"$NF" apply --yes --state "$T/state" $P | grep -q 'up to date' || fail "apply after import changed something"
+"$NF" plan --state "$T/state" $P | grep 'up to date' >/dev/null || fail "first plan after import is not empty"
+"$NF" apply --yes --state "$T/state" $P | grep 'up to date' >/dev/null || fail "apply after import changed something"
 after=$(docker compose -p $P ps -q web)
 [ "$before" = "$after" ] || fail "container was recreated ($before -> $after)"
 [ "$(docker exec "$after" cat /usr/share/nginx/html/index.html)" = "existing data" ] || fail "bind mount lost"

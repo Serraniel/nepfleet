@@ -45,7 +45,7 @@ before=$(docker compose -p $P ps -q web)
 cd "$T" && age-keygen -o key.txt 2>/dev/null && export SOPS_AGE_KEY_FILE=$T/key.txt
 "$NF" init fleet >/dev/null && cd fleet
 sed -i "s#    age: \[\]#    age: [\"$(age-keygen -y ../key.txt)\"]#" fleet.yaml
-"$NF" import portainer --url $API | grep -q "$P .*compose" || fail "stack not listed"
+"$NF" import portainer --url $API | grep "$P .*compose" >/dev/null || fail "stack not listed"
 "$NF" import portainer --url $API --state "$T/state" --target local $P | tee ../import.log
 grep -q 'secrets (encrypted):.*DB_PASSWORD' ../import.log || fail "DB_PASSWORD not encrypted"
 grep -rq s3cr3t stacks/$P/stack.yaml stacks/$P/compose.yaml && fail "secret in plaintext"
@@ -54,6 +54,6 @@ grep -q "$src" stacks/$P/compose.yaml || fail "relative bind mount not rewritten
 [ "$(docker exec "$before" cat /usr/share/nginx/html/index.html)" = "portainer data" ] || fail "container does not see the data"
 got=$(docker exec "$before" printenv GREETING)
 grep -q "GREETING: \"$got\"\|GREETING: $got\$\|GREETING: '$got'" stacks/$P/stack.yaml || fail "GREETING imported differently from what the container got ('$got')"
-"$NF" apply --yes --state "$T/state" $P | grep -q 'up to date' || fail "apply after import changed something"
+"$NF" apply --yes --state "$T/state" $P | grep 'up to date' >/dev/null || fail "apply after import changed something"
 [ "$(docker compose -p $P ps -q web)" = "$before" ] || fail "container was recreated"
 echo PASS
