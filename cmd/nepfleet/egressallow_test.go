@@ -127,3 +127,21 @@ func TestKeyBackupAPI(t *testing.T) {
 		t.Errorf("no key: %v", err)
 	}
 }
+
+func TestMatchAPI(t *testing.T) {
+	c, _ := newStackFleet(t)
+	m, err := matchAPI(c, "web", "local")
+	if err != nil || len(m.Matches) != 1 || m.Matches[0].Name != "hello" || len(m.Matches[0].Same) != 1 || m.Matches[0].Same[0].Image != "nginx" {
+		t.Fatalf("%+v %v", m, err)
+	}
+	var invalid api.InvalidError
+	if _, err := matchAPI(c, "web", "nope"); !errors.As(err, &invalid) {
+		t.Errorf("unknown source: %v", err)
+	}
+	if _, err := newStackAPI(c, api.NewStack{Template: "hello", Source: "local", Name: "greeter", Values: map[string]string{"GREETING": "hi"}}, "Ada"); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := matchAPI(c, "greeter", "local"); err != nil || m.Template != "local/hello" {
+		t.Errorf("a templated stack: %+v %v", m, err)
+	}
+}
