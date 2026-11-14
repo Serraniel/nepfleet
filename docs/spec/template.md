@@ -139,6 +139,7 @@ Inside the compose file and `files/`, you can use the following variables:
   - `NEPFLEET_URL`: where users reach the stack's web UI. It's `https://<DOMAIN>`, or `http://<host>:<port>` for a stack in access mode port. Use it for links (Homepage, Kuma) and for app settings such as a base URL.
   - `NEPFLEET_AGE_RECIPIENTS`: the fleet's age public keys, comma separated. Encrypt backups to these, and the fleet key can read them.
   - `NEPFLEET_NO_BACKUP_VOLUMES`: a regular expression alternation of the Docker volume names (`<stack>_<volume>`) that templates of stacks on the same host mark `backup: false`, such as caches and models. It's `$^` (matches nothing) when there are none, so `/backup/volumes/(${NEPFLEET_NO_BACKUP_VOLUMES})/` is a safe exclude. It's only computed for templates that use it.
+  - `NEPFLEET_DOCKER_GID`: the group ID of the host's Docker socket (the socket NepFleet uses), for services that talk to Docker as a non-root user (`user: "65532:${NEPFLEET_DOCKER_GID}"`). It differs between hosts, so templates use this instead of asking. Empty when NepFleet can't see the socket.
 
 Using any other `${VAR}` is a validation error, so a typo never silently becomes an empty string. Write `$${VAR}` to get a literal `${VAR}`.
 

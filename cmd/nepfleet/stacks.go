@@ -236,7 +236,7 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 		}
 	}
 	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret,
-		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/")})
+		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/"), DockerGID: doctor.DockerGID("/")})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
