@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -32,6 +34,34 @@ type Job struct {
 	Error    string    `json:"error,omitempty"`
 	Log      string    `json:"log"`
 	By       string    `json:"by"` // the token's name
+	// Progress is the phase a running apply is in, from its log.
+	Progress *Progress `json:"progress,omitempty"`
+}
+
+// Progress is step of steps of a job, and what that step does. Steps is
+// known when the job starts, so the step only grows.
+type Progress struct {
+	Step  int    `json:"step"`
+	Steps int    `json:"steps"`
+	Text  string `json:"text"`
+}
+
+// progressRe matches the lines apply writes per phase: "<stack>: step 3/6: …".
+var progressRe = regexp.MustCompile(`(?m)^[a-z0-9-]+: step ([0-9]+)/([0-9]+): (.+)$`)
+
+// ProgressFrom is the last phase a job's log reports, or nil.
+func ProgressFrom(log string) *Progress {
+	m := progressRe.FindAllStringSubmatch(log, -1)
+	if len(m) == 0 {
+		return nil
+	}
+	last := m[len(m)-1]
+	step, _ := strconv.Atoi(last[1])
+	steps, _ := strconv.Atoi(last[2])
+	if step < 1 || steps < step {
+		return nil
+	}
+	return &Progress{Step: step, Steps: steps, Text: last[3]}
 }
 
 // jobLog is the output of a running job, readable while it is written.
@@ -117,6 +147,9 @@ func (e *jobEntry) snapshot() Job {
 	defer e.mu.Unlock()
 	j := e.job
 	j.Log = e.log.String()
+	if j.State == "running" {
+		j.Progress = ProgressFrom(j.Log)
+	}
 	return j
 }
 

@@ -58,6 +58,9 @@ type Options struct {
 	// APINetwork is created if missing, internal: the stack uses NepFleet's
 	// API there, which the server joins when it starts.
 	APINetwork string
+	// Progress hears each phase as it starts: step of steps, and what it
+	// does. The count is known up front, so a bar never goes back.
+	Progress func(step, steps int, text string)
 	// Lock pins images to digests; nil disables pinning. Sync adds missing
 	// images (resolved with Resolver) and drops unused ones; UpdateLock
 	// re-resolves every image.
@@ -89,6 +92,10 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	if o.WaitTimeout <= 0 {
 		o.WaitTimeout = 3 * time.Minute
 	}
+	prog := newProgress(o, p, hasManifest(p.Dir))
+	if o.IngressNetwork != "" || o.APINetwork != "" {
+		prog.next("networks")
+	}
 	if o.IngressNetwork != "" {
 		if err := ensureNetwork(ctx, r, o.IngressNetwork, p.Mode == "swarm", false); err != nil {
 			return res, err
@@ -103,6 +110,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	if err != nil {
 		return res, err
 	}
+	prog.next("write the files")
 	if err := backup(p.Dir, prev); err != nil {
 		return res, fmt.Errorf("back up previous version: %w", err)
 	}
@@ -112,6 +120,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	var pins map[string]string
 	var imgs []string
 	if o.Lock != nil && o.Resolver != nil {
+		prog.next("pin the images")
 		imgs, err = images(ctx, r, p.Stack, p.Dir)
 		if err == nil {
 			resolver := o.Resolver
@@ -151,6 +160,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	}
 	var g *guard
 	if o.DataSafety != nil && prev != nil && p.Mode != "swarm" {
+		prog.next("snapshot the data")
 		if g, err = o.DataSafety.take(ctx, p.Stack); err != nil {
 			res.LockChanged = false
 			_ = restore(p.Dir, out.Files, prev)
@@ -173,16 +183,20 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 			err = waitReady(ctx, r, g.running, o.WaitTimeout)
 		}
 	}
-	if err == nil {
+	if err == nil && o.Migration != nil {
+		prog.next("migration steps before the update")
 		err = o.Migration.before(ctx, r, p.Stack)
 	}
 	if err == nil {
+		prog.next("pull, start and wait until healthy")
 		err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
 	}
-	if err == nil {
+	if err == nil && o.Migration != nil {
+		prog.next("migration steps after the update")
 		err = o.Migration.after(ctx, r, p.Stack)
 	}
 	if err == nil {
+		prog.next("record what runs")
 		// The manifest first: if writing it fails, the snapshot is still there.
 		if err := writeManifest(p.Dir, out.Files, pins, o); err != nil {
 			return res, err
@@ -427,6 +441,39 @@ func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]
 	return err
 }
 
+// progress counts Apply's phases for Options.Progress.
+type progress struct {
+	report      func(step, steps int, text string)
+	step, steps int
+}
+
+// newProgress counts the phases this apply will run, the same conditions
+// as Apply's: networks, files, pins, snapshot, migration, up, record.
+func newProgress(o Options, p *Plan, hadManifest bool) *progress {
+	n := 3 // files, up, record
+	if o.IngressNetwork != "" || o.APINetwork != "" {
+		n++
+	}
+	if o.Lock != nil && o.Resolver != nil {
+		n++
+	}
+	if o.DataSafety != nil && hadManifest && p.Mode != "swarm" {
+		n++
+	}
+	if o.Migration != nil {
+		n += 2
+	}
+	return &progress{report: o.Progress, steps: n}
+}
+
+func (g *progress) next(text string) {
+	if g.report == nil || g.step >= g.steps {
+		return
+	}
+	g.step++
+	g.report(g.step, g.steps, text)
+}
+
 func ensureNetwork(ctx context.Context, r Runner, name string, swarm, internal bool) error {
 	if _, err := r.Run(ctx, "", "network", "inspect", name); err == nil {
 		return nil
@@ -588,4 +635,10 @@ func tail(s string, n int) string {
 		}
 	}
 	return strings.Join(lines[max(0, len(lines)-n):], " | ")
+}
+
+// hasManifest reports a previous apply in dir (what readManifest finds).
+func hasManifest(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, metaDir, "manifest.json"))
+	return err == nil
 }
