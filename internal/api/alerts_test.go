@@ -429,3 +429,28 @@ func TestSecretEndpoints(t *testing.T) {
 		t.Errorf("keys: %s", rec.Body)
 	}
 }
+
+func TestFeaturesEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	all, _, _ := store.Create("all", auth.ScopeRead, nil, time.Hour)
+	onlyWeb, _, _ := store.Create("web", auth.ScopeRead, []string{"web"}, time.Hour)
+	h := Handler(Options{Tokens: store, Features: func() ([]Feature, error) {
+		return []Feature{{Name: "logs", Template: "dozzle", What: "logs", Stacks: []string{"dozzle@nas", "web@nas"}}}, nil
+	}})
+	get := func(token string) string {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/features", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body)
+		}
+		return rec.Body.String()
+	}
+	if b := get(all); !strings.Contains(b, `"stacks":["dozzle@nas","web@nas"]`) {
+		t.Errorf("all: %s", b)
+	}
+	if b := get(onlyWeb); !strings.Contains(b, `"stacks":["web@nas"]`) {
+		t.Errorf("a token for web sees only web: %s", b)
+	}
+}

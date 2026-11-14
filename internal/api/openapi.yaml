@@ -342,6 +342,24 @@ paths:
         "403": { description: "The scope isn't edit, or `{\"verify\": true}`" }
         "404": { description: No such stack, or no secret of that key }
         "409": { description: "Another operation runs, or the file has uncommitted changes on the server" }
+  /api/v1/features:
+    get:
+      tags: [server]
+      operationId: features
+      summary: The opt-in system stacks, as nepfleet enable lists them
+      description: >-
+        Needs the read scope. Each feature names the official template that provides
+        it and the stacks already doing so (those the token sees). Enabling one is
+        creating a stack from its template (POST /api/v1/stacks).
+      responses:
+        "200":
+          description: The features
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Feature" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -940,6 +958,14 @@ components:
         hosts: { type: array, items: { type: string }, description: Names looked up and then connected to (or refused) }
         addresses: { type: array, items: { type: string }, description: Addresses with no name seen }
         lookedUp: { type: array, items: { type: string }, description: Names looked up but never connected to }
+    Feature:
+      type: object
+      required: [name, template, what, stacks]
+      properties:
+        name: { type: string }
+        template: { type: string }
+        what: { type: string }
+        stacks: { type: array, items: { type: string }, description: "name@target" }
     SecretKeys:
       type: object
       required: [keys]

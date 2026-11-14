@@ -92,3 +92,14 @@ func TestSecretsAPI(t *testing.T) {
 		t.Errorf("dirty file: %v", err)
 	}
 }
+
+func TestFeatureList(t *testing.T) {
+	c, _ := newStackFleet(t)
+	fs, err := featureList(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fs) != len(features) || fs[0].Name != "ingress" || fs[0].Stacks == nil {
+		t.Errorf("features: %+v", fs)
+	}
+}

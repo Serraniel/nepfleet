@@ -8,6 +8,8 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/Serraniel/nepfleet/internal/api"
 )
 
 // feature is an opt-in part of NepFleet, run as a system stack from the
@@ -97,6 +99,29 @@ func stacksUsing(args []string, stderr io.Writer) (map[string][]string, error) {
 		if t := s.Spec.Template; t != nil && t.Source == "official" {
 			out[t.Name] = append(out[t.Name], s.Metadata.Name+"@"+s.Spec.Target)
 		}
+	}
+	return out, nil
+}
+
+// featureList is what GET /api/v1/features answers.
+func featureList(c common) ([]api.Feature, error) {
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	all, err := e.fleet.Stacks()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.Feature, 0, len(features))
+	for _, f := range features {
+		af := api.Feature{Name: f.Name, Template: f.Template, What: f.What, Stacks: []string{}}
+		for _, s := range all {
+			if t := s.Spec.Template; t != nil && t.Source == "official" && t.Name == f.Template {
+				af.Stacks = append(af.Stacks, s.Metadata.Name+"@"+s.Spec.Target)
+			}
+		}
+		out = append(out, af)
 	}
 	return out, nil
 }
