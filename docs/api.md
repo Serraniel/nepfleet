@@ -51,7 +51,7 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `GET /api/v1/sync` | read | where the fleet repository stands against its origin: last sync, commit, error, and the stacks the last pull applied, failed or left pending |
 | `POST /api/v1/sync` | apply, or a signed webhook | pulls now, in the background (`202`); see [Git sync](#git-sync) |
 | `GET /api/v1/maintenance` | read | the maintenance windows of each Uptime Kuma in `fleet.yaml` (title, status, next slot), or the error reading them; fleet-wide, so a token limited to stacks gets `403` |
-| `GET /api/v1/jobs/{id}` | read | a job's state (`running`, `succeeded`, `failed`), error and log |
+| `GET /api/v1/jobs/{id}` | read | a job's state (`running`, `succeeded`, `failed`), error and log; while an apply runs, `progress`: `{step, steps, text}` (the phase it is in) |
 | `GET /api/v1/stacks/{name}/history?n=20` | read | the last `n` commits (at most 200) that touched the stack, newest first; `applied` marks the revision running now |
 
 - **Stacks a token doesn't cover:** a token limited to stacks gets `404` for the others, the same as for a stack that doesn't exist.
