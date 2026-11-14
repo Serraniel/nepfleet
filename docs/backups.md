@@ -28,4 +28,4 @@ nepfleet restore immich --archive … --volume db        # only the database vol
 
 If a step fails or you press Ctrl-C, the stack stays stopped and NepFleet names the volumes already restored and the safety copies. Once the stack works, remove the copies with the `docker volume rm …` line NepFleet prints.
 
-Restore runs on the host where the stack's volumes are. Swarm stacks aren't supported yet: scale the service to 0 and restore on the node that holds the volume.
+Restore runs on the host where the stack's volumes are. The app can do it too (a stack's page, **Restore from a backup**): it lists the archives of the host's volume-backup folder, asks for the stack's name, and runs the same steps as a job. Swarm stacks aren't supported yet: scale the service to 0 and restore on the node that holds the volume.

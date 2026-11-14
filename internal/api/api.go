@@ -125,6 +125,10 @@ type Options struct {
 	// StartUpdates runs updates apply (now: also outside the update window);
 	// like StartApply, it answers the run to start as a job.
 	StartUpdates func(ctx context.Context, now bool, by string) (func(log io.Writer) error, error)
+	// Backups lists the archives a stack can be restored from; StartRestore
+	// restores its volumes from one, answering the run to start as a job.
+	Backups      func(ctx context.Context, stack string) (Backups, error)
+	StartRestore func(ctx context.Context, stack, archive string, volumes []string, by string) (func(log io.Writer) error, error)
 	// Match is which templates of a source run a plain stack's images.
 	Match func(ctx context.Context, stack, source string) (TemplateMatches, error)
 	// Render is what a stack renders to, secrets masked, as nepfleet render.
@@ -259,6 +263,7 @@ func Handler(o Options) http.Handler {
 		writeJSON(w, ev)
 	}))
 	js := newJobs()
+	registerRestore(mux, o, l, js)
 	mux.HandleFunc("POST /api/v1/stacks/{name}/apply", requireAuth(o, l, auth.ScopeApply, forStack(auth.ScopeApply, func(w http.ResponseWriter, r *http.Request, name string) {
 		if o.StartApply == nil {
 			http.Error(w, "no fleet", http.StatusServiceUnavailable)

@@ -819,3 +819,52 @@ func TestMatchEndpoint(t *testing.T) {
 		t.Errorf("bad source: %d", rec.Code)
 	}
 }
+
+func TestRestoreEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	apply, _, _ := store.Create("a", auth.ScopeApply, nil, time.Hour)
+	edit, _, _ := store.Create("e", auth.ScopeEdit, nil, time.Hour)
+	var gotVols []string
+	h := Handler(Options{Tokens: store,
+		Backups: func(context.Context, string) (Backups, error) {
+			return Backups{Folder: "/srv/backups", Archives: []string{"backup-2026-11-06T03-00-00.tar.gz.age"}, Volumes: []string{"db"}}, nil
+		},
+		StartRestore: func(_ context.Context, _, archive string, vols []string, _ string) (func(io.Writer) error, error) {
+			if archive == "nope" {
+				return nil, InvalidError{Reason: "not a backup archive name"}
+			}
+			gotVols = vols
+			return func(io.Writer) error { return nil }, nil
+		}})
+	do := func(method, path, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("GET", "/api/v1/stacks/web/backups", apply, ""); rec.Code != http.StatusForbidden {
+		t.Errorf("apply lists backups: %d", rec.Code)
+	}
+	if rec := do("GET", "/api/v1/stacks/web/backups", edit, ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"volumes":["db"]`) {
+		t.Errorf("backups: %d %s", rec.Code, rec.Body)
+	}
+	good := `{"archive":"backup-2026-11-06T03-00-00.tar.gz.age","volumes":["db"],"confirm":"web"}`
+	for body, want := range map[string]int{
+		`{"archive":"backup-2026-11-06T03-00-00.tar.gz.age","confirm":"db"}`:                     409,
+		`{"archive":"backup-2026-11-06T03-00-00.tar.gz.age","volumes":["../x"],"confirm":"web"}`: 400,
+		`{"archive":"nope","confirm":"web"}`:                                                     422,
+		`{"confirm":"web"}`:                                                                      400,
+		good:                                                                                     202,
+	} {
+		if rec := do("POST", "/api/v1/stacks/web/restore", edit, body); rec.Code != want {
+			t.Errorf("%s: %d, want %d (%s)", body, rec.Code, want, rec.Body)
+		}
+	}
+	if rec := do("POST", "/api/v1/stacks/web/restore", apply, good); rec.Code != http.StatusForbidden {
+		t.Errorf("an apply token restores: %d", rec.Code)
+	}
+	if !slices.Equal(gotVols, []string{"db"}) {
+		t.Errorf("volumes: %v", gotVols)
+	}
+}
