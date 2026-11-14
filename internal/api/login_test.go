@@ -585,15 +585,22 @@ func TestKeyBackupNeedsAFreshPerson(t *testing.T) {
 		`{"recipients":["age1short"]}`:                   422,
 		`{"recipients":["ssh-ed25519 AAAA\n-o /etc/x"]}`: 422,
 		`{"recipients":[]}`:                              400,
-		good:                                             200,
 	} {
 		if rec := l.do(http.MethodPost, "/api/v1/key/backup", body, session, testOrigin); rec.Code != want {
 			t.Errorf("%s: %d, want %d (%s)", body, rec.Code, want, rec.Body)
 		}
 	}
+	if rec := l.do(http.MethodPost, "/api/v1/key/backup", good, session, testOrigin); rec.Code != 200 {
+		t.Errorf("good: %d %s", rec.Code, rec.Body)
+	}
 	if len(asked) != 1 {
 		t.Errorf("asked: %v", asked)
 	}
+	// One confirmation, one backup.
+	if rec := l.do(http.MethodPost, "/api/v1/key/backup", good, session, testOrigin); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) {
+		t.Errorf("a second backup on one confirmation: %d %s", rec.Code, rec.Body)
+	}
+	l.a.Sessions.Verified(session)
 	now = now.Add(auth.ReverifyWindow + time.Minute)
 	if rec := l.do(http.MethodPost, "/api/v1/key/backup", good, session, testOrigin); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) {
 		t.Errorf("an old sign-in: %d %s", rec.Code, rec.Body)

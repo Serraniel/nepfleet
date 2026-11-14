@@ -3,11 +3,14 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
 )
@@ -24,7 +27,23 @@ type KeyBackupRequest struct {
 var ErrNoKeyFile = errors.New("this server's age key isn't a file it can back up")
 
 // recipient is an age or SSH public key, nothing an option could hide in.
-var recipient = regexp.MustCompile(`^(age1[02-9ac-hj-np-z]{58}|ssh-ed25519 [A-Za-z0-9+/]{68}={0,2}( [^\x00-\x1f]{0,100})?|ssh-rsa [A-Za-z0-9+/]{200,}={0,2}( [^\x00-\x1f]{0,100})?)$`)
+var recipient = regexp.MustCompile(`^(age1[02-9ac-hj-np-z]{58}|ssh-ed25519 [A-Za-z0-9+/]{68}={0,2}( [\x20-\x7e]{0,100})?|ssh-rsa [A-Za-z0-9+/]{200,}={0,2}( [\x20-\x7e]{0,100})?)$`)
+
+// RecipientPrints names recipients by a short fingerprint, so a key nobody
+// knows stands out in the log and the notification.
+func RecipientPrints(rs []string) string {
+	out := make([]string, 0, len(rs))
+	for _, r := range rs {
+		key, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(r, "ssh-ed25519 "), "ssh-rsa "), " ")
+		sum := sha256.Sum256([]byte(key))
+		kind := "age"
+		if strings.HasPrefix(r, "ssh-") {
+			kind = "ssh"
+		}
+		out = append(out, kind+":"+hex.EncodeToString(sum[:6]))
+	}
+	return strings.Join(out, ", ")
+}
 
 func registerKeyBackup(mux *http.ServeMux, o Options, l *limiter) {
 	// The key opens every secret of the fleet. Only a signed-in person, who
@@ -55,6 +74,10 @@ func registerKeyBackup(mux *http.ServeMux, o Options, l *limiter) {
 				return
 			}
 		}
+		// One passkey confirmation, one backup.
+		if c, err := r.Cookie(SessionCookie); err == nil && o.Accounts != nil {
+			o.Accounts.Sessions.SpendVerification(c.Value)
+		}
 		armored, err := o.KeyBackup(r.Context(), req.Recipients, t.Name)
 		switch {
 		case errors.Is(err, ErrNoKeyFile):
@@ -63,7 +86,7 @@ func registerKeyBackup(mux *http.ServeMux, o Options, l *limiter) {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %q took a backup of the age key, for %d recipient(s)", t.Name, len(req.Recipients)) //nolint:gosec // %q escapes the name
+		log.Printf("api: %q took a backup of the age key, for %s", t.Name, RecipientPrints(req.Recipients)) //nolint:gosec // %q escapes the name
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", `attachment; filename="nepfleet-age-key.age"`)
 		w.Header().Set("Cache-Control", "no-store")

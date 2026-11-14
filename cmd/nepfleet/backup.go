@@ -321,31 +321,39 @@ func keyBackupAPI(ctx context.Context, c common, recipients []string, by string)
 	if fi, err := os.Stat(key); err != nil || !fi.Mode().IsRegular() {
 		return nil, api.ErrNoKeyFile
 	}
+	// Announced before it's handed out: no backup the fleet doesn't hear of.
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	n, err := e.notifier()
+	if err != nil {
+		return nil, fmt.Errorf("the notification channels don't load, so the backup couldn't be announced: %w", err)
+	}
 	pub, err := exec.CommandContext(ctx, "age-keygen", "-y", "--", key).Output()
 	if err != nil {
-		return nil, fmt.Errorf("reading the age key: %w", cmdErr(err))
+		return nil, errors.New("age-keygen couldn't read the age key")
 	}
 	args := []string{"--armor"}
 	for _, r := range recipients {
 		args = append(args, "--recipient", r)
 	}
-	var out, errOut bytes.Buffer
+	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, "age", append(args, "--", key)...) //nolint:gosec // checked public keys and the key file
-	cmd.Stdout, cmd.Stderr = &out, &errOut
+	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("age: %w: %s", err, strings.TrimSpace(errOut.String()))
+		// age's own words stay out: they could quote the key file.
+		return nil, fmt.Errorf("age couldn't encrypt the key (%w)", err)
 	}
-	rec, err := json.MarshalIndent(keyBackup{Created: time.Now().UTC(), File: "downloaded by " + by + " through the API", Method: "recipients", PublicKey: strings.TrimSpace(string(pub))}, "", "  ")
+	prints := api.RecipientPrints(recipients)
+	rec, err := json.MarshalIndent(keyBackup{Created: time.Now().UTC(), File: "downloaded by " + by + " through the API, for " + prints, Method: "recipients", PublicKey: strings.TrimSpace(string(pub))}, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	if err := writeState(c.stateDir, keyBackupFile, rec); err != nil {
 		return nil, err
 	}
-	if e, err := c.open(); err == nil {
-		n, _ := e.notifier()
-		e.emit(n, io.Discard, notify.Event{Name: "key.backup", Severity: notify.Warning, Host: e.host,
-			Title: "the age key was backed up", Message: by + " downloaded the fleet's age key, encrypted to " + fmt.Sprint(len(recipients)) + " recipient(s). If that wasn't you, rotate the key."})
-	}
+	e.emit(n, io.Discard, notify.Event{Name: "key.backup", Severity: notify.Warning,
+		Title: "the age key was backed up", Message: by + " downloaded the fleet's age key, encrypted to " + prints + ". If that wasn't you, rotate the key and end their sessions."})
 	return out.Bytes(), nil
 }

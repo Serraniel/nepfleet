@@ -614,8 +614,10 @@ paths:
         As nepfleet key backup --recipient: the server's age key, which opens every
         secret, encrypted with age to the given age or SSH public keys (no
         passphrase travels), and recorded so doctor stops reminding. Only a person
-        signed in, who confirmed with a passkey within 5 minutes; API tokens are
-        refused. The fleet's notification channels hear of every backup.
+        signed in, who confirmed with a passkey within 5 minutes (one confirmation,
+        one backup); API tokens are
+        refused. The fleet's notification channels hear of every backup, with a
+        fingerprint of each recipient; it is refused when it couldn't be announced.
       requestBody:
         required: true
         content:
