@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nicholas-fedor/shoutrrr"
+	"github.com/nicholas-fedor/shoutrrr/pkg/types"
 
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/fleet"
@@ -27,7 +28,7 @@ func channelSecretKey(name string) string {
 // fleet.yaml, committed together.
 func setChannelAPI(c common, name, url, minSeverity, by string) (string, error) {
 	// Only the URL's shape: nothing is sent (the app tests separately).
-	if _, err := shoutrrr.CreateSender(url); err != nil {
+	if _, err := shoutrrr.CreateSenderWithOptions(types.SenderOptions{}, url); err != nil {
 		return "", api.InvalidError{Reason: "not a notification URL shoutrrr knows: " + err.Error()}
 	}
 	key := channelSecretKey(name)
