@@ -4,7 +4,6 @@ package api
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"regexp"
 	"time"
@@ -98,7 +97,7 @@ func registerTokens(mux *http.ServeMux, o Options, l *limiter) {
 			return
 		}
 		by, _ := TokenFrom(r.Context())
-		log.Printf("api: %q created token %s (%q, %s) (token %s)", by.Name, t.ID, t.Name, t.Scope, by.ID) //nolint:gosec // %q escapes the names
+		logf("api: %q created token %s (%q, %s) (token %s)", by.Name, t.ID, t.Name, t.Scope, by.ID)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusCreated)
@@ -118,7 +117,7 @@ func registerTokens(mux *http.ServeMux, o Options, l *limiter) {
 			return
 		}
 		by, _ := TokenFrom(r.Context())
-		log.Printf("api: %q revoked token %s (token %s)", by.Name, id, by.ID) //nolint:gosec // %q escapes the name
+		logf("api: %q revoked token %s (token %s)", by.Name, id, by.ID)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 }

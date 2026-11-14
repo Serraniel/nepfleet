@@ -4,7 +4,6 @@ package api
 
 import (
 	"errors"
-	"log"
 	"net/http"
 	"regexp"
 
@@ -60,7 +59,7 @@ func registerChannels(mux *http.ServeMux, o Options, l *limiter) {
 			return
 		case err != nil:
 			reason := redactURLs(err.Error())
-			log.Printf("api: test message to %s failed: %s", name, reason) //nolint:gosec // a checked name; URLs removed
+			logf("api: test message to %s failed: %s", name, reason)
 			http.Error(w, "sending failed: "+reason, http.StatusBadGateway)
 			return
 		}

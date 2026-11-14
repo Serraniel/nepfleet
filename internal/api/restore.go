@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"regexp"
 	"time"
@@ -90,7 +89,7 @@ func registerRestore(mux *http.ServeMux, o Options, l *limiter, js *jobs) {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %q restores %s from %s (token %s)", t.Name, name, req.Archive, t.ID) //nolint:gosec // %q escapes the name; checked names
+		logf("api: %q restores %s from %s (token %s)", t.Name, name, req.Archive, t.ID)
 		job := js.start("restore", name, t.Name, func(l *jobLog) error { return run(l) })
 		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
 		w.WriteHeader(http.StatusAccepted)

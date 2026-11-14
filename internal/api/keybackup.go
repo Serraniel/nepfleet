@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -86,7 +85,7 @@ func registerKeyBackup(mux *http.ServeMux, o Options, l *limiter) {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %q took a backup of the age key, for %s", t.Name, RecipientPrints(req.Recipients)) //nolint:gosec // %q escapes the name
+		logf("api: %q took a backup of the age key, for %s", t.Name, RecipientPrints(req.Recipients))
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", `attachment; filename="nepfleet-age-key.age"`)
 		w.Header().Set("Cache-Control", "no-store")

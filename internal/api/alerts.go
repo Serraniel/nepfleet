@@ -4,7 +4,6 @@ package api
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -77,7 +76,7 @@ func handleAlert(o Options) http.HandlerFunc {
 			return
 		}
 		t, _ := TokenFrom(r.Context())
-		log.Printf("api: alert %q from %s via %s (token %s)", a.Rule, a.Source, t.Name, t.ID)
+		logf("api: alert %q from %s via %s (token %s)", a.Rule, a.Source, t.Name, t.ID)
 		w.WriteHeader(http.StatusAccepted)
 	}
 }

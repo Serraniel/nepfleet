@@ -5,7 +5,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"regexp"
 
@@ -81,7 +80,7 @@ func registerEgress(mux *http.ServeMux, o Options, l *limiter) {
 			return
 		}
 		if res.Commit != "" {
-			log.Printf("api: %q allowed egress of %s to %d more (token %s)", t.Name, name, len(res.Added), t.ID) //nolint:gosec // %q escapes the name
+			logf("api: %q allowed egress of %s to %d more (token %s)", t.Name, name, len(res.Added), t.ID)
 		}
 		writeJSON(w, res)
 	})))

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"time"
 
@@ -93,7 +92,7 @@ func registerImport(mux *http.ServeMux, o Options, l *limiter) {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %q imported compose project %s in %s (token %s)", t.Name, req.Project, res.Commit, t.ID) //nolint:gosec // %q escapes the name; a checked project name
+		logf("api: %q imported compose project %s in %s (token %s)", t.Name, req.Project, res.Commit, t.ID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(res)

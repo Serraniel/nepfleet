@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"github.com/Serraniel/nepfleet/internal/auth"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -295,7 +294,7 @@ func Handler(o Options) http.Handler {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %s applies %s (token %s)", t.Name, name, t.ID)
+		logf("api: %s applies %s (token %s)", t.Name, name, t.ID)
 		job := js.start("apply", name, t.Name, func(l *jobLog) error { return run(l) })
 		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
 		w.WriteHeader(http.StatusAccepted)
@@ -328,7 +327,7 @@ func Handler(o Options) http.Handler {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %s runs updates (token %s)", t.Name, t.ID)
+		logf("api: %s runs updates (token %s)", t.Name, t.ID)
 		job := js.start("updates", "", t.Name, func(l *jobLog) error { return run(l) })
 		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
 		w.WriteHeader(http.StatusAccepted)
@@ -358,7 +357,7 @@ func Handler(o Options) http.Handler {
 		case writeErr(w, err):
 			return
 		}
-		log.Printf("api: %s rolls %s back to %s (token %s)", t.Name, name, req.Commit, t.ID)
+		logf("api: %s rolls %s back to %s (token %s)", t.Name, name, req.Commit, t.ID)
 		job := js.start("rollback", name, t.Name, func(l *jobLog) error { return run(l) })
 		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
 		w.WriteHeader(http.StatusAccepted)
@@ -452,7 +451,7 @@ func writeErr(w http.ResponseWriter, err error) bool {
 		w.Header().Set("Retry-After", "10")
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 	default:
-		log.Printf("api: %v", err)
+		logf("api: %v", err)
 		http.Error(w, "the stack cannot be read; see the server log", http.StatusInternalServerError)
 	}
 	return true

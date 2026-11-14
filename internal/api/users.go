@@ -4,7 +4,6 @@ package api
 
 import (
 	"encoding/base64"
-	"log"
 	"net/http"
 	"regexp"
 	"slices"
@@ -82,7 +81,7 @@ func registerUsers(mux *http.ServeMux, o Options, l *limiter) {
 		if err := o.Accounts.Users.Remove(name); writeErr(w, err) {
 			return
 		}
-		log.Printf("api: %q removed user %q (token %s)", t.Name, name, t.ID) //nolint:gosec // %q escapes the names
+		logf("api: %q removed user %q (token %s)", t.Name, name, t.ID)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	mux.HandleFunc("DELETE /api/v1/users/{user}/passkeys/{id}", requireAuth(o, l, auth.ScopeAdmin, func(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +99,7 @@ func registerUsers(mux *http.ServeMux, o Options, l *limiter) {
 			return
 		}
 		t, _ := TokenFrom(r.Context())
-		log.Printf("api: %q removed passkey %s of %q (token %s)", t.Name, id, name, t.ID) //nolint:gosec // %q escapes the names; a checked ID
+		logf("api: %q removed passkey %s of %q (token %s)", t.Name, id, name, t.ID)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 }

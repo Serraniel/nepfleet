@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"slices"
@@ -387,7 +386,7 @@ func (a *Accounts) oidcRoutes(mux *http.ServeMux, open guardedRoute, origins []s
 		a.mu.Lock()
 		a.SetupToken = ""
 		a.mu.Unlock()
-		log.Printf("api: %q signed in through the identity provider", u.Name) //nolint:gosec // a checked name, and %q escapes it
+		logf("api: %q signed in through the identity provider", u.Name)
 		if err := a.signIn(w, u); err != nil {
 			return err
 		}
