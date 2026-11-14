@@ -1880,3 +1880,67 @@ func renderAPI(c common, stack string) ([]api.RenderedFile, error) {
 	}
 	return out, nil
 }
+
+// composeProjectsAPI is GET /api/v1/import/compose.
+func composeProjectsAPI(ctx context.Context, c common) ([]api.ComposeProject, error) {
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	ps, err := importer.ListCompose(ctx, deploy.Docker{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.ComposeProject, 0, len(ps))
+	for _, p := range ps {
+		_, serr := e.fleet.LoadStack(p.Name)
+		out = append(out, api.ComposeProject{Name: p.Name, Status: p.Status, ConfigFiles: append([]string{}, p.ConfigFiles...), Stack: serr == nil})
+	}
+	return out, nil
+}
+
+// importComposeAPI is POST /api/v1/import/compose: import compose for one
+// project of this host, adopted, committed as by.
+func importComposeAPI(ctx context.Context, c common, req api.ImportCompose, by string) (api.ImportResult, error) {
+	if !apiMu.TryLock() {
+		return api.ImportResult{}, api.ErrBusy
+	}
+	defer apiMu.Unlock()
+	e, err := c.open()
+	if err != nil {
+		return api.ImportResult{}, err
+	}
+	if _, err := e.fleet.LoadStack(req.Project); err == nil {
+		return api.ImportResult{}, api.ErrStackExists
+	}
+	ps, err := importer.ListCompose(ctx, deploy.Docker{})
+	if err != nil {
+		return api.ImportResult{}, err
+	}
+	i := slices.IndexFunc(ps, func(p importer.Project) bool { return p.Name == req.Project })
+	if i < 0 {
+		return api.ImportResult{}, api.InvalidError{Reason: "no compose project " + req.Project + " on this host"}
+	}
+	var out strings.Builder
+	if err := e.importOne(ctx, &out, ps[i], importer.Options{Target: c.host, EncryptAll: req.EncryptAll}, c.host, nil); err != nil {
+		// Whatever it wrote goes: the stack is all or nothing.
+		if s, lerr := e.fleet.LoadStack(req.Project); lerr == nil {
+			_ = os.RemoveAll(s.Dir)
+		}
+		return api.ImportResult{}, api.InvalidError{Reason: cleanReason(err, e.fleet.Dir)}
+	}
+	s, err := e.fleet.LoadStack(req.Project)
+	if err != nil {
+		return api.ImportResult{}, err
+	}
+	rel := relTo(e.fleet.Dir, s.Dir)
+	if _, err := gitOut(e.fleet.Dir, "add", "--", rel); err != nil {
+		return api.ImportResult{}, err
+	}
+	if err := commitAs(e.fleet.Dir, apiAuthor(by), "feat("+s.Metadata.Name+"): import compose project "+req.Project, rel); err != nil {
+		_, _ = gitOut(e.fleet.Dir, "reset", "-q", "--", rel)
+		return api.ImportResult{}, err
+	}
+	head, err := gitOut(e.fleet.Dir, "rev-parse", "HEAD")
+	return api.ImportResult{Stack: s.Metadata.Name, Commit: strings.TrimSpace(head), Log: strings.ReplaceAll(out.String(), e.fleet.Dir+string(filepath.Separator), "")}, err
+}

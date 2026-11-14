@@ -739,6 +739,48 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "confirm isn't the stack's name, or another operation runs" }
         "422": { description: "Not an archive name, no volume-backup stack here, or the stack runs elsewhere" }
+  /api/v1/import/compose:
+    get:
+      tags: [stacks]
+      operationId: composeProjects
+      summary: The Compose projects of the server's Docker, as nepfleet import compose lists them (edit scope, a token not limited to stacks)
+      responses:
+        "200":
+          description: The projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ComposeProject" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't edit }
+    post:
+      tags: [stacks]
+      operationId: importCompose
+      summary: Import a Compose project of this host as a stack, adopted and committed
+      description: >-
+        As nepfleet import compose <project>: values and secret-looking ones
+        (encrypted) go to the stack, and the running containers become its applied
+        state, so its first plan is empty. Committed as the person or token. Needs the
+        edit scope, a token not limited to stacks, and a recent verification for a
+        person. A server in a container reads the project's files only under its
+        mounted folder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportCompose" }
+      responses:
+        "201":
+          description: The stack
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportResult" }
+        "400": { description: Not a project name }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, the token is limited to stacks, or `{\"verify\": true}`" }
+        "409": { description: "A stack of that name exists, or another operation runs" }
+        "422": { description: "No such project here, or it can't be imported; nothing kept" }
   /api/v1/secrets:
     get:
       tags: [server]
@@ -1381,6 +1423,27 @@ components:
         image: { type: string }
         stack: { type: string, description: The stack's tag }
         template: { type: string, description: The template's tag }
+    ComposeProject:
+      type: object
+      required: [name, status, configFiles, stack]
+      properties:
+        name: { type: string }
+        status: { type: string }
+        configFiles: { type: array, items: { type: string } }
+        stack: { type: boolean, description: A stack of that name exists already }
+    ImportCompose:
+      type: object
+      required: [project]
+      properties:
+        project: { type: string }
+        encryptAll: { type: boolean, description: Store every env value encrypted }
+    ImportResult:
+      type: object
+      required: [stack, commit, log]
+      properties:
+        stack: { type: string }
+        commit: { type: string }
+        log: { type: string }
     Backups:
       type: object
       required: [folder, archives, volumes]

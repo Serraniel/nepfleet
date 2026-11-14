@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -136,5 +137,40 @@ func TestRestoreThroughAPIInDocker(t *testing.T) {
 	got, err := exec.Command("docker", "run", "--rm", "-v", vol+":/v:ro", snapshot.HelperImage, "cat", "/v/hello.txt").Output()
 	if err != nil || string(got) != "restored\n" {
 		t.Errorf("restored %q\n%s", got, log.String())
+	}
+}
+
+// A running compose project of this host becomes a committed, adopted stack.
+func TestImportComposeAPIInDocker(t *testing.T) {
+	if os.Getenv("NEPFLEET_TEST_DOCKER") == "" {
+		t.Skip("set NEPFLEET_TEST_DOCKER to run with Docker")
+	}
+	rnd := make([]byte, 4)
+	_, _ = rand.Read(rnd)
+	project := "nfimport" + hex.EncodeToString(rnd)
+	dir := t.TempDir()
+	compose := filepath.Join(dir, "compose.yaml")
+	if err := os.WriteFile(compose, []byte("services:\n  app:\n    image: "+snapshot.HelperImage+"\n    command: [sleep, infinity]\n    environment:\n      GREETING: hi\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	up := exec.Command("docker", "compose", "-p", project, "-f", compose, "up", "-d")
+	if out, err := up.CombinedOutput(); err != nil {
+		t.Fatalf("up: %v %s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "compose", "-p", project, "-f", compose, "down", "-t", "0").Run() })
+	c, fleetDir, _ := rollbackFleet(t)
+	ps, err := composeProjectsAPI(t.Context(), c)
+	if err != nil || !slices.ContainsFunc(ps, func(p api.ComposeProject) bool { return p.Name == project && !p.Stack }) {
+		t.Fatalf("projects: %+v %v", ps, err)
+	}
+	res, err := importComposeAPI(t.Context(), c, api.ImportCompose{Project: project}, "Ada")
+	if err != nil || res.Stack != project || res.Commit == "" || !strings.Contains(res.Log, "adopted") {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if log := tgit(t, fleetDir, "log", "-1", "--format=%an %s"); !strings.Contains(log, "Ada feat("+project+"): import compose project") {
+		t.Errorf("commit: %s", log)
+	}
+	if _, err := importComposeAPI(t.Context(), c, api.ImportCompose{Project: project}, "Ada"); !errors.Is(err, api.ErrStackExists) {
+		t.Errorf("again: %v", err)
 	}
 }
