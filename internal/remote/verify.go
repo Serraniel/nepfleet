@@ -21,6 +21,10 @@ import (
 // GitHub's OIDC issuer).
 const ReleaseIdentity = `^https://github\.com/Serraniel/nepfleet/\.github/workflows/release\.yml@refs/(heads/main|tags/v[0-9.]+)$`
 
+// EdgeIdentity is who signs the :edge image, built from every push to main:
+// the edge workflow, from main only.
+const EdgeIdentity = `^https://github\.com/Serraniel/nepfleet/\.github/workflows/edge\.yml@refs/heads/main$`
+
 // digestRe is an image digest as registries give it.
 var digestRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
@@ -46,7 +50,13 @@ func SigstoreVerifier() ImageVerifier {
 			return "", fmt.Errorf("resolving %s: %w", image, err)
 		}
 		ref.Digest = digest
-		if err := chk.Verify(ctx, ref, sigcheck.Policy{Identity: ReleaseIdentity, Issuer: sigcheck.GitHubActions}); err != nil {
+		// The edge image is signed by the edge workflow on main, every other
+		// tag by the release workflow.
+		identity := ReleaseIdentity
+		if ref.Tag == EdgeVersion {
+			identity = EdgeIdentity
+		}
+		if err := chk.Verify(ctx, ref, sigcheck.Policy{Identity: identity, Issuer: sigcheck.GitHubActions}); err != nil {
 			return "", err
 		}
 		// The signature names the workflow, not the version: an older signed
@@ -157,8 +167,11 @@ func VerifiedCompose(ctx context.Context, compose []byte, version string, verify
 		return nil, errors.New("compose.yaml has no NepFleet image line")
 	}
 	tag := "latest"
-	if releaseRe.MatchString(version) {
+	switch {
+	case releaseRe.MatchString(version):
 		tag = strings.TrimPrefix(version, "v")
+	case version == EdgeVersion:
+		tag = EdgeVersion
 	}
 	image := releaseImage + ":" + tag
 	digest, err := verify(ctx, image)
