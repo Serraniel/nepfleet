@@ -68,6 +68,9 @@ type Server struct {
 	Keys Keys
 	// Doctor runs nepfleet doctor on a remote over SSH (remote.Doctor).
 	Doctor func(context.Context, remote.Target) ([]remote.DoctorCheck, error)
+	// HostUpdates asks a remote's package manager what it has pending
+	// (remote.CheckHostUpdates).
+	HostUpdates func(context.Context, remote.Target) (*remote.HostUpdates, error)
 	// RetryAfter and PollEvery tune the tunnels; tests shorten them.
 	RetryAfter, PollEvery time.Duration
 
@@ -144,6 +147,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/remotes", s.add)
 	mux.HandleFunc("POST /v1/remotes/{name}/refresh", s.refresh)
 	mux.HandleFunc("POST /v1/remotes/{name}/doctor", s.doctor)
+	mux.HandleFunc("POST /v1/remotes/{name}/host-updates", s.hostUpdates)
 	mux.HandleFunc("POST /v1/remotes/{name}/connect", s.connect)
 	mux.HandleFunc("POST /v1/remotes/{name}/disconnect", s.disconnect)
 	s.setupRoutes(mux)
@@ -276,11 +280,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 // doctor runs nepfleet doctor on the remote, over SSH like a check: it works
 // when the remote's API doesn't, which is when it's needed.
-func (s *Server) doctor(w http.ResponseWriter, r *http.Request) {
-	if s.Doctor == nil {
-		fail(w, http.StatusNotImplemented, "this daemon can't run the doctor")
-		return
-	}
+// target is the SSH target of the request's remote; on false, the error is
+// written.
+func (s *Server) target(w http.ResponseWriter, r *http.Request) (remote.Target, bool) {
 	s.mu.Lock()
 	i := s.index(r.PathValue("name"))
 	var address string
@@ -290,11 +292,42 @@ func (s *Server) doctor(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if i < 0 {
 		fail(w, http.StatusNotFound, "no such remote")
-		return
+		return remote.Target{}, false
 	}
 	t, err := remote.ParseTarget(address)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
+		return remote.Target{}, false
+	}
+	return t, true
+}
+
+// hostUpdates is POST /v1/remotes/{name}/host-updates: what the machine's
+// package manager has pending, asked over SSH; nothing is installed.
+func (s *Server) hostUpdates(w http.ResponseWriter, r *http.Request) {
+	if s.HostUpdates == nil {
+		fail(w, http.StatusNotImplemented, "this daemon can't check host updates")
+		return
+	}
+	t, ok := s.target(w, r)
+	if !ok {
+		return
+	}
+	h, err := s.HostUpdates(r.Context(), t)
+	if err != nil {
+		failErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h)
+}
+
+func (s *Server) doctor(w http.ResponseWriter, r *http.Request) {
+	if s.Doctor == nil {
+		fail(w, http.StatusNotImplemented, "this daemon can't run the doctor")
+		return
+	}
+	t, ok := s.target(w, r)
+	if !ok {
 		return
 	}
 	checks, err := s.Doctor(r.Context(), t)

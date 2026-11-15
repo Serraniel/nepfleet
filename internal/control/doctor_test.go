@@ -47,3 +47,37 @@ func TestRemoteDoctor(t *testing.T) {
 		t.Errorf("no doctor: %d", rec.Code)
 	}
 }
+
+func TestRemoteHostUpdates(t *testing.T) {
+	probe := func(_ context.Context, tg remote.Target) (*remote.Report, error) {
+		return &remote.Report{Kernel: "Linux", Target: tg.String()}, nil
+	}
+	yes := true
+	s := &Server{Dir: t.TempDir(), Probe: probe, HostUpdates: func(context.Context, remote.Target) (*remote.HostUpdates, error) {
+		return &remote.HostUpdates{OS: "arch", Supported: true, Pending: 2, Security: 1, RebootRequired: &yes, Packages: []string{"linux", "openssl"}}, nil
+	}}
+	if err := s.Load(); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	do := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"address":"ssh://me@vps","name":"vps"}`)))
+		return rec
+	}
+	if rec := do("/v1/remotes"); rec.Code != http.StatusCreated {
+		t.Fatalf("add: %d %s", rec.Code, rec.Body)
+	}
+	rec := do("/v1/remotes/vps/host-updates")
+	var got remote.HostUpdates
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Pending != 2 || got.RebootRequired == nil || !*got.RebootRequired {
+		t.Errorf("host updates: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do("/v1/remotes/nope/host-updates"); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown remote: %d", rec.Code)
+	}
+	s.HostUpdates = nil
+	if rec := do("/v1/remotes/vps/host-updates"); rec.Code != http.StatusNotImplemented {
+		t.Errorf("no checker: %d", rec.Code)
+	}
+}
