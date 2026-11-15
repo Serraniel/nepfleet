@@ -32,7 +32,8 @@ const maxPackages = 200
 // Nothing needs root: checkupdates syncs a database of its own, apt and dnf
 // read their lists as last refreshed.
 const hostUpdatesScript = `set -u
-. /etc/os-release 2>/dev/null || true
+# A missing file would end a POSIX shell at ".", even with || true.
+if [ -r /etc/os-release ]; then . /etc/os-release; fi
 echo "os=${ID:-unknown}"
 case "${ID:-}:${ID_LIKE:-}" in
 arch:*|manjaro:*|endeavouros:*|*:*arch*)
