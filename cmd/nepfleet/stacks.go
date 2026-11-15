@@ -1685,6 +1685,7 @@ func doctorChecks(c common) ([]doctor.Check, int, error) {
 	// a stick that is unplugged, a GPU this host lacks, an unmounted share.
 	hw := doctor.HostHardware("/")
 	used := map[string][]string{}
+	domains := map[string]string{} // stack → DOMAIN, for stacks behind Caddy
 	for _, s := range stacks {
 		if s.Spec.Template == nil {
 			continue // plain stacks: values pass through
@@ -1699,6 +1700,9 @@ func doctorChecks(c common) ([]doctor.Check, int, error) {
 				continue // another stack's value: checked where it is defined
 			}
 			v := cmp.Or(raw.Literal, inp.Default)
+			if inp.Name == "DOMAIN" && (s.Spec.Access == nil || s.Spec.Access.Mode != "port") {
+				domains[s.Metadata.Name] = v
+			}
 			switch {
 			case v == "" || v == "none":
 			case inp.Type == "device":
@@ -1729,6 +1733,7 @@ func doctorChecks(c common) ([]doctor.Check, int, error) {
 			checks = append(checks, doctor.Check{Name: "Shared folder", Status: doctor.OK, Detail: fmt.Sprintf("@%s %s (used by %s)", name, p, strings.Join(used[name], ", ")), Fix: ""})
 		}
 	}
+	checks = append(checks, domainChecks(context.Background(), net.DefaultResolver.LookupHost, domains)...)
 	checks = append(checks, backupChecks(e, c.stateDir, in.KeyFromEnv)...)
 	for _, err := range renderErrs {
 		checks = append(checks, doctor.Check{Name: "Stacks", Status: doctor.Fail, Detail: err.Error(), Fix: "fix the stack, then run doctor again"})
