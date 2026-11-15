@@ -698,6 +698,30 @@ type sourceCatalogue struct {
 	Templates []template.Entry `json:"templates"`
 	// Invalid lists templates that do not validate (not offered).
 	Invalid []string `json:"invalid,omitempty"`
+	// Installed lists the source's templates that stacks on this host use,
+	// so a form can say what a template needs that isn't here (Caddy for a
+	// domain, Uptime Kuma for monitors).
+	Installed []string `json:"installed"`
+}
+
+// installedTemplates is which templates of source the stacks on this host use.
+func installedTemplates(e *env, source string) []string {
+	out := []string{}
+	all, err := e.fleet.Stacks()
+	if err != nil {
+		return out
+	}
+	for _, s := range all {
+		t := s.Spec.Template
+		if t == nil || t.Source != source || (s.Spec.Target != e.host && s.Spec.Target != "local") {
+			continue
+		}
+		if !slices.Contains(out, t.Name) {
+			out = append(out, t.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // sourceCatalogues indexes every template source of the fleet, fetching
@@ -717,7 +741,7 @@ func sourceCatalogues(c common) ([]sourceCatalogue, error) {
 		if err != nil {
 			return nil, err
 		}
-		sc := sourceCatalogue{Source: src.Name, Commit: res.Commit}
+		sc := sourceCatalogue{Source: src.Name, Commit: res.Commit, Installed: installedTemplates(e, src.Name)}
 		var ts []*template.Template
 		for _, dir := range dirs {
 			t, err := template.Load(dir)

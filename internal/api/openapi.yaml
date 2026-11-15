@@ -104,7 +104,8 @@ paths:
       summary: The catalogue of each template source of the fleet
       description: >-
         Needs the read scope. Each source has its commit and its catalogue, in the
-        index.json format. Templates that don't validate are listed as invalid.
+        index.json format. Templates that don't validate are listed as invalid;
+        installed names the source's templates that stacks on the server's host use.
       responses:
         "200":
           description: Template sources
