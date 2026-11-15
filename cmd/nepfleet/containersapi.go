@@ -217,11 +217,11 @@ type limitedBuffer struct {
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if room := b.max - b.Len(); room < len(p) {
 		if room > 0 {
-			b.Builder.Write(p[:room])
+			_, _ = b.Builder.Write(p[:room])
 		}
 		if !b.truncated {
 			b.truncated = true
-			b.WriteString("\n… (cut at 1 MB)\n")
+			_, _ = b.WriteString("\n… (cut at 1 MB)\n")
 		}
 		return len(p), nil
 	}
