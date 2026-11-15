@@ -232,6 +232,27 @@ paths:
                 items: { $ref: "#/components/schemas/Container" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/stacks/{name}/containers/{container}/logs:
+    get:
+      tags: [stacks]
+      operationId: containerLogs
+      summary: The last lines of one container's output
+      description: >-
+        stdout and stderr with timestamps, of a container named in the stack's
+        container list (on Swarm, its service's logs). The edit scope, as logs
+        often hold what reading secrets would show. At most 1 MB.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+        - { name: container, in: path, required: true, schema: { type: string } }
+        - { name: lines, in: query, schema: { type: integer, minimum: 1, maximum: 2000, default: 200 } }
+      responses:
+        "200":
+          description: The lines
+          content:
+            text/plain: { schema: { type: string } }
+        "400": { description: lines is out of range }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/stacks/{name}/services/{service}/{action}:
     post:
       tags: [stacks]

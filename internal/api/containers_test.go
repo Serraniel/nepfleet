@@ -74,3 +74,42 @@ func TestContainersEndpoints(t *testing.T) {
 		t.Errorf("done: %v", did)
 	}
 }
+
+func TestLogsEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	read, _, _ := store.Create("read", auth.ScopeRead, nil, time.Hour)
+	edit, _, _ := store.Create("edit", auth.ScopeEdit, nil, time.Hour)
+	var asked int
+	h := Handler(Options{Tokens: store, Logs: func(_ context.Context, stack, container string, lines int) (string, error) {
+		if container == "other-web-1" {
+			return "", ErrNotFound
+		}
+		asked = lines
+		return "2026-11-15T10:00:00Z hello from " + stack + "\n", nil
+	}})
+	get := func(token, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get(read, "/api/v1/stacks/web/containers/web-web-1/logs"); rec.Code == http.StatusOK {
+		t.Error("a read token got logs")
+	}
+	rec := get(edit, "/api/v1/stacks/web/containers/web-web-1/logs")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "hello from web") || asked != 200 || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("logs: %d %q (lines %d)", rec.Code, rec.Body, asked)
+	}
+	if get(edit, "/api/v1/stacks/web/containers/web-web-1/logs?lines=50"); asked != 50 {
+		t.Errorf("lines: %d", asked)
+	}
+	for _, q := range []string{"0", "-1", "99999", "x"} {
+		if rec := get(edit, "/api/v1/stacks/web/containers/web-web-1/logs?lines="+q); rec.Code != http.StatusBadRequest {
+			t.Errorf("lines=%s: %d", q, rec.Code)
+		}
+	}
+	if rec := get(edit, "/api/v1/stacks/web/containers/other-web-1/logs"); rec.Code != http.StatusNotFound {
+		t.Errorf("another stack's container: %d", rec.Code)
+	}
+}

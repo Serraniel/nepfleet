@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
 )
@@ -81,6 +82,44 @@ func registerContainers(mux *http.ServeMux, o Options, l *limiter) {
 		}
 		logf("api: %q: %s %s/%s (token %s)", t.Name, action, name, service, t.ID)
 		w.WriteHeader(http.StatusNoContent)
+	})))
+}
+
+// MaxLogLines bounds the lines one logs request returns.
+const MaxLogLines = 2000
+
+// LogsFunc returns the last lines of one container's (Compose) or service's
+// (Swarm) output, stdout and stderr, with timestamps (Options.Logs).
+type LogsFunc func(ctx context.Context, stack, container string, lines int) (string, error)
+
+func registerLogs(mux *http.ServeMux, o Options, l *limiter) {
+	// Edit scope: logs often hold what reading secrets would show.
+	mux.HandleFunc("GET /api/v1/stacks/{name}/containers/{container}/logs", requireAuth(o, l, auth.ScopeEdit, forStack(auth.ScopeEdit, func(w http.ResponseWriter, r *http.Request, name string) {
+		if o.Logs == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		container := r.PathValue("container")
+		if !serviceName.MatchString(container) {
+			http.Error(w, ErrNotFound.Error(), http.StatusNotFound)
+			return
+		}
+		lines := 200
+		if v := r.URL.Query().Get("lines"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > MaxLogLines {
+				http.Error(w, "lines is 1 to "+strconv.Itoa(MaxLogLines), http.StatusBadRequest)
+				return
+			}
+			lines = n
+		}
+		out, err := o.Logs(r.Context(), name, container, lines)
+		if writeErr(w, err) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(out))
 	})))
 }
 
