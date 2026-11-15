@@ -28,3 +28,13 @@ spec:
 | openSUSE | later | `zypper dup` / `patch` | `zypper needs-rebooting` | `zypper patch --category security` |
 
 **Arch-specific safeguard:** before updating, the agent reads the [Arch news feed](https://archlinux.org/feeds/news/). If a news item has appeared since the last update, the host is not updated and you are notified, because those items usually announce manual interventions.
+
+## Checking for pending updates
+
+Before anything installs updates, the desktop app can show what each machine has pending: Fleets → **Check host updates** (the control daemon's `POST /v1/remotes/<name>/host-updates`). It runs over SSH as the connecting user and installs nothing:
+
+- **Arch Linux:** `checkupdates` (pacman-contrib) syncs a package database of its own, so the count is fresh; without it, `pacman -Qu` reads the database as of the last `pacman -Sy`. Security fixes come from `arch-audit --upgradable` when it's installed. A reboot is required when the running kernel's modules are gone.
+- **Debian / Ubuntu:** `apt list --upgradable`, from the package lists as of the last `apt update`; security fixes are the ones from a `-security` suite; a reboot is required when `/var/run/reboot-required` exists.
+- **Fedora / RHEL:** `dnf check-update`, `dnf updateinfo list --security` and `dnf needs-restarting -r`.
+
+It answers `{os, supported, pending, security, rebootRequired, packages, notes}`: `security` is `-1` and `rebootRequired` is `null` when the machine can't tell, and `notes` says how fresh or complete the answer is.
