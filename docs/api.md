@@ -176,7 +176,7 @@ spec:
 
 - **Which list counts:** the one the server has before the pull. A pushed commit can't turn the check off or add its own key unless an allowed key signed it.
 - **A commit that fails the check** (unsigned, signed by another key, or with an X.509 signature) stops sync with `sync.failed`, and nothing is fast-forwarded.
-- **Only these keys:** an SSH signature is checked against `allowedSigners`, an OpenPGP one against a keyring made for the check that holds only `allowedGPGKeys`, never the machine's own keys. Expiry and revocation follow the key as pasted: paste it again after extending or revoking it.
+- **Only these keys:** an SSH signature is checked against `allowedSigners`, an OpenPGP one against a keyring made for the check that holds only `allowedGPGKeys`, never the machine's own keys. Every key in a pasted block counts, so export only the keys you mean. Expiry and revocation follow the key as pasted: paste it again after extending or revoking it. A commit with more than one signature counts as unsigned.
 - **Signing with SSH:** `git config gpg.format ssh` and `git config user.signingkey ~/.ssh/id_ed25519.pub`, then `git commit -S` (or `commit.gpgsign true`). With GPG, `git commit -S` signs with your GPG key as usual.
 
 **Webhooks** make it immediate: set `NEPFLEET_SYNC_SECRET` for `serve`, and add a push webhook in Forgejo, Gitea or GitHub to `https://<server>/api/v1/sync`, with that secret and the JSON content type. NepFleet checks the HMAC-SHA256 signature of each delivery (`X-Forgejo-Signature`, `X-Gitea-Signature` or `X-Hub-Signature-256`); failed checks count towards the lockout. With the secret and no `--sync`, only webhooks trigger a sync.

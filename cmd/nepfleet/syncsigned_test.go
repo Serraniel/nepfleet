@@ -78,6 +78,8 @@ func TestSignatureKind(t *testing.T) {
 		"tree x\nauthor a\ngpgsig -----BEGIN SIGNED MESSAGE-----\n abc\n\nmsg\n":                                   "",
 		"tree x\nauthor a\n\ngpgsig -----BEGIN SSH SIGNATURE-----\n":                                               "",
 		"tree x\n\nmsg": "",
+		// Two signatures: git verifies one of them by the repository's format.
+		"tree x\ngpgsig-sha256 -----BEGIN SSH SIGNATURE-----\n a\n -----END SSH SIGNATURE-----\ngpgsig -----BEGIN PGP SIGNATURE-----\n b\n\nmsg\n": "",
 	} {
 		if got := signatureKind(raw); got != want {
 			t.Errorf("%q: %q, want %q", raw, got, want)

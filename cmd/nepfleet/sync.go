@@ -125,7 +125,7 @@ func pullFleet(ctx context.Context, e *env) (pulled, error) {
 	if from == to {
 		return pulled{from: from, to: to}, nil
 	}
-	if _, err := git("merge-base", "--is-ancestor", "HEAD", "@{u}"); err != nil {
+	if _, err := git("merge-base", "--is-ancestor", "HEAD", to); err != nil {
 		return pulled{from: from}, errDiverged
 	}
 	// With requireSigned, every incoming commit needs a signature by a key
@@ -136,7 +136,9 @@ func pullFleet(ctx context.Context, e *env) (pulled, error) {
 			return pulled{from: from}, err
 		}
 	}
-	if _, err := git("merge", "--ff-only", "--quiet", "@{u}"); err != nil {
+	// The commit checked above, not @{u} again: something else may fetch
+	// meanwhile.
+	if _, err := git("merge", "--ff-only", "--quiet", to); err != nil {
 		return pulled{from: from}, err
 	}
 	changed, err := git("diff", "--name-only", from, to)
@@ -328,7 +330,7 @@ func verifyIncoming(dir string, signers, gpgKeys []string, from, to string) erro
 				return fmt.Errorf("%w: commit %s isn't signed by a key in sync.allowedGPGKeys", errUnsigned, short)
 			}
 		default:
-			return fmt.Errorf("%w: commit %s has no SSH or OpenPGP signature", errUnsigned, short)
+			return fmt.Errorf("%w: commit %s has no single SSH or OpenPGP signature", errUnsigned, short)
 		}
 	}
 	return nil
@@ -401,25 +403,35 @@ func removeKeyring(home string) {
 }
 
 // signatureKind is the kind of a raw commit's signature header: "ssh",
-// "pgp", or "" (none, or another kind such as X.509).
+// "pgp", or "" (none, another kind such as X.509, or more than one). Git
+// verifies only one of gpgsig and gpgsig-sha256, by the repository's
+// format, so a commit with both could be checked as one kind and verified
+// as the other: it counts as unsigned.
 func signatureKind(commit string) string {
 	head, _, _ := strings.Cut(commit, "\n\n") // headers end at the first blank line
+	kind, found := "", 0
 	for _, line := range strings.Split(head, "\n") {
 		v, ok := strings.CutPrefix(line, "gpgsig ")
 		if !ok {
 			v, ok = strings.CutPrefix(line, "gpgsig-sha256 ")
 		}
-		if ok {
-			switch strings.TrimSpace(v) {
-			case "-----BEGIN SSH SIGNATURE-----":
-				return "ssh"
-			case "-----BEGIN PGP SIGNATURE-----":
-				return "pgp"
-			}
-			return ""
+		if !ok {
+			continue
+		}
+		found++
+		switch strings.TrimSpace(v) {
+		case "-----BEGIN SSH SIGNATURE-----":
+			kind = "ssh"
+		case "-----BEGIN PGP SIGNATURE-----":
+			kind = "pgp"
+		default:
+			kind = ""
 		}
 	}
-	return ""
+	if found != 1 {
+		return ""
+	}
+	return kind
 }
 
 var errUnsigned = errors.New("sync stopped: fleet.yaml requires signed commits")
