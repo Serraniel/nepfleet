@@ -483,6 +483,10 @@ func serve(args []string, stderr io.Writer) error {
 			}
 			return out.(*api.StackEgress), nil
 		},
+		Containers: func(ctx context.Context, stack string) ([]api.Container, error) { return containersAPI(ctx, c, stack) },
+		ServiceAction: func(ctx context.Context, stack, service, action, _ string) error {
+			return serviceActionAPI(ctx, c, stack, service, action)
+		},
 		Updates: func(ctx context.Context, stack string) ([]api.ImageUpdate, error) {
 			if !apiMu.TryLock() {
 				return nil, api.ErrBusy
