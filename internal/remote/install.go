@@ -76,8 +76,36 @@ func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, 
 				"printf 'NEPFLEET_UID=%s\\nNEPFLEET_GID=%s\\nDOCKER_GID=%s\\nNEPFLEET_HOST=%s\\n' \"$(id -u)\" \"$(id -g)\" \"$(getent group docker | cut -d: -f3)\" " + name + " > .env\n"},
 		{Text: pullText(compose),
 			Script: "cd " + InstallDir + "\ndocker compose pull -q\n"},
+	}
+	steps = append(steps, keyRepoStartSteps()...)
+	if skipDir {
+		return steps[1:], nil
+	}
+	if steps[0].Root && !r.Root && !r.Sudo && !r.SudoPassword {
+		return steps, fmt.Errorf("creating %s needs root: log in as root or as a user with sudo, or create it yourself, owned by %s, and use --skip-dir", InstallDir, r.User)
+	}
+	return steps, nil
+}
+
+var hostNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
+
+// pullText says what the pull step gets: an image whose signature this app
+// checked, pinned to its digest, or one it couldn't check.
+func pullText(compose []byte) string {
+	if Verified(compose) {
+		return "pull the image, pinned to the digest whose signature from NepFleet's release workflow was checked (Sigstore)"
+	}
+	return "pull the image (not verified: no signature was checked)"
+}
+
+// keyRepoStartSteps are the end of an install, and a repair: the age key
+// (generated once), the fleet repository encrypting to it with a first
+// commit, and the API started. Each step leaves what is there already.
+func keyRepoStartSteps() []Step {
+	return []Step{
 		{Text: "generate the fleet's age key on this machine (keep a copy elsewhere: without it, no secret can be read)",
 			Script: "cd " + InstallDir + "\n" +
+				"test -f compose.yaml || { echo 'no compose.yaml in " + InstallDir + ": NepFleet was not set up here by host install' >&2; exit 1; }\n" +
 				"if [ ! -s age.key ]; then docker compose run --rm -T --entrypoint age-keygen nepfleet -o " + InstallDir + "/age.key 2>/dev/null; fi\n" +
 				"chmod 600 age.key\n"},
 		{Text: "create the fleet repository, encrypting to that key, and commit it",
@@ -98,22 +126,14 @@ func InstallPlan(r *Report, name string, compose []byte, skipDir bool) ([]Step, 
 		{Text: "start the API and wait until it's healthy",
 			Script: "cd " + InstallDir + "\ndocker compose up -d --wait\n"},
 	}
-	if skipDir {
-		return steps[1:], nil
-	}
-	if steps[0].Root && !r.Root && !r.Sudo && !r.SudoPassword {
-		return steps, fmt.Errorf("creating %s needs root: log in as root or as a user with sudo, or create it yourself, owned by %s, and use --skip-dir", InstallDir, r.User)
-	}
-	return steps, nil
 }
 
-var hostNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$`)
-
-// pullText says what the pull step gets: an image whose signature this app
-// checked, pinned to its digest, or one it couldn't check.
-func pullText(compose []byte) string {
-	if Verified(compose) {
-		return "pull the image, pinned to the digest whose signature from NepFleet's release workflow was checked (Sigstore)"
+// RepairPlan fixes what an install left half done (the doctor offers it):
+// a fleet without age recipients, a fleet repository without commits. It
+// runs the end of an install again, which keeps what is there.
+func RepairPlan(r *Report) ([]Step, error) {
+	if r.NepFleetImage == "" {
+		return nil, errors.New("NepFleet was not set up here as a container by host install, so there is nothing to repair this way")
 	}
-	return "pull the image (not verified: no signature was checked)"
+	return keyRepoStartSteps(), nil
 }
