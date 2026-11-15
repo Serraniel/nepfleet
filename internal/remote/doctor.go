@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"github.com/Serraniel/nepfleet/internal/doctor"
 )
 
 // DoctorCheck is one of nepfleet doctor's checks, as `doctor --json` prints
@@ -19,7 +21,7 @@ type DoctorCheck struct {
 	Detail string `json:"detail,omitempty"`
 	Fix    string `json:"fix,omitempty"`
 	// Action names a setup kind that applies the fix as a reviewed plan
-	// (start), when the app can do it.
+	// (start, repair), when the app can do it.
 	Action string `json:"action,omitempty"`
 }
 
@@ -103,12 +105,18 @@ func parseDoctor(out []byte) []DoctorCheck {
 }
 
 // clean keeps another machine's text printable, like the probe's report.
+// The action is this side's: never one the machine names.
 func (c DoctorCheck) clean() DoctorCheck {
 	c.Name, c.Detail, c.Fix = Clean(c.Name), Clean(c.Detail), Clean(c.Fix)
 	switch c.Status {
 	case "ok", "warn", "fail":
 	default:
 		c.Status = "warn"
+	}
+	c.Action = ""
+	if c.Status == "fail" && (c.Name == "age key" && c.Detail == doctor.NoRecipients ||
+		c.Name == "Fleet repository" && c.Detail == doctor.NoCommits) {
+		c.Action = "repair"
 	}
 	return c
 }

@@ -91,6 +91,7 @@ Changes made to `/srv/nepfleet/compose.yaml` by hand are in `compose.yaml.previo
 `nepfleet doctor` on a machine checks Docker, the age key and its backup, disk, ports, log rotation, that the stacks' domains resolve, and more, and says how to fix what it finds. From the desktop app, Fleets runs it on a machine over SSH (the control daemon's `POST /v1/remotes/<name>/doctor`). That also works when the machine's API doesn't answer, which is when it matters most:
 - **Where it runs:** in the NepFleet container when one runs, else the host's `nepfleet`.
 - **A stopped or missing NepFleet** is reported as a failed check, with how to start it or set it up. A stopped one can be started from there, as a plan to review (setup kind `start`).
+- **What an install left half done** (no age recipients in fleet.yaml, a fleet repository without commits) can be repaired from there, as a plan to review (setup kind `repair`): it runs the end of an install again (the age key, the recipient and first commit, start and wait), keeping what is there.
 - **Older versions** without `doctor --json` work too: their text output is read.
 
 ## The control daemon
@@ -111,7 +112,7 @@ nepfleet control status
 - **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
 - **To start it at login:** run `nepfleet control` from a systemd user unit.
 - **Setting a remote up from the app:** the daemon offers what `host bootstrap` and `host install` do, for clients such as the app's wizard:
-  - `GET /v1/remotes/<name>/setup?kind=bootstrap|install` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run, and `sudoPassword: true` when its root steps need the sudo password.
+  - `GET /v1/remotes/<name>/setup?kind=bootstrap|install|update|start|repair|mounts` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run, and `sudoPassword: true` when its root steps need the sudo password.
   - `POST /v1/remotes/<name>/setup` with `{"kind", "plan": "<id>", "sudoPassword"}` starts it only if the plan is still the one reviewed (otherwise `409`). `sudoPassword` is needed when the plan says so, is used for that run only, and appears in no job, log or error.
   - `GET /v1/remotes/<name>/setup/job` follows it: state and log, and while it runs `progress` (`{step, steps, text}`, the current step).
   - A setup goes on when the window closes, and one runs per remote at a time.

@@ -5,6 +5,8 @@ package remote
 import (
 	"strings"
 	"testing"
+
+	"github.com/Serraniel/nepfleet/internal/doctor"
 )
 
 func TestUpdatePlan(t *testing.T) {
@@ -57,5 +59,48 @@ func TestStartPlan(t *testing.T) {
 	}
 	if got := parseDoctor([]byte("nepfleet-doctor: stopped\n")); len(got) != 1 || got[0].Action != "start" {
 		t.Errorf("stopped check: %+v", got)
+	}
+}
+
+func TestRepairPlan(t *testing.T) {
+	if _, err := RepairPlan(&Report{}); err == nil {
+		t.Error("repaired a machine without a NepFleet container")
+	}
+	steps, err := RepairPlan(&Report{NepFleetImage: "ghcr.io/serraniel/nepfleet:0.4.0", NepFleetRunning: true})
+	if err != nil || len(steps) != 3 {
+		t.Fatalf("repair: %+v %v", steps, err)
+	}
+	for _, want := range []string{"if [ ! -s age.key ]", "key add-recipient", "rev-parse -q --verify HEAD", "docker compose up -d --wait"} {
+		found := false
+		for _, s := range steps {
+			found = found || strings.Contains(s.Script, want)
+		}
+		if !found {
+			t.Errorf("no step does %q", want)
+		}
+	}
+	for _, s := range steps {
+		if s.Root {
+			t.Errorf("%q needs no root", s.Text)
+		}
+	}
+}
+
+// The app offers the repair for exactly the failures it fixes, and never
+// for an action the machine names itself.
+func TestDoctorRepairAction(t *testing.T) {
+	out := `[{"name":"age key","status":"fail","detail":"` + doctor.NoRecipients + `"},` +
+		`{"name":"Fleet repository","status":"fail","detail":"` + doctor.NoCommits + `"},` +
+		`{"name":"age key","status":"fail","detail":"no private key at /x"},` +
+		`{"name":"Disk","status":"warn","detail":"full","action":"repair"}]`
+	got := parseDoctor([]byte(out))
+	want := []string{"repair", "repair", "", ""}
+	if len(got) != len(want) {
+		t.Fatalf("checks: %+v", got)
+	}
+	for i, w := range want {
+		if got[i].Action != w {
+			t.Errorf("%s (%s): action %q, want %q", got[i].Name, got[i].Detail, got[i].Action, w)
+		}
 	}
 }

@@ -32,6 +32,9 @@ const (
 	SetupUpdate = "update"
 	// SetupStart starts the machine's stopped NepFleet container.
 	SetupStart = "start"
+	// SetupRepair finishes what an install left undone (no age recipients,
+	// no first commit), as the doctor offers.
+	SetupRepair = "repair"
 )
 
 // SetupPlan is what a setup would do on a remote, for a person to review.
@@ -178,6 +181,8 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 		steps, err = remote.UpdatePlan(rep, compose, s.Version)
 	case SetupStart:
 		steps, err = remote.StartPlan(rep)
+	case SetupRepair:
+		steps, err = remote.RepairPlan(rep)
 	case SetupMounts:
 		if s.Setup.Mounts == nil || s.Setup.Run == nil {
 			return nil, nil, t, errors.New("this daemon can't set up mounts")
@@ -191,7 +196,7 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 			err = errors.New("nothing to do: the mounts match the host file already")
 		}
 	default:
-		return nil, nil, t, errors.New("kind is bootstrap, install, update, start or mounts")
+		return nil, nil, t, errors.New("kind is bootstrap, install, update, start, repair or mounts")
 	}
 	p := &SetupPlan{Kind: kind, Steps: steps}
 	if p.Steps == nil {

@@ -28,6 +28,13 @@ const (
 
 func (s Status) String() string { return [...]string{"✓", "⚠", "✗"}[s] }
 
+// Details of failures the app can repair (remote.RepairPlan): the remote
+// doctor recognizes them by these exact texts.
+const (
+	NoRecipients = "fleet.yaml has no spec.secrets.age recipients"
+	NoCommits    = "the fleet repository has no commits yet"
+)
+
 // Word is the status for JSON: ok, warn or fail.
 func (s Status) Word() string { return [...]string{"ok", "warn", "fail"}[s] }
 
@@ -268,7 +275,7 @@ func versionCheck(name, version string, major, minor int, fix string) Check {
 
 func ageKey(ctx context.Context, e Env, in Input) Check {
 	if len(in.Recipients) == 0 {
-		return Check{"age key", Fail, "fleet.yaml has no spec.secrets.age recipients", "age-keygen -o key.txt, then add the public key to fleet.yaml"}
+		return Check{"age key", Fail, NoRecipients, "age-keygen -o key.txt, then add the public key to fleet.yaml"}
 	}
 	if in.KeyFromEnv != "" {
 		return Check{"age key", Warn, "provided through " + in.KeyFromEnv + "; not verified against the recipients", ""}
