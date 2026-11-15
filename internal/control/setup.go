@@ -9,10 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
 
@@ -54,6 +57,26 @@ type SetupJob struct {
 	Error    string    `json:"error,omitempty"`
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished,omitzero"`
+	// Progress is the step a running setup is in, from its log.
+	Progress *api.Progress `json:"progress,omitempty"`
+}
+
+// setupStepRe matches the line remote.RunBootstrap writes per step: "2/5 …".
+var setupStepRe = regexp.MustCompile(`(?m)^([0-9]+)/([0-9]+) (.+)$`)
+
+// setupProgress is the last step a setup's log reports, or nil.
+func setupProgress(log string) *api.Progress {
+	m := setupStepRe.FindAllStringSubmatch(log, -1)
+	if len(m) == 0 {
+		return nil
+	}
+	last := m[len(m)-1]
+	step, _ := strconv.Atoi(last[1])
+	steps, _ := strconv.Atoi(last[2])
+	if step < 1 || steps < step {
+		return nil
+	}
+	return &api.Progress{Step: step, Steps: steps, Text: last[3]}
 }
 
 // Setup holds what setups need besides the server's probe.
@@ -94,6 +117,9 @@ func (j *setupJob) snapshot() SetupJob {
 	defer j.mu.Unlock()
 	out := j.job
 	out.Log = j.log.String()
+	if out.State == "running" {
+		out.Progress = setupProgress(out.Log)
+	}
 	return out
 }
 

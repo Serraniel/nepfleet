@@ -221,3 +221,24 @@ func TestSetupRefusesUnverifiedImage(t *testing.T) {
 		t.Errorf("an unverified image must not be planned: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestSetupProgress(t *testing.T) {
+	p := setupProgress("1/3 install Docker\n2/3 start Docker, now and at boot\n")
+	if p == nil || p.Step != 2 || p.Steps != 3 || p.Text != "start Docker, now and at boot" {
+		t.Errorf("progress = %+v", p)
+	}
+	for _, bad := range []string{"", "4/3 nonsense\n", "0/3 none\n", "a line with 1/2 inside\n"} {
+		if p := setupProgress(bad); p != nil {
+			t.Errorf("%q: %+v", bad, p)
+		}
+	}
+	j := &setupJob{job: SetupJob{State: "running"}}
+	_, _ = j.Write([]byte("1/2 install the Compose plugin\n"))
+	if s := j.snapshot(); s.Progress == nil || s.Progress.Step != 1 {
+		t.Errorf("running snapshot progress = %+v", s.Progress)
+	}
+	j.job.State = "succeeded"
+	if s := j.snapshot(); s.Progress != nil {
+		t.Errorf("finished snapshot has progress %+v", s.Progress)
+	}
+}

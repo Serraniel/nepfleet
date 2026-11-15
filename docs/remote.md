@@ -113,7 +113,7 @@ nepfleet control status
 - **Setting a remote up from the app:** the daemon offers what `host bootstrap` and `host install` do, for clients such as the app's wizard:
   - `GET /v1/remotes/<name>/setup?kind=bootstrap|install` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run, and `sudoPassword: true` when its root steps need the sudo password.
   - `POST /v1/remotes/<name>/setup` with `{"kind", "plan": "<id>", "sudoPassword"}` starts it only if the plan is still the one reviewed (otherwise `409`). `sudoPassword` is needed when the plan says so, is used for that run only, and appears in no job, log or error.
-  - `GET /v1/remotes/<name>/setup/job` follows it: state and log.
+  - `GET /v1/remotes/<name>/setup/job` follows it: state and log, and while it runs `progress` (`{step, steps, text}`, the current step).
   - A setup goes on when the window closes, and one runs per remote at a time.
 - **Network mounts from the app:** `kind=mounts` does what `nepfleet host apply <name>` does: it makes the machine's NFS, SMB and SSHFS mounts match `hosts/<name>.yaml`, and they stay after a reboot.
   - It plans from a local clone of the fleet repository in your home folder, chosen once with `PUT /v1/settings {"fleetDir": "/home/you/fleet"}` (the app's Fleets page). Share passwords are decrypted from `fleet.secret.yaml` with this computer's age key, as on the command line.
