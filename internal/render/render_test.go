@@ -487,6 +487,8 @@ func TestForSwarmOneShots(t *testing.T) {
 			DependsOn any `yaml:"depends_on"`
 			Deploy    struct {
 				RestartPolicy map[string]string `yaml:"restart_policy"`
+				Mode          string            `yaml:"mode"`
+				UpdateConfig  map[string]any    `yaml:"update_config"`
 			} `yaml:"deploy"`
 		} `yaml:"services"`
 	}
@@ -496,6 +498,9 @@ func TestForSwarmOneShots(t *testing.T) {
 	}
 	if got, ok := doc.Services["db"].DependsOn.([]any); !ok || len(got) != 1 {
 		t.Errorf("a list stays a list: %#v", doc.Services["db"].DependsOn)
+	}
+	if s := doc.Services["setup"].Deploy; s.Mode != "replicated-job" || s.UpdateConfig != nil {
+		t.Errorf("one-shot: mode %q, update_config %v; want a job without one", s.Mode, s.UpdateConfig)
 	}
 	if got := doc.Services["setup"].Deploy.RestartPolicy["condition"]; got != "on-failure" {
 		t.Errorf("one-shot restart_policy = %q, want on-failure", got)

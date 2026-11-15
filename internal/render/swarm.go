@@ -108,10 +108,13 @@ func swarmDependsOn(svc *yaml.Node) {
 	mapSet(svc, "depends_on", list)
 }
 
-// swarmOneShot gives a one-shot (restart: "no") the swarm restart policy
-// on-failure: once it succeeded it stays done, and one that ran before
-// what it waits for was up (swarm doesn't order by depends_on) tries again.
-// A restart_policy the template sets wins.
+// swarmOneShot runs a one-shot (restart: "no") as a swarm job
+// (mode: replicated-job), with the restart policy on-failure: once it
+// succeeded it stays done, and one that ran before what it waits for was up
+// (swarm doesn't order by depends_on) tries again. As a job, docker stack
+// deploy waits until it completes; as a replicated service, a finished task
+// never counted as converged and the deploy waited forever. Jobs take no
+// update or rollback config. A mode or restart_policy the template sets wins.
 func swarmOneShot(svc *yaml.Node) {
 	r := mapGet(svc, "restart")
 	if r == nil || r.Value != "no" {
@@ -121,6 +124,11 @@ func swarmOneShot(svc *yaml.Node) {
 	if deploy == nil {
 		deploy = &yaml.Node{Kind: yaml.MappingNode}
 		mapSet(svc, "deploy", deploy)
+	}
+	if mapGet(deploy, "mode") == nil {
+		mapSet(deploy, "mode", &yaml.Node{Kind: yaml.ScalarNode, Value: "replicated-job"})
+		mapDelete(deploy, "update_config")
+		mapDelete(deploy, "rollback_config")
 	}
 	if mapGet(deploy, "restart_policy") != nil {
 		return
