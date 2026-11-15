@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // HostUpdates is what a machine's package manager has pending, read as the
@@ -24,7 +25,25 @@ type HostUpdates struct {
 	RebootRequired *bool    `json:"rebootRequired"`
 	Packages       []string `json:"packages,omitempty"` // the first maxPackages names
 	Notes          []string `json:"notes,omitempty"`    // how fresh or complete this is
+	// LastUpgrade is when the last full upgrade started (Arch: pacman.log).
+	LastUpgrade time.Time `json:"lastUpgrade,omitzero"`
+	// News are Arch news items published since LastUpgrade: they usually
+	// announce manual steps, so read them before updating.
+	News []NewsItem `json:"news,omitempty"`
+
+	archLike bool
 }
+
+// NewsItem is one entry of a distribution's news feed.
+type NewsItem struct {
+	Title     string    `json:"title"`
+	Link      string    `json:"link"`
+	Published time.Time `json:"published"`
+}
+
+// Arch reports whether the machine runs Arch Linux or a derivative, whose
+// news feed applies.
+func (h *HostUpdates) Arch() bool { return h.archLike }
 
 const maxPackages = 200
 
@@ -37,6 +56,7 @@ if [ -r /etc/os-release ]; then . /etc/os-release; fi
 echo "os=${ID:-unknown}"
 case "${ID:-}:${ID_LIKE:-}" in
 arch:*|manjaro:*|endeavouros:*|*:*arch*)
+  echo family=arch
   if command -v checkupdates >/dev/null 2>&1; then
     list=$(checkupdates 2>/dev/null)
   else
@@ -50,6 +70,8 @@ arch:*|manjaro:*|endeavouros:*|*:*arch*)
     echo "note=arch-audit isn't installed, so security fixes aren't counted"
   fi
   if [ -d "/usr/lib/modules/$(uname -r)" ]; then echo reboot=no; else echo reboot=yes; fi
+  # When the last full upgrade started, for Arch news published since.
+  echo "lastupgrade=$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -n 1 | sed -n 's/^\[\([^]]*\)\].*/\1/p')"
   ;;
 debian:*|ubuntu:*|raspbian:*|*:*debian*|*:*ubuntu*)
   list=$(apt list --upgradable 2>/dev/null | tail -n +2)
@@ -118,6 +140,12 @@ func parseHostUpdates(out []byte) *HostUpdates {
 			case "yes", "no":
 				b := value == "yes"
 				h.RebootRequired = &b
+			}
+		case "family":
+			h.archLike = value == "arch"
+		case "lastupgrade":
+			if ts, err := time.Parse("2006-01-02T15:04:05-0700", value); err == nil {
+				h.LastUpgrade = ts.UTC()
 			}
 		case "note":
 			if len(h.Notes) < 5 {

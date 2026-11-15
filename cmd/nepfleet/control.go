@@ -94,11 +94,20 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		defer cancel()
 		return remote.Doctor(ctx, ssh.Run, t)
 	}
+	news := &remote.NewsFeed{URL: remote.ArchNewsURL}
 	s.HostUpdates = func(ctx context.Context, t remote.Target) (*remote.HostUpdates, error) {
 		// checkupdates and dnf may sync package metadata first.
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		return remote.CheckHostUpdates(ctx, ssh.Run, t)
+		h, err := remote.CheckHostUpdates(ctx, ssh.Run, t)
+		if err != nil || !h.Arch() || h.LastUpgrade.IsZero() {
+			return h, err
+		}
+		// Arch news since the last upgrade usually asks for manual steps.
+		if h.News, err = news.Since(ctx, h.LastUpgrade); err != nil {
+			h.Notes = append(h.Notes, "couldn't read the Arch news: "+err.Error())
+		}
+		return h, nil
 	}
 	s.Setup.Mounts = controlMounts(func() string { return s.LoadSettings().FleetDir })
 	if err := s.Load(); err != nil {

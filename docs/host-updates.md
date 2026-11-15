@@ -37,4 +37,6 @@ Before anything installs updates, the desktop app can show what each machine has
 - **Debian / Ubuntu:** `apt list --upgradable`, from the package lists as of the last `apt update`; security fixes are the ones from a `-security` suite; a reboot is required when `/var/run/reboot-required` exists.
 - **Fedora / RHEL:** `dnf check-update`, `dnf updateinfo list --security` and `dnf needs-restarting -r`.
 
-It answers `{os, supported, pending, security, rebootRequired, packages, notes}`: `security` is `-1` and `rebootRequired` is `null` when the machine can't tell, and `notes` says how fresh or complete the answer is.
+It answers `{os, supported, pending, security, rebootRequired, packages, notes, lastUpgrade, news}`: `security` is `-1` and `rebootRequired` is `null` when the machine can't tell, and `notes` says how fresh or complete the answer is.
+
+**Arch news:** on Arch and its derivatives, `lastUpgrade` is when the last full upgrade started (from `/var/log/pacman.log`), and `news` lists the [Arch news](https://archlinux.org/news/) items published since. Read them before updating: they usually announce manual steps. The control daemon reads the feed from archlinux.org, at most once an hour.
