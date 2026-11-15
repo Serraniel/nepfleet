@@ -1068,9 +1068,13 @@ func cmdRender(args []string, stdout, stderr io.Writer) error {
 	for _, path := range paths {
 		out := p.out.Masked(path)
 		// A swarm stack's compose file as docker stack gets it: integration
-		// labels on the service, depends_on as a list, one-shots' policy.
+		// labels on the service, depends_on as a list, one-shots' policy, and
+		// services with local volumes pinned to the stack's data node.
 		if path == render.ComposeFile && s.Spec.Mode == "swarm" {
 			if out, err = render.ForSwarm(out); err != nil {
+				return err
+			}
+			if out, _, err = render.PinData(out, s.Metadata.Name); err != nil {
 				return err
 			}
 		}
