@@ -84,8 +84,8 @@ func registerContainers(mux *http.ServeMux, o Options, l *limiter) {
 	})))
 }
 
-// ContainersFunc and ServiceActionFunc are Options' hooks, named for docs.
-type (
-	ContainersFunc    func(ctx context.Context, stack string) ([]Container, error)
-	ServiceActionFunc func(ctx context.Context, stack, service, action, by string) error
-)
+// ContainersFunc lists a stack's containers (Options.Containers).
+type ContainersFunc func(ctx context.Context, stack string) ([]Container, error)
+
+// ServiceActionFunc acts on one service of a stack (Options.ServiceAction).
+type ServiceActionFunc func(ctx context.Context, stack, service, action, by string) error

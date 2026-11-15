@@ -211,6 +211,47 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: Another operation runs; try again }
+  /api/v1/stacks/{name}/containers:
+    get:
+      tags: [stacks]
+      operationId: stackContainers
+      summary: The stack's containers, or its tasks on Swarm
+      description: >-
+        The containers of the stack on the server's host (Compose), or the
+        stack's tasks (Swarm), with state, health, image and Docker's automatic
+        restarts. Read-only.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: One entry per container or task
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Container" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/stacks/{name}/services/{service}/{action}:
+    post:
+      tags: [stacks]
+      operationId: stackServiceAction
+      summary: Restart, stop or start one service of the stack
+      description: >-
+        Not while an apply or restore of the stack runs. Swarm services restart
+        only, by a forced update; stop and start answer 422. Changes nothing in
+        the fleet repository: the next apply brings the service back to what the
+        stack says.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+        - { name: service, in: path, required: true, schema: { type: string, pattern: "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$" } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [restart, stop, start] } }
+      responses:
+        "204": { description: Done }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: The action isn't offered for this stack's mode }
+        "503": { description: An apply or restore of the stack runs; try again }
   /api/v1/stacks/{name}/egress:
     get:
       tags: [stacks]
@@ -1687,6 +1728,19 @@ components:
         status: { type: string, description: "under-maintenance, scheduled, ended, inactive or unknown" }
         start: { type: string, description: Its next or current slot's start, as Kuma reports it }
         end: { type: string }
+    Container:
+      type: object
+      required: [service, name, state, image, restarts]
+      properties:
+        service: { type: string }
+        name: { type: string }
+        state: { type: string, description: "running, exited, restarting, … (Compose); the task's current state (Swarm)" }
+        health: { type: string, description: "healthy, unhealthy or starting; empty without a health check" }
+        status: { type: string, description: "Docker's words, e.g. Up 2 hours" }
+        image: { type: string }
+        restarts: { type: integer, description: "Docker's automatic restarts" }
+        node: { type: string, description: "Swarm: where the task runs" }
+        error: { type: string }
     ImageUpdate:
       type: object
       required: [stack, image, track, current]
