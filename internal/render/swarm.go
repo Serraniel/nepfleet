@@ -50,6 +50,8 @@ func ForSwarm(compose []byte) ([]byte, error) {
 		updateDefaults(svc)
 		swarmDependsOn(svc)
 		swarmOneShot(svc)
+		swarmTmpfs(svc)
+		swarmPorts(svc)
 		labels := mapGet(svc, "labels")
 		if labels == nil {
 			continue
@@ -265,4 +267,68 @@ func listToMap(seq *yaml.Node) *yaml.Node {
 			&yaml.Node{Kind: yaml.ScalarNode, Value: v, Style: yaml.DoubleQuotedStyle})
 	}
 	return out
+}
+
+// swarmTmpfs turns a service's tmpfs list into tmpfs mounts: docker stack
+// deploy ignores the tmpfs key, so a read-only service that writes there
+// (the socket proxies' /run) failed on swarm. "/run:size=1m" keeps the
+// path; swarm's tmpfs mounts take a size, not mount options.
+func swarmTmpfs(svc *yaml.Node) {
+	t := mapGet(svc, "tmpfs")
+	if t == nil {
+		return
+	}
+	var paths []string
+	switch t.Kind {
+	case yaml.ScalarNode:
+		paths = []string{t.Value}
+	case yaml.SequenceNode:
+		for _, p := range t.Content {
+			paths = append(paths, p.Value)
+		}
+	}
+	mapDelete(svc, "tmpfs")
+	if len(paths) == 0 {
+		return
+	}
+	vols := mapGet(svc, "volumes")
+	if vols == nil || vols.Kind != yaml.SequenceNode {
+		vols = &yaml.Node{Kind: yaml.SequenceNode}
+		mapSet(svc, "volumes", vols)
+	}
+	for _, p := range paths {
+		target, _, _ := strings.Cut(p, ":")
+		vols.Content = append(vols.Content, &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Value: "type"}, {Kind: yaml.ScalarNode, Value: "tmpfs"},
+			{Kind: yaml.ScalarNode, Value: "target"}, {Kind: yaml.ScalarNode, Value: target},
+		}})
+	}
+}
+
+// swarmPorts writes published and target ports as numbers: docker compose
+// config quotes published ("80"), and docker stack deploy refuses strings.
+func swarmPorts(svc *yaml.Node) {
+	ports := mapGet(svc, "ports")
+	if ports == nil || ports.Kind != yaml.SequenceNode {
+		return
+	}
+	for _, p := range ports.Content {
+		for _, k := range []string{"published", "target"} {
+			if v := mapGet(p, k); v != nil && v.Kind == yaml.ScalarNode && isDigits(v.Value) {
+				v.Tag, v.Style = "!!int", 0
+			}
+		}
+	}
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
