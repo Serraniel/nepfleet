@@ -38,6 +38,9 @@ const (
 	// SetupHostUpdate installs the machine's pending package updates; it
 	// doesn't reboot.
 	SetupHostUpdate = "host-update"
+	// SetupReboot reboots the machine and waits until it is back, with
+	// Docker running and its containers healthy.
+	SetupReboot = "reboot"
 )
 
 // SetupPlan is what a setup would do on a remote, for a person to review.
@@ -188,6 +191,8 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 		steps, err = remote.RepairPlan(rep)
 	case SetupHostUpdate:
 		steps, err = remote.HostUpdatePlan(rep)
+	case SetupReboot:
+		steps, err = remote.RebootPlan(rep)
 	case SetupMounts:
 		if s.Setup.Mounts == nil || s.Setup.Run == nil {
 			return nil, nil, t, errors.New("this daemon can't set up mounts")
@@ -201,7 +206,7 @@ func (s *Server) setupPlan(ctx context.Context, name, kind string) (*SetupPlan, 
 			err = errors.New("nothing to do: the mounts match the host file already")
 		}
 	default:
-		return nil, nil, t, errors.New("kind is bootstrap, install, update, start, repair, host-update or mounts")
+		return nil, nil, t, errors.New("kind is bootstrap, install, update, start, repair, host-update, reboot or mounts")
 	}
 	p := &SetupPlan{Kind: kind, Steps: steps}
 	if p.Steps == nil {

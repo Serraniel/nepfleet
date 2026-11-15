@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Step is one thing bootstrapping a host does.
@@ -17,7 +18,14 @@ type Step struct {
 	Text   string `json:"text"`
 	Root   bool   `json:"root"`
 	Script string `json:"-"`
+	// Wait, if set, runs the step again every waitEvery until it succeeds
+	// or Wait has passed: for a machine that is rebooting.
+	Wait time.Duration `json:"-"`
 }
+
+// waitEvery is the pause between tries of a step with Wait; each try may
+// take waitTry at most (a connection the reboot cut can hang).
+var waitEvery, waitTry = 10 * time.Second, time.Minute
 
 var (
 	networkRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$`)
@@ -167,11 +175,37 @@ func RunBootstrap(ctx context.Context, run func(context.Context, string) ([]byte
 	}
 	for i, s := range steps {
 		fmt.Fprintf(w, "%d/%d %s\n", i+1, len(steps), s.Text)
-		if _, err := run(ctx, stepScript(s, r.Root, password)); err != nil {
+		if err := runStep(ctx, run, stepScript(s, r.Root, password), s.Wait); err != nil {
 			return fmt.Errorf("step %d (%s) failed, and later steps did not run: %w", i+1, s.Text, sudoError(err, password))
 		}
 	}
 	return nil
+}
+
+// runStep runs a step once, or with wait, until it succeeds or wait passes;
+// the error is the last try's.
+func runStep(ctx context.Context, run func(context.Context, string) ([]byte, error), script string, wait time.Duration) error {
+	if wait == 0 {
+		_, err := run(ctx, script)
+		return err
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		tctx, cancel := context.WithTimeout(ctx, waitTry)
+		_, err := run(tctx, script)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if time.Now().Add(waitEvery).After(deadline) {
+			return fmt.Errorf("still not done after %s: %w", wait, err)
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(waitEvery):
+		}
+	}
 }
 
 // HostFile is hosts/<name>.yaml for a bootstrapped machine.

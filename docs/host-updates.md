@@ -50,3 +50,13 @@ Fleets → **Update the host…** plans the update for review, like setting a ma
 - **Fedora:** `dnf upgrade --refresh`.
 
 An upgrade of Docker itself restarts Docker, and with it every container on the machine.
+
+## Rebooting a machine from the app
+
+When the check says a reboot is required, Fleets offers **Reboot…**, a plan to review like the others (setup kind `reboot`):
+
+1. It notes the current boot (in the SSH user's `~/.cache`), to tell afterwards that the machine did restart.
+2. It reboots 5 seconds later, as root (`systemd-run`, else a background `sleep 5; reboot`), so the SSH command returns cleanly.
+3. It waits up to 10 minutes, trying every 10 seconds, until the machine answers with a new boot, Docker runs, and no container is starting or unhealthy. If that doesn't happen, the job fails and names what wasn't ready.
+
+The stacks stop with the machine and start again with Docker (their restart policies). On a Swarm node, drain it first: rolling node maintenance is planned (#54).
