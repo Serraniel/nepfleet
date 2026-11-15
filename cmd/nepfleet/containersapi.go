@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -168,4 +169,61 @@ func containersAPIFor(ctx context.Context, stack string, swarm bool) ([]api.Cont
 		return swarmTasks(ctx, stack)
 	}
 	return stackComposeContainers(ctx, stack)
+}
+
+// maxLogBytes bounds a logs answer: lines can be long.
+const maxLogBytes = 1 << 20
+
+// logsAPI is GET /api/v1/stacks/{name}/containers/{container}/logs: only a
+// container of that stack, by the name the containers list gives.
+func logsAPI(ctx context.Context, c common, stack, container string, lines int) (string, error) {
+	out, err := withStack(c, stack, func(_ *env, s *fleet.Stack) (any, error) {
+		swarm := s.Spec.Mode == "swarm"
+		cs, err := containersAPIFor(ctx, stack, swarm)
+		if err != nil {
+			return nil, err
+		}
+		i := slices.IndexFunc(cs, func(c api.Container) bool { return c.Name == container })
+		if i < 0 {
+			return nil, api.ErrNotFound
+		}
+		args := []string{"logs", "--timestamps", "--tail", strconv.Itoa(lines), container}
+		if swarm {
+			args = []string{"service", "logs", "--timestamps", "--no-task-ids", "--tail", strconv.Itoa(lines), stack + "_" + cs[i].Service}
+		}
+		cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // names from docker's own listing
+		var buf limitedBuffer
+		buf.max = maxLogBytes
+		cmd.Stdout, cmd.Stderr = &buf, &buf
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("reading %s's logs: %w", container, err)
+		}
+		return buf.String(), nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return out.(string), nil
+}
+
+// limitedBuffer keeps the first max bytes written and drops the rest,
+// marking that it did.
+type limitedBuffer struct {
+	strings.Builder
+	max       int
+	truncated bool
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if room := b.max - b.Len(); room < len(p) {
+		if room > 0 {
+			b.Builder.Write(p[:room])
+		}
+		if !b.truncated {
+			b.truncated = true
+			b.Builder.WriteString("\n… (cut at 1 MB)\n")
+		}
+		return len(p), nil
+	}
+	return b.Builder.Write(p)
 }

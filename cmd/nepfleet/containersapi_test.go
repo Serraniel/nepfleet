@@ -37,3 +37,13 @@ func TestParseStackPS(t *testing.T) {
 		t.Errorf("api: %+v", cs[1])
 	}
 }
+
+func TestLimitedBuffer(t *testing.T) {
+	b := limitedBuffer{max: 10}
+	_, _ = b.Write([]byte("12345"))
+	_, _ = b.Write([]byte("67890abc"))
+	_, _ = b.Write([]byte("more"))
+	if got := b.String(); got != "1234567890\n… (cut at 1 MB)\n" {
+		t.Errorf("%q", got)
+	}
+}

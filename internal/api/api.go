@@ -116,6 +116,8 @@ type Options struct {
 	Containers ContainersFunc
 	// ServiceAction restarts, stops or starts one service of a stack.
 	ServiceAction ServiceActionFunc
+	// Logs returns the last lines of one of a stack's containers.
+	Logs LogsFunc
 	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
 	// instances.
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
@@ -376,6 +378,7 @@ func Handler(o Options) http.Handler {
 	registerAlerts(mux, o, l)
 	registerUpdates(mux, o, l)
 	registerContainers(mux, o, l)
+	registerLogs(mux, o, l)
 	registerMaintenance(mux, o, l)
 	registerEdit(mux, o, l)
 	registerSync(mux, o, l)
