@@ -51,6 +51,9 @@ func ForSwarm(compose []byte) ([]byte, error) {
 		swarmDependsOn(svc)
 		swarmOneShot(svc)
 		swarmTmpfs(svc)
+		// Compose profiles: docker compose config has left out the inactive
+		// services already, and docker stack deploy refuses the key.
+		mapDelete(svc, "profiles")
 		swarmPorts(svc)
 		labels := mapGet(svc, "labels")
 		if labels == nil {

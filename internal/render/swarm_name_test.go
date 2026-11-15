@@ -59,3 +59,13 @@ func TestForSwarmTmpfsAndPorts(t *testing.T) {
 		t.Errorf("short syntax changed: %v", doc.Services["caddy"].Ports[1])
 	}
 }
+
+func TestForSwarmDropsProfiles(t *testing.T) {
+	out, err := ForSwarm([]byte("services:\n  gotenberg:\n    image: g:1\n    profiles: [office]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "profiles") || !strings.Contains(string(out), "gotenberg") {
+		t.Errorf("%s", out)
+	}
+}
