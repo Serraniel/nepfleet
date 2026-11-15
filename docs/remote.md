@@ -32,7 +32,7 @@ It lists the worst first: password or root login over SSH, whether a firewall ru
 - **For the UI and alerts:** `--json` prints the findings. `--notify` sends problems new since the last check to the fleet's channels as `host.security_problem`, once each, so run it on a schedule. A problem that was fixed and comes back counts as new.
 - **Read-only:** a fixed script with no `sudo`, so it changes nothing. `--notify` only keeps what it reported, in `<state>/security`.
 - **Honest about limits:** what this user can't read shows as `?`, never as fine. It looks at the first matching SSH setting in the config files, not at what `sshd` would resolve, and "listening" doesn't say whether your router or provider lets traffic through.
-- **Fixing:** it only reports; applying changes comes with `nepfleet host bootstrap` (#15).
+- **Fixing:** the check itself only reports. SSH logins can be fixed from the app, below; other fixes come with `nepfleet host bootstrap` (#15).
 **Fixing SSH logins:** Fleets → **Turn off SSH password logins…** is a plan to review (setup kind `ssh-harden`). It writes `/etc/ssh/sshd_config.d/10-nepfleet.conf` with `PasswordAuthentication no`, `KbdInteractiveAuthentication no` and `PermitRootLogin no` (`prohibit-password` when you connect as root, so that login keeps working). It checks the config with `sshd -t`, putting the old file back if it fails, and confirms with `sshd -T` that no earlier setting still allows passwords. Then it reloads sshd: open sessions stay. It needs `sshd_config` to include `sshd_config.d/*.conf`, as current Debian, Ubuntu, Fedora and Arch do. Its last step logs in again with your key. To undo, remove the file and reload sshd.
 
 
