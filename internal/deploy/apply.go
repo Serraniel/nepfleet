@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -433,6 +435,15 @@ func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]
 	if swarmCfg, err = render.PinImages(swarmCfg, pins); err != nil {
 		return err
 	}
+	swarmCfg, pinned, err := render.PinData(swarmCfg, stack)
+	if err != nil {
+		return err
+	}
+	if len(pinned) > 0 {
+		if err := ensureDataNode(ctx, r, stack, pinned); err != nil {
+			return err
+		}
+	}
 	path := filepath.Join(dir, metaDir, "stack.yaml")
 	if err := os.WriteFile(path, swarmCfg, 0o600); err != nil {
 		return err
@@ -641,4 +652,50 @@ func tail(s string, n int) string {
 func hasManifest(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, metaDir, "manifest.json"))
 	return err == nil
+}
+
+// ensureDataNode puts the stack's data label (render.DataLabel) on one node,
+// once. Where its services with local volumes run now, so a stack that runs
+// already keeps its data; for a new stack, the node NepFleet runs on. If they
+// run on several nodes, their data is spread: that needs a person.
+func ensureDataNode(ctx context.Context, r Runner, stack string, services []string) error {
+	label := render.DataLabel(stack)
+	out, err := r.Run(ctx, "", "node", "ls", "--filter", "node.label="+label+"=true", "--format", "{{.Hostname}}")
+	if err != nil {
+		return fmt.Errorf("finding the node with %s's data: %w", stack, err)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return nil
+	}
+	nodes := map[string]bool{}
+	for _, s := range services {
+		o, err := r.Run(ctx, "", "service", "ps", stack+"_"+s, "--filter", "desired-state=running", "--format", "{{.Node}}")
+		if err != nil {
+			continue // not deployed yet
+		}
+		for _, n := range strings.Fields(string(o)) {
+			nodes[n] = true
+		}
+	}
+	var node string
+	switch len(nodes) {
+	case 0:
+		id, err := r.Run(ctx, "", "info", "--format", "{{.Swarm.NodeID}}")
+		if err != nil || strings.TrimSpace(string(id)) == "" {
+			return fmt.Errorf("finding this swarm node: %w", err)
+		}
+		node = strings.TrimSpace(string(id))
+	case 1:
+		for n := range nodes {
+			node = n
+		}
+	default:
+		names := slices.Sorted(maps.Keys(nodes))
+		return fmt.Errorf("%s's services with local volumes run on several nodes (%s), so their data is spread across them. "+
+			"Move it to one node, then mark that node: docker node update --label-add %s=true <node>", stack, strings.Join(names, ", "), label)
+	}
+	if _, err := r.Run(ctx, "", "node", "update", "--label-add", label+"=true", node); err != nil {
+		return fmt.Errorf("marking the node for %s's data: %w", stack, err)
+	}
+	return nil
 }
