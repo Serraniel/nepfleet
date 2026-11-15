@@ -112,6 +112,10 @@ type Options struct {
 	// Updates is what the registries have for a stack's images: newer tags in
 	// and beyond each track, and tags rebuilt since lock.yaml pinned them.
 	Updates func(ctx context.Context, stack string) ([]ImageUpdate, error)
+	// Containers lists a stack's containers (Compose) or tasks (Swarm).
+	Containers ContainersFunc
+	// ServiceAction restarts, stops or starts one service of a stack.
+	ServiceAction ServiceActionFunc
 	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
 	// instances.
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)
@@ -371,6 +375,7 @@ func Handler(o Options) http.Handler {
 	})))
 	registerAlerts(mux, o, l)
 	registerUpdates(mux, o, l)
+	registerContainers(mux, o, l)
 	registerMaintenance(mux, o, l)
 	registerEdit(mux, o, l)
 	registerSync(mux, o, l)
