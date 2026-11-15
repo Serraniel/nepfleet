@@ -191,3 +191,45 @@ func TestEditStackSymlinkInside(t *testing.T) {
 		t.Errorf("a refusal shows server paths: %v", err)
 	}
 }
+
+// An edit that breaks a stack taking values from the edited one is refused;
+// a token limited to stacks learns only its own stacks' names.
+func TestEditStackDependants(t *testing.T) {
+	c, dir, _ := rollbackFleet(t)
+	webYAML := "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec:\n  target: local\n  values:\n    URL: http://web:80\n"
+	app := filepath.Join(dir, "stacks", "app")
+	if err := os.MkdirAll(app, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"stacks/web/stack.yaml":   webYAML,
+		"stacks/app/stack.yaml":   "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: app}\nspec:\n  target: local\n  values:\n    WEB: {from: web, value: URL}\n",
+		"stacks/app/compose.yaml": "services: {app: {image: \"nginx:1.29\"}}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tgit(t, dir, "add", "-A")
+	tgit(t, dir, "commit", "-qm", "app uses web", "--no-verify")
+	withoutURL := "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec: {target: local}\n"
+	edit := api.StackEdit{Files: map[string]string{"stack.yaml": withoutURL}, Base: map[string]string{"stack.yaml": gitBlob([]byte(webYAML))}}
+	var invalid api.InvalidError
+	if _, err := editStack(c, "web", edit, "ci", nil); !errors.As(err, &invalid) || !strings.Contains(invalid.Reason, "would no longer render: app") {
+		t.Fatalf("breaking a dependant: %v", err)
+	}
+	if now, _ := os.ReadFile(filepath.Join(dir, "stacks/web/stack.yaml")); string(now) != webYAML {
+		t.Error("stack.yaml wasn't restored")
+	}
+	if _, err := editStack(c, "web", edit, "ci", []string{"web"}); !errors.As(err, &invalid) || !strings.Contains(invalid.Reason, "1 other stack(s)") || strings.Contains(invalid.Reason, "app") {
+		t.Fatalf("a limited token: %v", err)
+	}
+	// A dependant that is broken already doesn't block edits.
+	if err := os.WriteFile(filepath.Join(app, "stack.yaml"), []byte("apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: app}\nspec:\n  target: local\n  values:\n    WEB: {from: web, value: NOPE}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tgit(t, dir, "commit", "-qam", "app broken", "--no-verify")
+	if _, err := editStack(c, "web", edit, "ci", nil); err != nil {
+		t.Fatalf("with a dependant broken before: %v", err)
+	}
+}

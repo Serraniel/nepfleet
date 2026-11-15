@@ -7,12 +7,15 @@ package source
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
@@ -177,12 +180,25 @@ func (r *Resolver) clone(src fleet.Source) (Resolved, error) {
 	return Resolved{Dir: dir, Commit: commit}, nil
 }
 
+// gitTimeout bounds each git command: a clone or fetch that hangs (a slow
+// or silent remote) would otherwise hold up an edit or apply, and with it
+// every change over the API.
+var gitTimeout = 2 * time.Minute
+
 func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	// SIGTERM, not a kill: git then removes its lock files.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 10 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("git %s didn't finish within %s and was stopped", args[0], gitTimeout)
+	}
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
 	}
