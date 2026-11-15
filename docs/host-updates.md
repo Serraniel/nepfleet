@@ -40,3 +40,13 @@ Before anything installs updates, the desktop app can show what each machine has
 It answers `{os, supported, pending, security, rebootRequired, packages, notes, lastUpgrade, news}`: `security` is `-1` and `rebootRequired` is `null` when the machine can't tell, and `notes` says how fresh or complete the answer is.
 
 **Arch news:** on Arch and its derivatives, `lastUpgrade` is when the last full upgrade started (from `/var/log/pacman.log`), and `news` lists the [Arch news](https://archlinux.org/news/) items published since. Read them before updating: they usually announce manual steps. The control daemon reads the feed from archlinux.org, at most once an hour.
+
+## Updating a machine from the app
+
+Fleets → **Update the host…** plans the update for review, like setting a machine up, and runs it only when you start it (setup kind `host-update`). It needs root or sudo, as preparing the machine does, and never reboots: when the check says a reboot is required, reboot it yourself when it suits.
+
+- **Arch:** `pacman -Sy archlinux-keyring` first, then `pacman -Su`: never a partial upgrade. Read the Arch news the check lists before you start it.
+- **Debian / Ubuntu:** `apt-get update`, then `apt-get dist-upgrade`, keeping config files you changed.
+- **Fedora:** `dnf upgrade --refresh`.
+
+An upgrade of Docker itself restarts Docker, and with it every container on the machine.
