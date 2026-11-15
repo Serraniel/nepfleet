@@ -33,6 +33,8 @@ It lists the worst first: password or root login over SSH, whether a firewall ru
 - **Read-only:** a fixed script with no `sudo`, so it changes nothing. `--notify` only keeps what it reported, in `<state>/security`.
 - **Honest about limits:** what this user can't read shows as `?`, never as fine. It looks at the first matching SSH setting in the config files, not at what `sshd` would resolve, and "listening" doesn't say whether your router or provider lets traffic through.
 - **Fixing:** it only reports; applying changes comes with `nepfleet host bootstrap` (#15).
+**Fixing SSH logins:** Fleets → **Turn off SSH password logins…** is a plan to review (setup kind `ssh-harden`). It writes `/etc/ssh/sshd_config.d/10-nepfleet.conf` with `PasswordAuthentication no`, `KbdInteractiveAuthentication no` and `PermitRootLogin no` (`prohibit-password` when you connect as root, so that login keeps working). It checks the config with `sshd -t`, putting the old file back if it fails, and confirms with `sshd -T` that no earlier setting still allows passwords. Then it reloads sshd: open sessions stay. It needs `sshd_config` to include `sshd_config.d/*.conf`, as current Debian, Ubuntu, Fedora and Arch do. Its last step logs in again with your key. To undo, remove the file and reload sshd.
+
 
 ## Preparing a machine
 
@@ -112,7 +114,7 @@ nepfleet control status
 - **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
 - **To start it at login:** run `nepfleet control` from a systemd user unit.
 - **Setting a remote up from the app:** the daemon offers what `host bootstrap` and `host install` do, for clients such as the app's wizard:
-  - `GET /v1/remotes/<name>/setup?kind=bootstrap|install|update|start|repair|host-update|reboot|mounts` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run, and `sudoPassword: true` when its root steps need the sudo password.
+  - `GET /v1/remotes/<name>/setup?kind=bootstrap|install|update|start|repair|host-update|reboot|ssh-harden|mounts` probes the machine again and returns the plan, with an `id`, or an `error` saying why it can't run, and `sudoPassword: true` when its root steps need the sudo password.
   - `POST /v1/remotes/<name>/setup` with `{"kind", "plan": "<id>", "sudoPassword"}` starts it only if the plan is still the one reviewed (otherwise `409`). `sudoPassword` is needed when the plan says so, is used for that run only, and appears in no job, log or error.
   - `GET /v1/remotes/<name>/setup/job` follows it: state and log, and while it runs `progress` (`{step, steps, text}`, the current step).
   - A setup goes on when the window closes, and one runs per remote at a time.
