@@ -4,9 +4,12 @@ package remote
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseHostUpdates(t *testing.T) {
@@ -53,4 +56,34 @@ func TestHostUpdatesScriptRuns(t *testing.T) {
 		t.Errorf("%+v", h)
 	}
 	t.Logf("this machine: %+v", h)
+}
+
+func TestArchNews(t *testing.T) {
+	h := parseHostUpdates([]byte("os=endeavouros\nfamily=arch\nlastupgrade=2026-10-21T15:55:00+0200\nreboot=no\n"))
+	if !h.Arch() || !h.LastUpgrade.Equal(time.Date(2026, 10, 21, 13, 55, 0, 0, time.UTC)) {
+		t.Fatalf("%+v", h)
+	}
+	if d := parseHostUpdates([]byte("os=debian\nlastupgrade=garbage\n")); d.Arch() || !d.LastUpgrade.IsZero() {
+		t.Errorf("debian: %+v", d)
+	}
+	feed := `<?xml version="1.0"?><rss><channel>
+<item><title>Newer &amp; important</title><link>https://archlinux.org/news/a/</link><pubDate>Wed, 21 Oct 2026 13:58:42 +0000</pubDate></item>
+<item><title>Older</title><link>javascript:alert(1)</link><pubDate>Wed, 21 Oct 2026 13:52:37 +0000</pubDate></item>
+<item><title>No date</title><link>https://x/</link><pubDate>soon</pubDate></item>
+</channel></rss>`
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(feed))
+	}))
+	defer srv.Close()
+	f := &NewsFeed{URL: srv.URL}
+	items, err := f.Since(context.Background(), h.LastUpgrade)
+	if err != nil || len(items) != 1 || items[0].Title != "Newer & important" || items[0].Link != "https://archlinux.org/news/a/" {
+		t.Fatalf("since: %+v %v", items, err)
+	}
+	all, _ := f.Since(context.Background(), time.Time{})
+	if len(all) != 2 || all[1].Link != "" || calls != 1 {
+		t.Errorf("all: %+v (calls %d)", all, calls)
+	}
 }
