@@ -290,7 +290,10 @@ func verifyIncoming(dir string, signers []string, from, to string) error {
 		if !sshSigned(raw) {
 			return fmt.Errorf("%w: commit %s has no SSH signature", errUnsigned, short)
 		}
-		if _, err := gitOut(dir, "-c", "gpg.ssh.allowedSignersFile="+f.Name(), "verify-commit", c); err != nil {
+		// minTrustLevel fully: only a key listed in allowedSigners counts;
+		// some git versions accept a valid signature by an unknown key with
+		// trust "undefined".
+		if _, err := gitOut(dir, "-c", "gpg.ssh.allowedSignersFile="+f.Name(), "-c", "gpg.minTrustLevel=fully", "verify-commit", c); err != nil {
 			return fmt.Errorf("%w: commit %s isn't signed by a key in sync.allowedSigners", errUnsigned, short)
 		}
 	}

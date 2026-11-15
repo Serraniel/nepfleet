@@ -42,7 +42,7 @@ type Spec struct {
 		// "<principal> <key type> <public key>", e.g. "me@example.org ssh-ed25519 AAAA…".
 		AllowedSigners []string `yaml:"allowedSigners"`
 	} `yaml:"sync"`
-	Secrets         struct {
+	Secrets struct {
 		// Age recipients (public keys) that every secret file is encrypted to.
 		Age []string `yaml:"age"`
 	} `yaml:"secrets"`
