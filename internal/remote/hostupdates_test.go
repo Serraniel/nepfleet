@@ -87,3 +87,32 @@ func TestArchNews(t *testing.T) {
 		t.Errorf("all: %+v (calls %d)", all, calls)
 	}
 }
+
+func TestHostUpdatePlan(t *testing.T) {
+	arch, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "endeavouros", Sudo: true})
+	if err != nil || len(arch) != 2 || !strings.Contains(arch[0].Script, "archlinux-keyring") || !strings.Contains(arch[1].Script, "pacman -Su") {
+		t.Fatalf("arch: %+v %v", arch, err)
+	}
+	for _, s := range arch {
+		if !s.Root || strings.Contains(s.Script, "reboot") {
+			t.Errorf("%q: root and no reboot", s.Text)
+		}
+		// Never a partial upgrade: -Sy only for the keyring.
+		if strings.Contains(s.Script, "-Syu") || (strings.Contains(s.Script, "-Sy ") && !strings.Contains(s.Script, "archlinux-keyring")) {
+			t.Errorf("partial upgrade risk: %q", s.Script)
+		}
+	}
+	deb, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "ubuntu", Root: true})
+	if err != nil || len(deb) != 2 || !strings.Contains(deb[1].Script, "--force-confold") {
+		t.Fatalf("debian: %+v %v", deb, err)
+	}
+	if _, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "fedora", SudoPassword: true}); err != nil {
+		t.Errorf("fedora: %v", err)
+	}
+	if _, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "arch"}); err == nil {
+		t.Error("planned without root or sudo")
+	}
+	if _, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "gentoo", Root: true}); err == nil {
+		t.Error("planned an unknown distribution")
+	}
+}

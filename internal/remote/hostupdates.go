@@ -6,6 +6,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -157,4 +159,40 @@ func parseHostUpdates(out []byte) *HostUpdates {
 		h.Security = -1
 	}
 	return h
+}
+
+// HostUpdatePlan installs the machine's pending updates with its package
+// manager, as root. It doesn't reboot: when one is required, the check
+// says so. On Arch the keyring comes first, then the full upgrade, never a
+// partial one; read the Arch news the check lists before running it.
+func HostUpdatePlan(r *Report) ([]Step, error) {
+	if r.Kernel != "Linux" {
+		return nil, fmt.Errorf("NepFleet updates Linux hosts; this is %s", r.Kernel)
+	}
+	if !r.Root && !r.Sudo && !r.SudoPassword {
+		return nil, errors.New("updating the host needs root: log in as root, or as a user who may use sudo")
+	}
+	const restarts = " (a Docker upgrade restarts Docker, and with it every container)"
+	switch r.OSID {
+	case "arch", "manjaro", "endeavouros":
+		return []Step{
+			{Text: "update the package signing keys first (archlinux-keyring)", Root: true,
+				Script: "pacman -Sy --needed --noconfirm archlinux-keyring\n"},
+			{Text: "install every pending update (pacman -Su)" + restarts, Root: true,
+				Script: "pacman -Su --noconfirm\n"},
+		}, nil
+	case "debian", "ubuntu", "raspbian":
+		return []Step{
+			{Text: "refresh the package lists (apt-get update)", Root: true,
+				Script: "export DEBIAN_FRONTEND=noninteractive\napt-get update -qq\n"},
+			{Text: "install every pending update, keeping changed config files (apt-get dist-upgrade)" + restarts, Root: true,
+				Script: "export DEBIAN_FRONTEND=noninteractive\napt-get -y -qq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade\n"},
+		}, nil
+	case "fedora":
+		return []Step{
+			{Text: "install every pending update (dnf upgrade)" + restarts, Root: true,
+				Script: "dnf -y -q upgrade --refresh\n"},
+		}, nil
+	}
+	return nil, fmt.Errorf("updating %q hosts isn't supported yet: update it with its package manager", r.OSID)
 }
