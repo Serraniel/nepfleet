@@ -459,7 +459,18 @@ func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]
 	if err := os.WriteFile(path, swarmCfg, 0o600); err != nil {
 		return err
 	}
-	_, err = r.Run(ctx, dir, "stack", "deploy", "--detach=false", "--prune", "--with-registry-auth", "--compose-file", path, stack)
+	// --detach=false waits until the services converge, which a service that
+	// can't be placed (a constraint no node meets) never does: give up after
+	// the apply's wait. Stopping the client leaves the deploy itself running.
+	dctx, cancel := ctx, context.CancelFunc(func() {})
+	if wait > 0 {
+		dctx, cancel = context.WithTimeout(ctx, wait)
+	}
+	defer cancel()
+	_, err = r.Run(dctx, dir, "stack", "deploy", "--detach=false", "--prune", "--with-registry-auth", "--compose-file", path, stack)
+	if dctx.Err() != nil && ctx.Err() == nil {
+		return fmt.Errorf("%s did not converge within %s: docker stack ps %s says why", stack, wait, stack)
+	}
 	return err
 }
 

@@ -42,6 +42,9 @@ func ForSwarm(compose []byte) ([]byte, error) {
 	if services == nil {
 		return nil, fmt.Errorf("compose document has no services")
 	}
+	// docker compose config names the project at the top; docker stack
+	// deploy refuses that key (the stack's name is its argument).
+	mapDelete(doc.Content[0], "name")
 	for i := 1; i < len(services.Content); i += 2 {
 		svc := services.Content[i]
 		updateDefaults(svc)
