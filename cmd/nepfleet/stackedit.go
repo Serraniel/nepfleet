@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/Serraniel/nepfleet/internal/api"
@@ -99,6 +100,62 @@ func refsOutside(before, after *fleet.Stack, allowed []string) []string {
 	return out
 }
 
+// renderingDependants lists the stacks that take values from stack and
+// render now, before an edit: those must still render after it. One that
+// is broken already doesn't block the edit.
+func renderingDependants(e *env, stack string) []string {
+	all, err := e.fleet.Stacks()
+	if err != nil {
+		return nil // the edited stack's own checks report a broken fleet
+	}
+	var out []string
+	for _, d := range all {
+		if d.Metadata.Name == stack || !slices.Contains(d.Refs(), stack) {
+			continue
+		}
+		if _, err := e.prepare(d); err == nil {
+			out = append(out, d.Metadata.Name)
+		}
+	}
+	return out
+}
+
+// brokenDependants lists those of names that no longer load or render.
+func brokenDependants(e *env, names []string) []string {
+	var out []string
+	for _, n := range names {
+		d, err := e.fleet.LoadStack(n)
+		if err == nil {
+			_, err = e.prepare(d)
+		}
+		if err != nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// namesFor names stacks to a token limited to allowed: the ones it may
+// reach by name, the others only counted.
+func namesFor(names, allowed []string) string {
+	if len(allowed) == 0 {
+		return strings.Join(names, ", ")
+	}
+	var shown []string
+	hidden := 0
+	for _, n := range names {
+		if slices.Contains(allowed, n) {
+			shown = append(shown, n)
+		} else {
+			hidden++
+		}
+	}
+	if hidden > 0 {
+		shown = append(shown, fmt.Sprintf("%d other stack(s)", hidden))
+	}
+	return strings.Join(shown, ", ")
+}
+
 // cleanReason is an error safe to show a client: no server paths, one line.
 func cleanReason(err error, dirs ...string) string {
 	msg := err.Error()
@@ -115,8 +172,14 @@ func cleanReason(err error, dirs ...string) string {
 	return msg
 }
 
+// editMu keeps listings from reading an edit's files while it writes them,
+// commits or puts them back. Not apiMu: that is held through whole applies.
+var editMu sync.RWMutex
+
 // stackFiles lists a stack's editable text files.
 func stackFiles(s *fleet.Stack) ([]api.StackFile, error) {
+	editMu.RLock()
+	defer editMu.RUnlock()
 	var out []api.StackFile
 	add := func(full, rel string) error {
 		fi, err := os.Lstat(full)
@@ -166,6 +229,8 @@ func editStack(c common, stack string, e api.StackEdit, by string, allowed []str
 		return api.EditResult{}, api.ErrBusy
 	}
 	defer apiMu.Unlock()
+	editMu.Lock()
+	defer editMu.Unlock()
 	out, err := withStack(c, stack, func(env *env, s *fleet.Stack) (any, error) {
 		rel := relTo(env.fleet.Dir, s.Dir)
 		if st, _ := gitOut(env.fleet.Dir, "status", "--porcelain", "--", rel); strings.TrimSpace(st) != "" {
@@ -237,6 +302,7 @@ func editStack(c common, stack string, e api.StackEdit, by string, allowed []str
 			}
 			return nil, err
 		}
+		dependants := renderingDependants(env, stack)
 		for _, ch := range changes {
 			if err := root.MkdirAll(path.Dir(ch.rel), 0o750); err != nil {
 				return fail(err)
@@ -262,6 +328,10 @@ func editStack(c common, stack string, e api.StackEdit, by string, allowed []str
 			// Not the error itself: a render error may quote a value, even a secret.
 			log.Printf("api: an edit of %s was refused: the stack would no longer load or render", stack)
 			return fail(api.InvalidError{Reason: cleanReason(err, s.Dir, env.fleet.Dir)})
+		}
+		if broken := brokenDependants(e2, dependants); len(broken) > 0 {
+			log.Printf("api: an edit of %s was refused: %s would no longer render", stack, strings.Join(broken, ", "))
+			return fail(api.InvalidError{Reason: "stacks that take values from " + stack + " would no longer render: " + namesFor(broken, allowed)})
 		}
 		paths := make([]string, 0, len(changes))
 		for _, ch := range changes {

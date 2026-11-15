@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/deploy"
@@ -36,13 +38,32 @@ func apiAuthor(by string) string {
 	return fmt.Sprintf("%s <%s@tokens.nepfleet.invalid>", name, slug)
 }
 
+// commitTimeout bounds a commit over the API, which holds the API's lock:
+// a signing key waiting for its passphrase would block every change.
+var commitTimeout = 60 * time.Second
+
+// commitWaitDelay is how long a stopped commit gets to exit before it is
+// killed and its output abandoned.
+var commitWaitDelay = 10 * time.Second
+
 // commitAs commits paths in the fleet repository as the given author. Nothing
-// staged elsewhere goes along.
+// staged elsewhere goes along. A commit that outlasts commitTimeout is
+// stopped with SIGTERM, on which git removes its lock files (a kill would
+// leave index.lock and block later commits); only one that ignores it is
+// killed.
 func commitAs(dir, author, msg string, paths ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
+	defer cancel()
 	args := append([]string{"commit", "--quiet", "--author", author, "-m", msg, "--"}, paths...)
-	cmd := exec.Command("git", args...) //nolint:gosec,noctx // fixed arguments; a stuck commit can't be left half done
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // fixed arguments
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = commitWaitDelay
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("git commit didn't finish within %s and was stopped; is git waiting for a signing key's passphrase? %s", commitTimeout, strings.TrimSpace(string(out)))
+	}
+	if err != nil {
 		return fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/deploy"
@@ -160,5 +161,45 @@ func TestAPIAuthor(t *testing.T) {
 		if got := apiAuthor(by); got != want {
 			t.Errorf("%q: %q", by, got)
 		}
+	}
+}
+
+// A commit that hangs (a signing prompt; here a slow hook) is stopped, and
+// leaves no index.lock behind: the next commit works.
+func TestCommitAsTimeout(t *testing.T) {
+	_, dir, _ := rollbackFleet(t)
+	oldT, oldW := commitTimeout, commitWaitDelay
+	commitTimeout, commitWaitDelay = 300*time.Millisecond, 300*time.Millisecond
+	t.Cleanup(func() { commitTimeout, commitWaitDelay = oldT, oldW })
+	hooks := t.TempDir()
+	tgit(t, dir, "config", "core.hooksPath", hooks)
+	hook := filepath.Join(hooks, "pre-commit")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nsleep 5\n"), 0o700); err != nil { //nolint:gosec // a test hook must be executable
+		t.Fatal(err)
+	}
+	f := filepath.Join(dir, "stacks", "web", "compose.yaml")
+	if err := os.WriteFile(f, []byte("services:\n  web:\n    image: nginx:1.30-alpine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tgit(t, dir, "add", "stacks/web/compose.yaml")
+	start := time.Now()
+	err := commitAs(dir, apiAuthor("ci"), "slow", "stacks/web/compose.yaml")
+	if err == nil || !strings.Contains(err.Error(), "didn't finish within") {
+		t.Fatalf("err = %v", err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("took %s", d)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git", "index.lock")); err == nil {
+		t.Fatal("index.lock was left behind")
+	}
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitAs(dir, apiAuthor("ci"), "fast", "stacks/web/compose.yaml"); err != nil {
+		t.Fatalf("the next commit: %v", err)
 	}
 }
