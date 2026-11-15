@@ -221,7 +221,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 		}
 		if !b.truncated {
 			b.truncated = true
-			b.Builder.WriteString("\n… (cut at 1 MB)\n")
+			b.WriteString("\n… (cut at 1 MB)\n")
 		}
 		return len(p), nil
 	}
