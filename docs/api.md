@@ -158,4 +158,19 @@ Changes over the API are commits in the fleet repository, authored by the token'
 - **Destructive plans and `apply: manual` stacks** wait for a person: they are listed as pending (`GET /api/v1/sync`), and a `sync.pending` notification says so.
 - **It stops** when the server's repository has uncommitted changes or commits origin doesn't have, with a `sync.failed` notification, until someone resolves it.
 
+**Signed commits only:** with this in `fleet.yaml`, sync brings in only commits with an SSH signature by one of the listed keys (git's allowed-signers lines):
+
+```yaml
+spec:
+  sync:
+    requireSigned: true
+    allowedSigners:
+      - "me@example.org ssh-ed25519 AAAAC3Nza…"
+```
+
+- **Which list counts:** the one the server has before the pull. A pushed commit can't turn the check off or add its own key unless an allowed key signed it.
+- **A commit that fails the check** (unsigned, signed by another key, or with a GPG or X.509 signature) stops sync with `sync.failed`, and nothing is fast-forwarded.
+- **SSH signatures only:** git would check GPG and X.509 signatures against the machine's own keyring, not this list.
+- **Signing with SSH:** `git config gpg.format ssh` and `git config user.signingkey ~/.ssh/id_ed25519.pub`, then `git commit -S` (or `commit.gpgsign true`).
+
 **Webhooks** make it immediate: set `NEPFLEET_SYNC_SECRET` for `serve`, and add a push webhook in Forgejo, Gitea or GitHub to `https://<server>/api/v1/sync`, with that secret and the JSON content type. NepFleet checks the HMAC-SHA256 signature of each delivery (`X-Forgejo-Signature`, `X-Gitea-Signature` or `X-Hub-Signature-256`); failed checks count towards the lockout. With the secret and no `--sync`, only webhooks trigger a sync.
