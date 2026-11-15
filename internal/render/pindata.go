@@ -47,11 +47,6 @@ func PinData(compose []byte, stack string) ([]byte, []string, error) {
 			if m := mapGet(deploy, "mode"); m != nil && m.Value == "global" {
 				continue
 			}
-			if p := mapGet(deploy, "placement"); p != nil {
-				if c := mapGet(p, "constraints"); c != nil && len(c.Content) > 0 {
-					continue // the template placed it itself
-				}
-			}
 		} else {
 			deploy = &yaml.Node{Kind: yaml.MappingNode}
 			mapSet(svc, "deploy", deploy)
@@ -61,9 +56,15 @@ func PinData(compose []byte, stack string) ([]byte, []string, error) {
 			placement = &yaml.Node{Kind: yaml.MappingNode}
 			mapSet(deploy, "placement", placement)
 		}
-		mapSet(placement, "constraints", &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{
-			{Kind: yaml.ScalarNode, Value: constraint},
-		}})
+		constraints := mapGet(placement, "constraints")
+		if constraints == nil || constraints.Kind != yaml.SequenceNode {
+			constraints = &yaml.Node{Kind: yaml.SequenceNode}
+			mapSet(placement, "constraints", constraints)
+		}
+		if tiedToANode(constraints) {
+			continue // the template keeps it on one node itself
+		}
+		constraints.Content = append(constraints.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: constraint})
 		pinned = append(pinned, name)
 	}
 	if len(pinned) == 0 {
@@ -125,6 +126,21 @@ func mountsLocal(svc *yaml.Node, local map[string]bool) bool {
 		}
 		if local[source] {
 			return true
+		}
+	}
+	return false
+}
+
+// tiedToANode reports whether placement constraints keep a service on one
+// node already: by its hostname, its ID, or an equality on a node label.
+// Broader ones (node.role==manager, node.platform.os==linux) don't.
+func tiedToANode(constraints *yaml.Node) bool {
+	for _, c := range constraints.Content {
+		v := strings.ReplaceAll(c.Value, " ", "")
+		for _, p := range []string{"node.hostname==", "node.id==", "node.labels."} {
+			if strings.HasPrefix(v, p) && strings.Contains(v, "==") {
+				return true
+			}
 		}
 	}
 	return false

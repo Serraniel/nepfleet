@@ -207,6 +207,17 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 		return res, nil
 	}
 	res.LockChanged = false // the new pins did not run successfully; never ask to commit them
+	var dataNode *DataNodeError
+	if errors.As(err, &dataNode) {
+		// Refused before docker stack deploy ran: nothing to roll back, only
+		// the files to put back.
+		if prev != nil {
+			if rerr := restore(p.Dir, out.Files, prev); rerr != nil {
+				return res, fmt.Errorf("%w; restoring the previous files also failed: %w", err, rerr)
+			}
+		}
+		return res, err
+	}
 	if prev == nil {
 		// Nothing to go back to. Leave it as is for inspection.
 		return res, fmt.Errorf("first deploy of %s failed (left as is for inspection, `docker compose -p %s logs`): %w", p.Stack, p.Stack, err)
@@ -654,45 +665,82 @@ func hasManifest(dir string) bool {
 	return err == nil
 }
 
+// DataNodeError is why NepFleet won't choose the node for a swarm stack's
+// data itself: a person has to. Nothing is deployed when it is returned.
+type DataNodeError struct{ Reason string }
+
+func (e *DataNodeError) Error() string { return e.Reason }
+
 // ensureDataNode puts the stack's data label (render.DataLabel) on one node,
-// once. Where its services with local volumes run now, so a stack that runs
-// already keeps its data; for a new stack, the node NepFleet runs on. If they
-// run on several nodes, their data is spread: that needs a person.
+// once. For a stack that exists, the node where its pinned services' tasks
+// run, so it keeps its data; for a new stack, the node NepFleet runs on.
+// Whenever that isn't clear (data spread over nodes, no task to tell, a
+// label set by hand to another value), a person decides.
 func ensureDataNode(ctx context.Context, r Runner, stack string, services []string) error {
 	label := render.DataLabel(stack)
-	out, err := r.Run(ctx, "", "node", "ls", "--filter", "node.label="+label+"=true", "--format", "{{.Hostname}}")
+	howTo := fmt.Sprintf("put the label on the node that holds its volumes: docker node update --label-add %s=true <node>", label)
+	out, err := r.Run(ctx, "", "node", "ls", "--filter", "node.label="+label, "--format", "{{.ID}}")
 	if err != nil {
 		return fmt.Errorf("finding the node with %s's data: %w", stack, err)
 	}
-	if strings.TrimSpace(string(out)) != "" {
+	if ids := strings.Fields(string(out)); len(ids) > 0 {
+		if len(ids) > 1 {
+			return &DataNodeError{fmt.Sprintf("%d nodes carry %s, so %s's pinned services could start on either: keep it on one node only", len(ids), label, stack)}
+		}
+		v, err := r.Run(ctx, "", "node", "inspect", "--format", "{{index .Spec.Labels \""+label+"\"}}", ids[0])
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", label, err)
+		}
+		if strings.TrimSpace(string(v)) != "true" {
+			return &DataNodeError{fmt.Sprintf("node %s carries %s=%s, but the constraint needs true: %s", ids[0], label, strings.TrimSpace(string(v)), howTo)}
+		}
 		return nil
 	}
-	nodes := map[string]bool{}
-	for _, s := range services {
-		o, err := r.Run(ctx, "", "service", "ps", stack+"_"+s, "--filter", "desired-state=running", "--format", "{{.Node}}")
-		if err != nil {
-			continue // not deployed yet
-		}
-		for _, n := range strings.Fields(string(o)) {
-			nodes[n] = true
-		}
+	// Whether the stack exists at all decides between "new" and "find it".
+	existing, err := r.Run(ctx, "", "service", "ls", "--filter", "label=com.docker.stack.namespace="+stack, "--quiet")
+	if err != nil {
+		return fmt.Errorf("listing %s's services: %w", stack, err)
 	}
 	var node string
-	switch len(nodes) {
-	case 0:
+	if strings.TrimSpace(string(existing)) == "" {
 		id, err := r.Run(ctx, "", "info", "--format", "{{.Swarm.NodeID}}")
-		if err != nil || strings.TrimSpace(string(id)) == "" {
+		if err != nil {
 			return fmt.Errorf("finding this swarm node: %w", err)
 		}
-		node = strings.TrimSpace(string(id))
-	case 1:
-		for n := range nodes {
-			node = n
+		if strings.TrimSpace(string(id)) == "" {
+			return errors.New("finding this swarm node: docker info names none (is this node in the swarm?)")
 		}
-	default:
-		names := slices.Sorted(maps.Keys(nodes))
-		return fmt.Errorf("%s's services with local volumes run on several nodes (%s), so their data is spread across them. "+
-			"Move it to one node, then mark that node: docker node update --label-add %s=true <node>", stack, strings.Join(names, ", "), label)
+		node = strings.TrimSpace(string(id))
+	} else {
+		nodes := map[string]bool{}
+		for _, s := range services {
+			tasks, err := r.Run(ctx, "", "service", "ps", stack+"_"+s, "--filter", "desired-state=running", "--quiet", "--no-trunc")
+			if err != nil {
+				continue // a service the stack doesn't have yet: its tasks can't tell
+			}
+			ids := strings.Fields(string(tasks))
+			if len(ids) == 0 {
+				continue
+			}
+			on, err := r.Run(ctx, "", append([]string{"inspect", "--format", "{{.NodeID}}"}, ids...)...)
+			if err != nil {
+				return fmt.Errorf("finding where %s runs: %w", stack+"_"+s, err)
+			}
+			for _, n := range strings.Fields(string(on)) {
+				nodes[n] = true
+			}
+		}
+		switch len(nodes) {
+		case 0:
+			return &DataNodeError{fmt.Sprintf("%s runs, but none of its services with local volumes has a running task to tell where their data is: %s", stack, howTo)}
+		case 1:
+			for n := range nodes {
+				node = n
+			}
+		default:
+			return &DataNodeError{fmt.Sprintf("%s's services with local volumes run on several nodes (%s), so their data is spread across them: move it to one node, then %s",
+				stack, strings.Join(slices.Sorted(maps.Keys(nodes)), ", "), howTo)}
+		}
 	}
 	if _, err := r.Run(ctx, "", "node", "update", "--label-add", label+"=true", node); err != nil {
 		return fmt.Errorf("marking the node for %s's data: %w", stack, err)

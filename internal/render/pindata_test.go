@@ -32,6 +32,12 @@ func TestPinData(t *testing.T) {
     deploy:
       placement:
         constraints: ["node.hostname == nas"]
+  managers:
+    image: z:1
+    volumes: ["db:/z"]
+    deploy:
+      placement:
+        constraints: ["node.role == manager"]
   agent:
     image: y:1
     volumes: ["db:/y"]
@@ -51,7 +57,7 @@ volumes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(pinned, ",") != "db" {
+	if strings.Join(pinned, ",") != "db,managers" {
 		t.Fatalf("pinned %v", pinned)
 	}
 	var doc map[string]any
@@ -66,6 +72,10 @@ volumes:
 	placed := svc["placed"].(map[string]any)["deploy"].(map[string]any)["placement"].(map[string]any)["constraints"].([]any)
 	if len(placed) != 1 || placed[0] != "node.hostname == nas" {
 		t.Errorf("a template's own placement changed: %v", placed)
+	}
+	managers := svc["managers"].(map[string]any)["deploy"].(map[string]any)["placement"].(map[string]any)["constraints"].([]any)
+	if len(managers) != 2 || managers[0] != "node.role == manager" || managers[1] != "node.labels.nepfleet.data.app==true" {
+		t.Errorf("a broad constraint: %v", managers)
 	}
 	for _, s := range []string{"app", "web", "cache"} {
 		if _, has := svc[s].(map[string]any)["deploy"]; has {
