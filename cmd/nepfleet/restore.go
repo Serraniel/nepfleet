@@ -157,7 +157,19 @@ func restoreVolumes(ctx context.Context, e *env, s *fleet.Stack, label string, o
 		return fmt.Errorf("checking %s: %w", s.Metadata.Name, err)
 	}
 	wasRunning := strings.TrimSpace(running) != ""
+	// One line per step: the API reads the last one of a job's log as its
+	// progress (api.ProgressFrom). Safety copy and restore per volume, and
+	// stop and start when it was running.
+	step, steps := 0, 2*len(vols)
 	if wasRunning {
+		steps += 2
+	}
+	next := func(text string) {
+		step++
+		fmt.Fprintf(stdout, "%s: step %d/%d: %s\n", s.Metadata.Name, step, steps, text)
+	}
+	if wasRunning {
+		next("stop the stack")
 		if err := docker(ctx, nil, stdout, append(project, "stop")...); err != nil {
 			return fmt.Errorf("stopping %s: %w", s.Metadata.Name, err)
 		}
@@ -182,6 +194,7 @@ func restoreVolumes(ctx context.Context, e *env, s *fleet.Stack, label string, o
 	}
 	for _, v := range vols {
 		safety := v + "-before-restore-" + stamp
+		next("keep a safety copy of " + v)
 		if err := docker(ctx, nil, stdout, "volume", "create", "--label", "nepfleet.restore.of="+v, safety); err != nil {
 			return failed(fmt.Errorf("safety copy of %s: %w", v, err))
 		}
@@ -190,6 +203,7 @@ func restoreVolumes(ctx context.Context, e *env, s *fleet.Stack, label string, o
 			snapshot.HelperImage, "cp", "-a", "/from/.", "/to/"); err != nil {
 			return failed(fmt.Errorf("safety copy of %s: %w", v, err))
 		}
+		next("restore " + v)
 		rc, err := open()
 		if err != nil {
 			return failed(err)
@@ -209,6 +223,7 @@ func restoreVolumes(ctx context.Context, e *env, s *fleet.Stack, label string, o
 		fmt.Fprintf(stdout, "%s: restored\n", v)
 	}
 	if wasRunning {
+		next("start the stack")
 		if err := docker(ctx, nil, stdout, append(project, "start")...); err != nil {
 			return fmt.Errorf("starting %s: %w", s.Metadata.Name, err)
 		}

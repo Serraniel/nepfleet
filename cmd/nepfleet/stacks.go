@@ -557,6 +557,9 @@ type applyOptions struct {
 	// check, if set, sees each stack's plan before anything happens; an error
 	// refuses it. What it saw is exactly what is applied.
 	check func(*deploy.Plan) error
+	// noProgress leaves out the per-phase step lines, for a job that counts
+	// its own steps (updates: stacks of total).
+	noProgress bool
 }
 
 // lockStack keeps one apply per stack on this host, whether from the CLI or
@@ -688,8 +691,10 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		}
 		// One line per phase: the CLI shows it, and the API reads the last
 		// one of a job's log as its progress (api.ProgressFrom).
-		opts.Progress = func(step, steps int, text string) {
-			fmt.Fprintf(stdout, "%s: step %d/%d: %s\n", name, step, steps, text)
+		if !o.noProgress {
+			opts.Progress = func(step, steps int, text string) {
+				fmt.Fprintf(stdout, "%s: step %d/%d: %s\n", name, step, steps, text)
+			}
 		}
 		if p.tpl != nil {
 			opts.Template, opts.TemplateVersion = p.tpl.Metadata.Name, p.tpl.Spec.Version

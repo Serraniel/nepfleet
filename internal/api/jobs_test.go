@@ -15,4 +15,9 @@ func TestProgressFrom(t *testing.T) {
 			t.Errorf("%q: %+v", bad, p)
 		}
 	}
+	// The updates job counts stacks; the applies it runs print no steps.
+	u := ProgressFrom("updates: step 1/3: checking web\nweb: 1 update; updating\nupdates: step 2/3: checking db\n")
+	if u == nil || u.Step != 2 || u.Steps != 3 || u.Text != "checking db" {
+		t.Errorf("updates progress = %+v", u)
+	}
 }
