@@ -90,7 +90,7 @@ func TestRepairPlan(t *testing.T) {
 // for an action the machine names itself.
 func TestDoctorRepairAction(t *testing.T) {
 	out := `[{"name":"age key","status":"fail","detail":"` + doctor.NoRecipients + `"},` +
-		`{"name":"Fleet repository","status":"fail","detail":"` + doctor.NoCommits + `"},` +
+		`{"name":"Fleet repository","status":"warn","detail":"` + doctor.NoCommits + `"},` +
 		`{"name":"age key","status":"fail","detail":"no private key at /x"},` +
 		`{"name":"Disk","status":"warn","detail":"full","action":"repair"}]`
 	got := parseDoctor([]byte(out))

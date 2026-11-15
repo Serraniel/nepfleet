@@ -114,7 +114,7 @@ func (c DoctorCheck) clean() DoctorCheck {
 		c.Status = "warn"
 	}
 	c.Action = ""
-	if c.Status == "fail" && (c.Name == "age key" && c.Detail == doctor.NoRecipients ||
+	if c.Status != "ok" && (c.Name == "age key" && c.Detail == doctor.NoRecipients ||
 		c.Name == "Fleet repository" && c.Detail == doctor.NoCommits) {
 		c.Action = "repair"
 	}

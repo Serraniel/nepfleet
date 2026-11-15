@@ -1734,11 +1734,12 @@ func doctorChecks(c common) ([]doctor.Check, int, error) {
 		}
 	}
 	checks = append(checks, domainChecks(context.Background(), net.DefaultResolver.LookupHost, domains)...)
-	if _, err := gitOut(e.fleet.Dir, "rev-parse", "--git-dir"); err != nil {
-		// Not a git repository: nothing to commit to.
-	} else if _, err := gitOut(e.fleet.Dir, "rev-parse", "-q", "--verify", "HEAD"); err != nil {
-		checks = append(checks, doctor.Check{Name: "Fleet repository", Status: doctor.Fail, Detail: doctor.NoCommits,
-			Fix: "commit it: git -C " + e.fleet.Dir + " add -A && git -C " + e.fleet.Dir + " commit -m 'chore: the fleet repository'"})
+	// A git repository (not just a folder) without a first commit: rollbacks
+	// and edits from the app need one. A warning: a manual setup commits later.
+	_, notRepo := gitOut(e.fleet.Dir, "rev-parse", "--git-dir")
+	if _, noHead := gitOut(e.fleet.Dir, "rev-parse", "-q", "--verify", "HEAD"); notRepo == nil && noHead != nil {
+		checks = append(checks, doctor.Check{Name: "Fleet repository", Status: doctor.Warn, Detail: doctor.NoCommits,
+			Fix: "commit it (rollbacks and edits from the app need a commit): git -C " + e.fleet.Dir + " add -A && git -C " + e.fleet.Dir + " commit -m 'chore: the fleet repository'"})
 	}
 	checks = append(checks, backupChecks(e, c.stateDir, in.KeyFromEnv)...)
 	for _, err := range renderErrs {
