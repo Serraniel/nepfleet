@@ -34,7 +34,8 @@ type Job struct {
 	Error    string    `json:"error,omitempty"`
 	Log      string    `json:"log"`
 	By       string    `json:"by"` // the token's name
-	// Progress is the phase a running apply is in, from its log.
+	// Progress is the step a running job is in, from its log (apply, restore,
+	// updates).
 	Progress *Progress `json:"progress,omitempty"`
 }
 
@@ -46,7 +47,8 @@ type Progress struct {
 	Text  string `json:"text"`
 }
 
-// progressRe matches the lines apply writes per phase: "<stack>: step 3/6: …".
+// progressRe matches the step lines jobs write: "<stack>: step 3/6: …"
+// (apply, restore) or "updates: step 2/9: …".
 var progressRe = regexp.MustCompile(`(?m)^[a-z0-9-]+: step ([0-9]+)/([0-9]+): (.+)$`)
 
 // ProgressFrom is the last phase a job's log reports, or nil.

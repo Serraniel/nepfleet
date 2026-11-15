@@ -139,12 +139,23 @@ func runUpdates(ctx context.Context, c common, names []string, now bool, wait ti
 	if err != nil {
 		return err
 	}
+	// One step per stack that takes updates: the API reads the last step
+	// line of a job's log as its progress (api.ProgressFrom).
+	steps := 0
+	for _, s := range stacks {
+		if s.Spec.Updates != "off" {
+			steps++
+		}
+	}
+	step := 0
 	var errs []error
 	for _, s := range stacks {
 		name := s.Metadata.Name
 		if s.Spec.Updates == "off" {
 			continue
 		}
+		step++
+		fmt.Fprintf(stdout, "updates: step %d/%d: %s\n", step, steps, "checking "+name)
 		updates, err := e.stackUpdates(ctx, s)
 		if err != nil {
 			errs = append(errs, err)
@@ -176,7 +187,7 @@ func runUpdates(ctx context.Context, c common, names []string, now bool, wait ti
 				}
 				return nil
 			}
-			if err := runApply(ctx, c, []string{name}, applyOptions{yes: true, wait: wait, updateLock: true, check: check}, stdout, stderr); err != nil {
+			if err := runApply(ctx, c, []string{name}, applyOptions{yes: true, wait: wait, updateLock: true, check: check, noProgress: true}, stdout, stderr); err != nil {
 				errs = append(errs, err)
 				continue
 			}
