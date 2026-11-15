@@ -35,12 +35,16 @@ type Spec struct {
 	// Sync: what the server's git sync (serve --sync, webhooks) accepts.
 	Sync struct {
 		// RequireSigned: every commit sync brings in must carry an SSH
-		// signature by one of AllowedSigners, as the fleet repository had
-		// them before the pull; otherwise sync stops.
+		// signature by one of AllowedSigners or an OpenPGP signature by one
+		// of AllowedGPGKeys, as the fleet repository had them before the
+		// pull; otherwise sync stops.
 		RequireSigned bool `yaml:"requireSigned"`
 		// AllowedSigners in git's allowed-signers format:
 		// "<principal> <key type> <public key>", e.g. "me@example.org ssh-ed25519 AAAA…".
 		AllowedSigners []string `yaml:"allowedSigners"`
+		// AllowedGPGKeys are OpenPGP public keys, each an ASCII-armored block
+		// (gpg --armor --export <key>), whose signatures count.
+		AllowedGPGKeys []string `yaml:"allowedGPGKeys"`
 	} `yaml:"sync"`
 	Secrets struct {
 		// Age recipients (public keys) that every secret file is encrypted to.
@@ -647,12 +651,18 @@ var allowedSignerRe = regexp.MustCompile(`^[^\s"#]+ (ssh-ed25519|ssh-rsa|ecdsa-s
 
 func checkSync(f *Fleet) error {
 	s := f.Spec.Sync
-	if s.RequireSigned && len(s.AllowedSigners) == 0 {
-		return errors.New("fleet.yaml: sync.requireSigned needs sync.allowedSigners (\"<email> ssh-ed25519 AAAA…\")")
+	if s.RequireSigned && len(s.AllowedSigners) == 0 && len(s.AllowedGPGKeys) == 0 {
+		return errors.New("fleet.yaml: sync.requireSigned needs sync.allowedSigners (\"<email> ssh-ed25519 AAAA…\") or sync.allowedGPGKeys (gpg --armor --export <key>)")
 	}
 	for i, a := range s.AllowedSigners {
 		if !allowedSignerRe.MatchString(a) {
 			return fmt.Errorf("fleet.yaml: sync.allowedSigners[%d]: write \"<email> <key type> <public key>\", as one line of git's allowed signers", i)
+		}
+	}
+	for i, k := range s.AllowedGPGKeys {
+		k = strings.TrimSpace(k)
+		if !strings.HasPrefix(k, "-----BEGIN PGP PUBLIC KEY BLOCK-----") || !strings.HasSuffix(k, "-----END PGP PUBLIC KEY BLOCK-----") {
+			return fmt.Errorf("fleet.yaml: sync.allowedGPGKeys[%d]: paste one public key as gpg --armor --export <key> prints it, from BEGIN to END PGP PUBLIC KEY BLOCK", i)
 		}
 	}
 	return nil

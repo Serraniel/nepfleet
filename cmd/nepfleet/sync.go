@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -129,7 +132,7 @@ func pullFleet(ctx context.Context, e *env) (pulled, error) {
 	// the repository allowed before this pull: a pushed commit can't
 	// switch the check off or add its own key without one.
 	if e.fleet.Spec.Sync.RequireSigned {
-		if err := verifyIncoming(dir, e.fleet.Spec.Sync.AllowedSigners, from, to); err != nil {
+		if err := verifyIncoming(dir, e.fleet.Spec.Sync.AllowedSigners, e.fleet.Spec.Sync.AllowedGPGKeys, from, to); err != nil {
 			return pulled{from: from}, err
 		}
 	}
@@ -258,8 +261,11 @@ func short(commit string) string {
 }
 
 // verifyIncoming checks that every commit in from..to carries an SSH
-// signature by one of signers (git's allowed-signers lines).
-func verifyIncoming(dir string, signers []string, from, to string) error {
+// signature by one of signers (git's allowed-signers lines) or an OpenPGP
+// signature by one of gpgKeys (armored public keys). Neither is checked
+// against the machine's own keys: SSH against a file of signers, OpenPGP
+// against a keyring holding only gpgKeys.
+func verifyIncoming(dir string, signers, gpgKeys []string, from, to string) error {
 	f, err := os.CreateTemp("", "nepfleet-allowed-signers-")
 	if err != nil {
 		return err
@@ -276,42 +282,144 @@ func verifyIncoming(dir string, signers []string, from, to string) error {
 	if err != nil {
 		return err
 	}
+	var home string // the OpenPGP keyring, made at the first such commit
+	defer func() {
+		if home != "" {
+			removeKeyring(home)
+		}
+	}()
 	for _, c := range strings.Fields(list) {
 		short := c
 		if len(short) > 12 {
 			short = short[:12]
 		}
-		// SSH signatures only: verify-commit would check an OpenPGP or X.509
-		// signature against the machine's own keyring, not allowedSigners.
 		raw, err := gitOut(dir, "cat-file", "commit", c)
 		if err != nil {
 			return err
 		}
-		if !sshSigned(raw) {
-			return fmt.Errorf("%w: commit %s has no SSH signature", errUnsigned, short)
-		}
-		// minTrustLevel fully: only a key listed in allowedSigners counts;
-		// some git versions accept a valid signature by an unknown key with
-		// trust "undefined".
-		if _, err := gitOut(dir, "-c", "gpg.ssh.allowedSignersFile="+f.Name(), "-c", "gpg.minTrustLevel=fully", "verify-commit", c); err != nil {
-			return fmt.Errorf("%w: commit %s isn't signed by a key in sync.allowedSigners", errUnsigned, short)
+		switch signatureKind(raw) {
+		case "ssh":
+			if len(signers) == 0 {
+				return fmt.Errorf("%w: commit %s has an SSH signature, and sync.allowedSigners lists no key", errUnsigned, short)
+			}
+			// minTrustLevel fully: only a key listed in allowedSigners counts;
+			// some git versions accept a valid signature by an unknown key with
+			// trust "undefined".
+			if _, err := gitOut(dir, "-c", "gpg.ssh.allowedSignersFile="+f.Name(), "-c", "gpg.minTrustLevel=fully", "verify-commit", c); err != nil {
+				return fmt.Errorf("%w: commit %s isn't signed by a key in sync.allowedSigners", errUnsigned, short)
+			}
+		case "pgp":
+			if len(gpgKeys) == 0 {
+				return fmt.Errorf("%w: commit %s has an OpenPGP signature, and sync.allowedGPGKeys lists no key", errUnsigned, short)
+			}
+			if home == "" {
+				if home, err = gpgKeyring(gpgKeys); err != nil {
+					return err
+				}
+			}
+			// gpg itself, whatever the repository's config names (the
+			// format's own setting wins over gpg.program); only the keyring's
+			// keys, which it trusts ultimately.
+			cmd := exec.Command("git", "-c", "gpg.program=gpg", "-c", "gpg.openpgp.program=gpg", "-c", "gpg.minTrustLevel=fully", "verify-commit", c) //nolint:gosec // a commit id from rev-list
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "GNUPGHOME="+home)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				log.Printf("sync: commit %s: %s", short, strings.TrimSpace(string(out)))
+				return fmt.Errorf("%w: commit %s isn't signed by a key in sync.allowedGPGKeys", errUnsigned, short)
+			}
+		default:
+			return fmt.Errorf("%w: commit %s has no SSH or OpenPGP signature", errUnsigned, short)
 		}
 	}
 	return nil
 }
 
-// sshSigned says whether a raw commit's signature header is an SSH signature.
-func sshSigned(commit string) bool {
-	head, _, _ := strings.Cut(commit, "\n\n") // headers end at the first blank line
-	for _, line := range strings.Split(head, "\n") {
-		if v, ok := strings.CutPrefix(line, "gpgsig "); ok {
-			return strings.TrimSpace(v) == "-----BEGIN SSH SIGNATURE-----"
+// gpgKeyring makes a GnuPG home holding only keys, each trusted ultimately
+// there, so that verify-commit counts exactly these keys.
+func gpgKeyring(keys []string) (string, error) {
+	home, err := os.MkdirTemp("", "nepfleet-gnupg-")
+	if err != nil {
+		return "", err
+	}
+	fail := func(err error) (string, error) {
+		removeKeyring(home)
+		return "", err
+	}
+	// GnuPG 2.4 sets a new home up for keyboxd, a daemon that would outlive
+	// it, unless common.conf exists already.
+	if err := os.WriteFile(filepath.Join(home, "common.conf"), nil, 0o600); err != nil {
+		return fail(err)
+	}
+	gpg := func(stdin string, args ...string) (string, error) {
+		cmd := exec.Command("gpg", append([]string{"--homedir", home, "--batch", "--no-tty"}, args...)...) //nolint:gosec // fixed arguments
+		cmd.Stdin = strings.NewReader(stdin)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("gpg %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
 		}
-		if v, ok := strings.CutPrefix(line, "gpgsig-sha256 "); ok {
-			return strings.TrimSpace(v) == "-----BEGIN SSH SIGNATURE-----"
+		return string(out), nil
+	}
+	if _, err := gpg(strings.Join(keys, "\n"), "--import"); err != nil {
+		return fail(fmt.Errorf("sync.allowedGPGKeys: %w", err))
+	}
+	listing, err := gpg("", "--with-colons", "--list-keys")
+	if err != nil {
+		return fail(err)
+	}
+	// Each primary key's fingerprint is the fpr line right after its pub line.
+	var trust strings.Builder
+	primary := false
+	for _, line := range strings.Split(listing, "\n") {
+		field := strings.Split(line, ":")
+		switch field[0] {
+		case "pub":
+			primary = true
+		case "sub":
+			primary = false
+		case "fpr":
+			if primary && len(field) > 9 && field[9] != "" {
+				trust.WriteString(field[9] + ":6:\n") // 6: ultimate
+			}
+			primary = false
 		}
 	}
-	return false
+	if trust.Len() == 0 {
+		return fail(errors.New("sync.allowedGPGKeys holds no OpenPGP public key"))
+	}
+	if _, err := gpg(trust.String(), "--import-ownertrust"); err != nil {
+		return fail(err)
+	}
+	return home, nil
+}
+
+// removeKeyring stops what GnuPG may have started for home, and removes it.
+func removeKeyring(home string) {
+	_ = exec.Command("gpgconf", "--homedir", home, "--kill", "all").Run() //nolint:gosec // our own temporary directory
+	_ = os.RemoveAll(home)
+}
+
+// signatureKind is the kind of a raw commit's signature header: "ssh",
+// "pgp", or "" (none, or another kind such as X.509).
+func signatureKind(commit string) string {
+	head, _, _ := strings.Cut(commit, "\n\n") // headers end at the first blank line
+	for _, line := range strings.Split(head, "\n") {
+		v, ok := strings.CutPrefix(line, "gpgsig ")
+		if !ok {
+			v, ok = strings.CutPrefix(line, "gpgsig-sha256 ")
+		}
+		if ok {
+			switch strings.TrimSpace(v) {
+			case "-----BEGIN SSH SIGNATURE-----":
+				return "ssh"
+			case "-----BEGIN PGP SIGNATURE-----":
+				return "pgp"
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 var errUnsigned = errors.New("sync stopped: fleet.yaml requires signed commits")
