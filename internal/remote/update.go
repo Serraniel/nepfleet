@@ -14,6 +14,14 @@ import (
 // imageTagRe finds a release version in NepFleet's image reference.
 var imageTagRe = regexp.MustCompile(`:v?([0-9]+\.[0-9]+\.[0-9]+)(@|$)`)
 
+// EdgeVersion is the version of a NepFleet built from main for testing (the
+// nepfleet-git package): it installs and updates machines to the signed
+// :edge image of main, not to a release.
+const EdgeVersion = "edge"
+
+// edgeImageRe is NepFleet's edge image in an image reference.
+var edgeImageRe = regexp.MustCompile(`/nepfleet:edge(@|$)`)
+
 // RunningVersion is the NepFleet release the machine's container runs, from
 // its image tag, or "".
 func (r *Report) RunningVersion() string {
@@ -31,14 +39,18 @@ func (r *Report) RunningVersion() string {
 func UpdatePlan(r *Report, compose []byte, version string) ([]Step, error) {
 	target := strings.TrimPrefix(version, "v")
 	current := r.RunningVersion()
+	edge := version == EdgeVersion
+	if edge && current == "" && edgeImageRe.MatchString(r.NepFleetImage) {
+		current = "the previous edge"
+	}
 	switch {
 	case r.NepFleetImage == "":
 		return nil, errors.New("no NepFleet container runs here to update")
-	case !releaseRe.MatchString(version):
-		return nil, fmt.Errorf("this app is a development build (%s): it updates machines to releases only", version)
+	case !edge && !releaseRe.MatchString(version):
+		return nil, fmt.Errorf("this app is a development build (%s): it updates machines to releases, or with a build of main (version %s) to the edge image", version, EdgeVersion)
 	case current == "":
 		return nil, fmt.Errorf("can't tell which version runs here from its image (%s)", r.NepFleetImage)
-	case semver.Compare("v"+current, "v"+target) >= 0:
+	case !edge && semver.Compare("v"+current, "v"+target) >= 0:
 		return nil, fmt.Errorf("NepFleet %s runs here already, as new as this app's %s", current, target)
 	case strings.Contains(string(compose), composeEOF):
 		return nil, errors.New("compose.yaml holds the heredoc marker")

@@ -37,6 +37,9 @@ func TestVerifiedCompose(t *testing.T) {
 	if _, err := VerifiedCompose(context.Background(), []byte(testCompose), "dev", verify); err != nil || asked != "ghcr.io/serraniel/nepfleet:latest" {
 		t.Errorf("a development build: %s, %v", asked, err)
 	}
+	if out, err := VerifiedCompose(context.Background(), []byte(testCompose), EdgeVersion, verify); err != nil || asked != "ghcr.io/serraniel/nepfleet:edge" || !strings.Contains(string(out), "nepfleet:edge@sha256:") {
+		t.Errorf("an edge build: %s, %v", asked, err)
+	}
 
 	// Fails closed: nothing is written when the signature doesn't check out.
 	refuse := func(context.Context, string) (string, error) { return "", errors.New("no valid signature") }
@@ -64,6 +67,10 @@ func TestSigstoreVerifierLive(t *testing.T) {
 	}
 	if _, err := SigstoreVerifier()(context.Background(), "ghcr.io/serraniel/nepfleet-caddy:2.11"); err == nil {
 		t.Error("an image signed by another workflow passed as NepFleet's release")
+	}
+	// :edge is signed by the edge workflow, which the release identity refuses.
+	if d, err := SigstoreVerifier()(context.Background(), "ghcr.io/serraniel/nepfleet:edge"); err != nil || !digestRe.MatchString(d) {
+		t.Errorf("edge: %q %v", d, err)
 	}
 }
 

@@ -1,0 +1,23 @@
+pkgbase = nepfleet-git
+	pkgdesc = Self-hosted fleet manager for Docker Compose and Swarm stacks (built from main)
+	pkgver = 0.3.4.r0.g0000000
+	pkgrel = 1
+	url = https://github.com/Serraniel/nepfleet
+	arch = x86_64
+	arch = aarch64
+	license = AGPL-3.0-or-later
+	makedepends = go
+	depends = git
+	depends = openssh
+	optdepends = docker: run stacks on this machine
+	optdepends = docker-compose: run stacks on this machine
+	optdepends = sops: secrets, when not run in its container
+	optdepends = age: secrets, when not run in its container
+	optdepends = syft: sbom --contents for images without an SBOM attestation
+	provides = nepfleet
+	conflicts = nepfleet
+	conflicts = nepfleet-bin
+	source = nepfleet-git::git+https://github.com/Serraniel/nepfleet.git
+	sha256sums = SKIP
+
+pkgname = nepfleet-git

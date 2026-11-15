@@ -47,6 +47,19 @@ func TestUpdatePlan(t *testing.T) {
 			t.Errorf("%+v → %s: want %q, got %v", c.r, c.version, c.want, err)
 		}
 	}
+
+	// An edge build updates from a release, or from an older edge, without
+	// comparing versions: edge is the newest main.
+	edgeCompose := []byte("services:\n  nepfleet:\n    image: ghcr.io/serraniel/nepfleet:edge@sha256:" + strings.Repeat("a", 64) + "\n")
+	for image, current := range map[string]string{
+		"ghcr.io/serraniel/nepfleet:0.5.0":                                  "0.5.0",
+		"ghcr.io/serraniel/nepfleet:edge@sha256:" + strings.Repeat("b", 64): "the previous edge",
+	} {
+		steps, err := UpdatePlan(&Report{NepFleetImage: image, NepFleetRunning: true}, edgeCompose, EdgeVersion)
+		if err != nil || len(steps) != 4 || !strings.Contains(steps[3].Text, "start "+current+" again") {
+			t.Errorf("edge from %s: %+v %v", image, steps, err)
+		}
+	}
 }
 
 func TestStartPlan(t *testing.T) {
