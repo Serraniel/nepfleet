@@ -127,3 +127,32 @@ func changeChannels(c common, by, msg string, change func(e *env, secrets map[st
 	head, err := gitOut(e.fleet.Dir, "rev-parse", "HEAD")
 	return strings.TrimSpace(head), err
 }
+
+// routesAPI is GET /api/v1/notifications/routes: fleet.yaml's routes.
+func routesAPI(c common) ([]api.NotifyRoute, error) {
+	e, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	nonNil := func(v []string) []string { return append([]string{}, v...) }
+	out := []api.NotifyRoute{}
+	for _, r := range e.fleet.Spec.Notifications.Routes {
+		out = append(out, api.NotifyRoute{Channels: nonNil(r.Channels), Events: nonNil(r.Events), Stacks: nonNil(r.Stacks), MinSeverity: r.MinSeverity})
+	}
+	return out, nil
+}
+
+// setRoutesAPI is PUT /api/v1/notifications/routes: it replaces fleet.yaml's
+// routes and commits that; unknown channels are refused.
+func setRoutesAPI(c common, routes []api.NotifyRoute, by string) (string, error) {
+	rs := make([]fleet.NotifyRoute, 0, len(routes))
+	for _, r := range routes {
+		rs = append(rs, fleet.NotifyRoute{Channels: r.Channels, Events: r.Events, Stacks: r.Stacks, MinSeverity: r.MinSeverity})
+	}
+	return changeChannels(c, by, "chore(fleet): set notification routes", func(e *env, _ map[string]string) (bool, error) {
+		if err := fleet.SetRoutes(e.fleet.Dir, rs); err != nil {
+			return false, api.InvalidError{Reason: cleanReason(err, e.fleet.Dir)}
+		}
+		return false, nil
+	})
+}

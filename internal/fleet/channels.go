@@ -186,3 +186,44 @@ func mapDelete(m *yaml.Node, key string) bool {
 	}
 	return false
 }
+
+// SetRoutes replaces fleet.yaml's notifications.routes with routes, keeping
+// the rest of the file and its comments. Loading the result checks them:
+// known channels, valid severities.
+func SetRoutes(dir string, routes []NotifyRoute) error {
+	list := func(vals []string) *yaml.Node {
+		n := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+		for _, v := range vals {
+			n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: v})
+		}
+		return n
+	}
+	return editFleet(dir, func(spec *yaml.Node) error {
+		n, err := child(spec, "notifications", yaml.MappingNode)
+		if err != nil {
+			return err
+		}
+		seq := &yaml.Node{Kind: yaml.SequenceNode}
+		for _, r := range routes {
+			m := &yaml.Node{Kind: yaml.MappingNode}
+			mapPut(m, "channels", list(r.Channels))
+			if len(r.Events) > 0 {
+				mapPut(m, "events", list(r.Events))
+			}
+			if len(r.Stacks) > 0 {
+				mapPut(m, "stacks", list(r.Stacks))
+			}
+			if r.MinSeverity != "" {
+				mapPut(m, "minSeverity", &yaml.Node{Kind: yaml.ScalarNode, Value: r.MinSeverity})
+			}
+			seq.Content = append(seq.Content, m)
+		}
+		mapPut(n, "routes", seq)
+		return nil
+	}, func(f *Fleet) error {
+		if len(f.Spec.Notifications.Routes) != len(routes) {
+			return errors.New("the routes aren't there after writing them")
+		}
+		return nil
+	})
+}

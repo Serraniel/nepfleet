@@ -428,6 +428,10 @@ func serve(args []string, stderr io.Writer) error {
 		TestChannel: func(_ context.Context, name string) error {
 			return testChannel(c, name)
 		},
+		Routes: func() ([]api.NotifyRoute, error) { return routesAPI(c) },
+		SetRoutes: func(_ context.Context, routes []api.NotifyRoute, by string) (string, error) {
+			return setRoutesAPI(c, routes, by)
+		},
 		SetChannel: func(_ context.Context, name, url, minSeverity, by string) (string, error) {
 			return setChannelAPI(c, name, url, minSeverity, by)
 		},

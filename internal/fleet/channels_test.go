@@ -57,3 +57,41 @@ func TestChannels(t *testing.T) {
 		t.Errorf("remove again: %v %v", found, err)
 	}
 }
+
+func TestSetRoutes(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, ch := range []string{"phone", "mail"} {
+		if err := SetChannel(dir, ch, "NOTIFY_"+strings.ToUpper(ch), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []NotifyRoute{
+		{Channels: []string{"phone"}, Events: []string{"apply.*"}, MinSeverity: "error"},
+		{Channels: []string{"mail", "phone"}, Stacks: []string{"web"}},
+	}
+	if err := SetRoutes(dir, want); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.Spec.Notifications.Routes
+	if len(got) != 2 || !slices.Equal(got[0].Events, []string{"apply.*"}) || got[0].MinSeverity != "error" || !slices.Equal(got[1].Stacks, []string{"web"}) {
+		t.Fatalf("routes: %+v", got)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "fleet.yaml"))
+	// An unknown channel is refused, and fleet.yaml stays as it was.
+	if err := SetRoutes(dir, []NotifyRoute{{Channels: []string{"pager"}}}); err == nil {
+		t.Error("a route to an unknown channel was written")
+	}
+	if now, _ := os.ReadFile(filepath.Join(dir, "fleet.yaml")); string(now) != string(raw) {
+		t.Error("fleet.yaml changed after a refused edit")
+	}
+	if err := SetRoutes(dir, []NotifyRoute{}); err != nil {
+		t.Errorf("no routes: %v", err)
+	}
+}

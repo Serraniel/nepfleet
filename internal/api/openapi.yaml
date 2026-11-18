@@ -437,6 +437,49 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Channels" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/notifications/routes:
+    get:
+      tags: [server]
+      operationId: routes
+      summary: Which events go to which channels (fleet.yaml's notifications.routes)
+      description: Needs the read scope.
+      responses:
+        "200":
+          description: The routes, in order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routes]
+                properties:
+                  routes: { type: array, items: { $ref: "#/components/schemas/NotifyRoute" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [server]
+      operationId: setRoutes
+      summary: Replace the notification routes (admin scope)
+      description: >-
+        Replaces notifications.routes in fleet.yaml and commits it in the token's
+        name; the rest of the file and its comments stay. Unknown channels, odd
+        event patterns or severities are refused (400), and nothing changes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [routes]
+              properties:
+                routes: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/NotifyRoute" } }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { type: object, properties: { commit: { type: string } } }
+        "400": { description: A route isn't valid }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: Another change runs, or fleet.yaml has uncommitted changes on the server }
   /api/v1/notifications/channels/{name}:
     put:
       tags: [server]
@@ -1651,6 +1694,14 @@ components:
         detail: { type: string }
         fix: { type: string }
         action: { type: string, enum: [dns-records], description: "A fix the app can start: dns-records is POST /api/v1/dns-records" }
+    NotifyRoute:
+      type: object
+      required: [channels, events, stacks]
+      properties:
+        channels: { type: array, items: { type: string }, description: At least one of the fleet's channels }
+        events: { type: array, items: { type: string }, description: "Event names or patterns (apply.*, *); empty matches all" }
+        stacks: { type: array, items: { type: string }, description: Empty matches all stacks }
+        minSeverity: { type: string, enum: [info, warning, error] }
     DNSRecordsResult:
       type: object
       required: [stack, commit]
