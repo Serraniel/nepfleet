@@ -3,7 +3,9 @@
 package api
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,5 +146,58 @@ func TestDNSRecordsEndpoint(t *testing.T) {
 	}
 	if rec := post(admin, `{"zone":"nocaddy.org"}`); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "no Caddy") {
 		t.Errorf("refused: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestFollowLogs(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	edit, _, _ := store.Create("edit", auth.ScopeEdit, nil, time.Hour)
+	release := make(chan struct{})
+	h := Handler(Options{Tokens: store, FollowLogs: func(ctx context.Context, _, container string, _ int, out io.Writer) error {
+		if container == "other-1" {
+			return ErrNotFound
+		}
+		_, _ = out.Write([]byte("first\n"))
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil
+		}
+		_, _ = out.Write([]byte("second\n"))
+		return nil
+	}})
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	get := func(path string) *http.Response {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+edit)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	resp := get("/api/v1/stacks/web/containers/web-web-1/logs?follow=1")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("follow: %d", resp.StatusCode)
+	}
+	// The first line arrives before the second is written: streamed, not buffered.
+	r := bufio.NewReader(resp.Body)
+	if line, err := r.ReadString('\n'); err != nil || line != "first\n" {
+		t.Fatalf("first: %q %v", line, err)
+	}
+	close(release)
+	if line, _ := r.ReadString('\n'); line != "second\n" {
+		t.Errorf("second: %q", line)
+	}
+	if nf := get("/api/v1/stacks/web/containers/other-1/logs?follow=1"); nf.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown container: %d", nf.StatusCode)
+	}
+	old := maxLogFollows
+	maxLogFollows = 0
+	t.Cleanup(func() { maxLogFollows = old })
+	if busy := get("/api/v1/stacks/web/containers/web-web-1/logs?follow=1"); busy.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("over the limit: %d", busy.StatusCode)
 	}
 }

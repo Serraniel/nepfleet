@@ -176,7 +176,10 @@ const maxLogBytes = 1 << 20
 
 // logsAPI is GET /api/v1/stacks/{name}/containers/{container}/logs: only a
 // container of that stack, by the name the containers list gives.
-func logsAPI(ctx context.Context, c common, stack, container string, lines int) (string, error) {
+// logArgs is the docker command line for a container's last lines (and,
+// with follow, what comes after): only a container of that stack, by the
+// name its containers list gives.
+func logArgs(ctx context.Context, c common, stack, container string, lines int, follow bool) ([]string, error) {
 	out, err := withStack(c, stack, func(_ *env, s *fleet.Stack) (any, error) {
 		swarm := s.Spec.Mode == "swarm"
 		cs, err := containersAPIFor(ctx, stack, swarm)
@@ -187,23 +190,52 @@ func logsAPI(ctx context.Context, c common, stack, container string, lines int) 
 		if i < 0 {
 			return nil, api.ErrNotFound
 		}
-		args := []string{"logs", "--timestamps", "--tail", strconv.Itoa(lines), container}
+		args := []string{"logs", "--timestamps", "--tail", strconv.Itoa(lines)}
 		if swarm {
-			args = []string{"service", "logs", "--timestamps", "--no-task-ids", "--tail", strconv.Itoa(lines), stack + "_" + cs[i].Service}
+			args = []string{"service", "logs", "--timestamps", "--no-task-ids", "--tail", strconv.Itoa(lines)}
 		}
-		cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // names from docker's own listing
-		var buf limitedBuffer
-		buf.max = maxLogBytes
-		cmd.Stdout, cmd.Stderr = &buf, &buf
-		if err := cmd.Run(); err != nil {
-			return nil, fmt.Errorf("reading %s's logs: %w", container, err)
+		if follow {
+			args = append(args, "--follow")
 		}
-		return buf.String(), nil
+		if swarm {
+			return append(args, stack+"_"+cs[i].Service), nil
+		}
+		return append(args, container), nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return out.([]string), nil
+}
+
+// followLogsAPI is .../logs?follow=1: the last lines, then the container's
+// output as it comes, until ctx ends.
+func followLogsAPI(ctx context.Context, c common, stack, container string, lines int, w io.Writer) error {
+	args, err := logArgs(ctx, c, stack, container, lines, true)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // names from docker's own listing
+	cmd.Stdout, cmd.Stderr = w, w
+	if err := cmd.Run(); err != nil && ctx.Err() == nil {
+		return fmt.Errorf("following %s's logs: %w", container, err)
+	}
+	return nil
+}
+
+func logsAPI(ctx context.Context, c common, stack, container string, lines int) (string, error) {
+	args, err := logArgs(ctx, c, stack, container, lines, false)
 	if err != nil {
 		return "", err
 	}
-	return out.(string), nil
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // names from docker's own listing
+	var buf limitedBuffer
+	buf.max = maxLogBytes
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("reading %s's logs: %w", container, err)
+	}
+	return buf.String(), nil
 }
 
 // limitedBuffer keeps the first max bytes written and drops the rest,

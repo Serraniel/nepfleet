@@ -487,6 +487,9 @@ func serve(args []string, stderr io.Writer) error {
 			return out.(*api.StackEgress), nil
 		},
 		Containers: func(ctx context.Context, stack string) ([]api.Container, error) { return containersAPI(ctx, c, stack) },
+		FollowLogs: func(ctx context.Context, stack, container string, lines int, out io.Writer) error {
+			return followLogsAPI(ctx, c, stack, container, lines, out)
+		},
 		Logs: func(ctx context.Context, stack, container string, lines int) (string, error) {
 			return logsAPI(ctx, c, stack, container, lines)
 		},
