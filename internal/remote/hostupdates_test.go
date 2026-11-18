@@ -96,10 +96,10 @@ func TestArchNews(t *testing.T) {
 
 func TestHostUpdatePlan(t *testing.T) {
 	arch, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "endeavouros", Sudo: true})
-	if err != nil || len(arch) != 2 || !strings.Contains(arch[0].Script, "archlinux-keyring") || !strings.Contains(arch[1].Script, "pacman -Su") {
+	if err != nil || len(arch) != 3 || !strings.Contains(arch[1].Script, "archlinux-keyring") || !strings.Contains(arch[2].Script, "pacman -Su") {
 		t.Fatalf("arch: %+v %v", arch, err)
 	}
-	for _, s := range arch {
+	for _, s := range arch[1:] {
 		if !s.Root || strings.Contains(s.Script, "reboot") {
 			t.Errorf("%q: root and no reboot", s.Text)
 		}
@@ -109,7 +109,7 @@ func TestHostUpdatePlan(t *testing.T) {
 		}
 	}
 	deb, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "ubuntu", Root: true})
-	if err != nil || len(deb) != 2 || !strings.Contains(deb[1].Script, "--force-confold") {
+	if err != nil || len(deb) != 3 || !strings.Contains(deb[2].Script, "--force-confold") {
 		t.Fatalf("debian: %+v %v", deb, err)
 	}
 	if _, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "fedora", SudoPassword: true}); err != nil {
@@ -120,5 +120,25 @@ func TestHostUpdatePlan(t *testing.T) {
 	}
 	if _, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "gentoo", Root: true}); err == nil {
 		t.Error("planned an unknown distribution")
+	}
+}
+
+func TestDiskCheck(t *testing.T) {
+	plan, err := HostUpdatePlan(&Report{Kernel: "Linux", OSID: "arch", Root: true})
+	if err != nil || plan[0].Root || !strings.Contains(plan[0].Script, "/var/cache/pacman/pkg") {
+		t.Fatalf("the plan doesn't start with the disk check: %+v %v", plan, err)
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	script := diskCheck(t.TempDir()).Script
+	// Small needs pass on any machine running the tests.
+	if out, err := exec.Command("sh", "-c", strings.ReplaceAll(script, " 2048", " 1")).CombinedOutput(); err != nil {
+		t.Errorf("with room: %v %s", err, out)
+	}
+	// Needs no disk can meet stop the update, and say where.
+	out, err := exec.Command("sh", "-c", strings.ReplaceAll(script, " 2048", " 999999999")).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "MiB free for /") {
+		t.Errorf("without room: %v %s", err, out)
 	}
 }
