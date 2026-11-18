@@ -29,6 +29,11 @@ type HostUpdates struct {
 	Notes          []string `json:"notes,omitempty"`    // how fresh or complete this is
 	// LastUpgrade is when the last full upgrade started (Arch: pacman.log).
 	LastUpgrade time.Time `json:"lastUpgrade,omitzero"`
+	// Fresh: the package manager asked its mirrors just now (checkupdates,
+	// dnf). Otherwise the answer is only as new as ListsFrom, when the
+	// package lists were last refreshed: "no updates" then means none known.
+	Fresh     bool      `json:"fresh"`
+	ListsFrom time.Time `json:"listsFrom,omitzero"`
 	// News are Arch news items published since LastUpgrade: they usually
 	// announce manual steps, so read them before updating.
 	News []NewsItem `json:"news,omitempty"`
@@ -61,9 +66,12 @@ arch:*|manjaro:*|endeavouros:*|*:*arch*)
   echo family=arch
   if command -v checkupdates >/dev/null 2>&1; then
     list=$(checkupdates 2>/dev/null)
+    echo fresh=yes
   else
     list=$(pacman -Qu 2>/dev/null)
-    echo "note=pacman-contrib isn't installed, so this is from the package database as of the last pacman -Sy"
+    echo fresh=no
+    echo "listsfrom=$(stat -c %Y /var/lib/pacman/sync/core.db 2>/dev/null)"
+    echo "note=install pacman-contrib for a fresh answer: without it, this comes from the package lists of the last pacman -Sy"
   fi
   printf '%s\n' "$list" | awk 'NF { print "pkg=" $1 }'
   if command -v arch-audit >/dev/null 2>&1; then
@@ -80,9 +88,14 @@ debian:*|ubuntu:*|raspbian:*|*:*debian*|*:*ubuntu*)
   printf '%s\n' "$list" | awk -F/ 'NF > 1 { print "pkg=" $1 }'
   echo "security=$(printf '%s\n' "$list" | grep -c -- '-security')"
   if [ -f /var/run/reboot-required ]; then echo reboot=yes; else echo reboot=no; fi
-  echo "note=from the package lists as of the last apt update"
+  echo fresh=no
+  lists=$(ls -t /var/lib/apt/lists/*Packages* 2>/dev/null | head -n 1)
+  if [ -n "$lists" ]; then echo "listsfrom=$(stat -c %Y "$lists" 2>/dev/null)"; fi
+  echo "note=this comes from the package lists of the last apt update"
   ;;
 fedora:*|rhel:*|centos:*|rocky:*|almalinux:*|*:*fedora*|*:*rhel*)
+  # dnf refreshes metadata that has expired before it answers.
+  echo fresh=yes
   dnf -q check-update 2>/dev/null | awk 'NF == 3 && $1 ~ /\./ { sub(/\.[^.]*$/, "", $1); print "pkg=" $1 }'
   echo "security=$(dnf -q updateinfo list --security 2>/dev/null | grep -c .)"
   dnf needs-restarting -r >/dev/null 2>&1
@@ -145,6 +158,12 @@ func parseHostUpdates(out []byte) *HostUpdates {
 			}
 		case "family":
 			h.archLike = value == "arch"
+		case "fresh":
+			h.Fresh = value == "yes"
+		case "listsfrom":
+			if n, err := strconv.ParseInt(value, 10, 64); err == nil && n > 0 {
+				h.ListsFrom = time.Unix(n, 0).UTC()
+			}
 		case "lastupgrade":
 			if ts, err := time.Parse("2006-01-02T15:04:05-0700", value); err == nil {
 				h.LastUpgrade = ts.UTC()
