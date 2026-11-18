@@ -45,6 +45,7 @@ It answers `{os, supported, pending, security, rebootRequired, packages, notes, 
 
 Fleets → **Update the host…** plans the update for review, like setting a machine up, and runs it only when you start it (setup kind `host-update`). It needs root or sudo, as preparing the machine does, and never reboots: when the check says a reboot is required, reboot it yourself when it suits.
 
+- **First, on every system:** a check that there's room. It needs 2 GiB free on `/` and on the package cache's file system, and 150 MiB on a separate `/boot`, where the kernel and initramfs go. Without that room it stops before anything is installed, because an upgrade that runs out of space halfway is what breaks hosts.
 - **Arch:** `pacman -Sy archlinux-keyring` first, then `pacman -Su`: never a partial upgrade. Read the Arch news the check lists before you start it.
 - **Debian / Ubuntu:** `apt-get update`, then `apt-get dist-upgrade`, keeping config files you changed.
 - **Fedora:** `dnf upgrade --refresh`.

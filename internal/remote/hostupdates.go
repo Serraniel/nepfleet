@@ -194,24 +194,46 @@ func HostUpdatePlan(r *Report) ([]Step, error) {
 	const restarts = " (a Docker upgrade restarts Docker, and with it every container)"
 	switch r.OSID {
 	case "arch", "manjaro", "endeavouros":
-		return []Step{
+		return []Step{diskCheck("/var/cache/pacman/pkg"),
 			{Text: "update the package signing keys first (archlinux-keyring)", Root: true,
 				Script: "pacman -Sy --needed --noconfirm archlinux-keyring\n"},
 			{Text: "install every pending update (pacman -Su)" + restarts, Root: true,
 				Script: "pacman -Su --noconfirm\n"},
 		}, nil
 	case "debian", "ubuntu", "raspbian":
-		return []Step{
+		return []Step{diskCheck("/var/cache/apt/archives"),
 			{Text: "refresh the package lists (apt-get update)", Root: true,
 				Script: "export DEBIAN_FRONTEND=noninteractive\napt-get update -qq\n"},
 			{Text: "install every pending update, keeping changed config files (apt-get dist-upgrade)" + restarts, Root: true,
 				Script: "export DEBIAN_FRONTEND=noninteractive\napt-get -y -qq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade\n"},
 		}, nil
 	case "fedora":
-		return []Step{
+		return []Step{diskCheck("/var/cache/dnf"),
 			{Text: "install every pending update (dnf upgrade)" + restarts, Root: true,
 				Script: "dnf -y -q upgrade --refresh\n"},
 		}, nil
 	}
 	return nil, fmt.Errorf("updating %q hosts isn't supported yet: update it with its package manager", r.OSID)
+}
+
+// diskCheck is a plan's first step: it stops before anything is installed
+// when the package cache's file system, / or a separate /boot (kernel and
+// initramfs) hasn't the room an upgrade needs. Half-installed upgrades on a
+// full disk are what breaks hosts.
+func diskCheck(cache string) Step {
+	script := `fail=0
+need() {
+	[ -d "$1" ] || return 0
+	free=$(df -Pk "$1" | awk 'NR==2 { print int($4 / 1024) }')
+	if [ "$free" -lt "$2" ]; then
+		echo "only ${free} MiB free for $1; the update needs at least $2 MiB there: free some space first" >&2
+		fail=1
+	fi
+}
+need / 2048
+need ` + cache + ` 2048
+if awk '$2 == "/boot" { found = 1 } END { exit !found }' /proc/mounts; then need /boot 150; fi
+exit $fail
+`
+	return Step{Text: "check there is room: 2 GiB on / and for the packages, 150 MiB on a separate /boot", Script: script}
 }
