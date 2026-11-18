@@ -174,7 +174,10 @@ type Options struct {
 	// encrypted, a route of events at minSeverity and above if none sends
 	// to it, committed. RemoveChannel deletes it (ErrNoChannel if unknown).
 	// Both return the commit; errors: InvalidError, ErrBusy, ErrUncommitted.
-	SetChannel    func(ctx context.Context, name, url, minSeverity, by string) (string, error)
+	SetChannel func(ctx context.Context, name, url, minSeverity, by string) (string, error)
+	// Routes lists, and SetRoutes replaces, notifications.routes.
+	Routes        RoutesFunc
+	SetRoutes     SetRoutesFunc
 	RemoveChannel func(ctx context.Context, name, by string) (string, error)
 	// Features are the opt-in system stacks and the stacks providing them.
 	Features func() ([]Feature, error)
@@ -390,6 +393,7 @@ func Handler(o Options) http.Handler {
 	registerSecrets(mux, o, l)
 	registerFeatures(mux, o, l)
 	registerChannels(mux, o, l)
+	registerRoutes(mux, o, l)
 	registerTokens(mux, o, l)
 	registerSBOM(mux, o, l)
 	registerDoctor(mux, o, l)

@@ -206,3 +206,51 @@ func TestFollowLogs(t *testing.T) {
 		t.Errorf("over the limit: %d", code)
 	}
 }
+
+func TestRoutesEndpoints(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	read, _, _ := store.Create("read", auth.ScopeRead, nil, time.Hour)
+	admin, _, _ := store.Create("admin", auth.ScopeAdmin, nil, time.Hour)
+	var saved []NotifyRoute
+	h := Handler(Options{Tokens: store,
+		Routes: func() ([]NotifyRoute, error) {
+			return []NotifyRoute{{Channels: []string{"phone"}, Events: []string{}, Stacks: []string{}}}, nil
+		},
+		SetRoutes: func(_ context.Context, rs []NotifyRoute, _ string) (string, error) {
+			if len(rs) > 0 && rs[0].Channels[0] == "pager" {
+				return "", InvalidError{Reason: `notifications.routes[0]: unknown channel "pager"`}
+			}
+			saved = rs
+			return "abc", nil
+		}})
+	do := func(token, method, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/api/v1/notifications/routes", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(read, http.MethodGet, ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"channels":["phone"]`) {
+		t.Errorf("get: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(read, http.MethodPut, `{"routes":[]}`); rec.Code == 200 {
+		t.Error("a read token set routes")
+	}
+	if rec := do(admin, http.MethodPut, `{"routes":[{"channels":["phone"],"events":["apply.*"],"stacks":["web"],"minSeverity":"error"}]}`); rec.Code != 200 || len(saved) != 1 || saved[0].MinSeverity != "error" {
+		t.Errorf("put: %d %s %+v", rec.Code, rec.Body, saved)
+	}
+	for _, bad := range []string{
+		`{"routes":[{"channels":[]}]}`,
+		`{"routes":[{"channels":["phone"],"events":["APPLY now"]}]}`,
+		`{"routes":[{"channels":["phone"],"minSeverity":"loud"}]}`,
+		`{"routes":[{"channels":["phone"],"stacks":["../x"]}]}`,
+		`{}`,
+	} {
+		if rec := do(admin, http.MethodPut, bad); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", bad, rec.Code)
+		}
+	}
+	if rec := do(admin, http.MethodPut, `{"routes":[{"channels":["pager"]}]}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unknown channel") {
+		t.Errorf("unknown channel: %d %s", rec.Code, rec.Body)
+	}
+}
