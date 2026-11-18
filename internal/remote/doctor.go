@@ -113,7 +113,13 @@ func (c DoctorCheck) clean() DoctorCheck {
 	default:
 		c.Status = "warn"
 	}
+	// The machine may name one action: dns-records, a call to its own API
+	// (the app asks it), never a plan this side runs over SSH.
+	fromMachine := c.Action
 	c.Action = ""
+	if fromMachine == "dns-records" && c.Name == "DNS" && c.Status == "fail" {
+		c.Action = fromMachine
+	}
 	if c.Status != "ok" && (c.Name == "age key" && c.Detail == doctor.NoRecipients ||
 		c.Name == "Fleet repository" && c.Detail == doctor.NoCommits) {
 		c.Action = "repair"

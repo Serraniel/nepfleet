@@ -1586,9 +1586,10 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	}
 	if *asJSON {
 		// For the app's remote doctor: one line, the same checks.
+		action := doctorAction(c)
 		out := make([]remote.DoctorCheck, 0, len(checks))
 		for _, ch := range checks {
-			out = append(out, remote.DoctorCheck{Name: ch.Name, Status: ch.Status.Word(), Detail: ch.Detail, Fix: ch.Fix})
+			out = append(out, remote.DoctorCheck{Name: ch.Name, Status: ch.Status.Word(), Detail: ch.Detail, Fix: ch.Fix, Action: action(ch)})
 		}
 		raw, err := json.Marshal(out)
 		if err != nil {
@@ -1896,8 +1897,9 @@ func doctorAPI(ctx context.Context, c common) (api.DoctorReport, error) {
 		return api.DoctorReport{}, err
 	}
 	rep := api.DoctorReport{Host: c.host, Stacks: n}
+	action := doctorAction(c)
 	for _, ch := range checks {
-		rep.Checks = append(rep.Checks, api.DoctorCheck{Name: ch.Name, Status: [...]string{"ok", "warn", "fail"}[ch.Status], Detail: ch.Detail, Fix: ch.Fix})
+		rep.Checks = append(rep.Checks, api.DoctorCheck{Name: ch.Name, Status: [...]string{"ok", "warn", "fail"}[ch.Status], Detail: ch.Detail, Fix: ch.Fix, Action: action(ch)})
 	}
 	e, err := c.open()
 	if err != nil {

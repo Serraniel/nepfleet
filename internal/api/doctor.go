@@ -4,6 +4,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -17,6 +19,9 @@ type DoctorCheck struct {
 	Status string `json:"status"`
 	Detail string `json:"detail"`
 	Fix    string `json:"fix,omitempty"`
+	// Action names a fix the app can start: dns-records (POST
+	// /api/v1/dns-records).
+	Action string `json:"action,omitempty"`
 }
 
 // SecurityFinding is one of nepfleet doctor --security's results.
@@ -57,5 +62,46 @@ func registerDoctor(mux *http.ServeMux, o Options, l *limiter) {
 			rep.Security = []SecurityFinding{}
 		}
 		writeJSON(w, rep)
+	}))
+}
+
+// DNSRecordsResult is what turning on Caddy's DNS records committed: the
+// Caddy stack, whose plan then shows the change, and the commit.
+type DNSRecordsResult struct {
+	Stack  string `json:"stack"`
+	Commit string `json:"commit"`
+}
+
+func registerDNSRecords(mux *http.ServeMux, o Options, l *limiter) {
+	// Admin, as the doctor that offers it: it changes the ingress stack.
+	mux.HandleFunc("POST /api/v1/dns-records", requireAuth(o, l, auth.ScopeAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if o.DNSRecords == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
+		var req struct {
+			Zone string `json:"zone"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil || req.Zone == "" {
+			http.Error(w, `send {"zone": "example.org"}`, http.StatusBadRequest)
+			return
+		}
+		t, _ := TokenFrom(r.Context())
+		res, err := o.DNSRecords(r.Context(), req.Zone, t.Name)
+		var invalid InvalidError
+		switch {
+		case errors.As(err, &invalid):
+			http.Error(w, invalid.Reason, http.StatusUnprocessableEntity)
+			return
+		case errors.Is(err, ErrUncommitted):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case writeErr(w, err):
+			return
+		}
+		logf("api: %q let Caddy keep DNS records in %s (token %s, commit %s)", t.Name, req.Zone, t.ID, res.Commit)
+		writeJSON(w, res)
 	}))
 }
