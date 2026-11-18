@@ -213,7 +213,9 @@ func TestRoutesEndpoints(t *testing.T) {
 	admin, _, _ := store.Create("admin", auth.ScopeAdmin, nil, time.Hour)
 	var saved []NotifyRoute
 	h := Handler(Options{Tokens: store,
-		Routes: func() ([]NotifyRoute, error) { return []NotifyRoute{{Channels: []string{"phone"}, Events: []string{}, Stacks: []string{}}}, nil },
+		Routes: func() ([]NotifyRoute, error) {
+			return []NotifyRoute{{Channels: []string{"phone"}, Events: []string{}, Stacks: []string{}}}, nil
+		},
 		SetRoutes: func(_ context.Context, rs []NotifyRoute, _ string) (string, error) {
 			if len(rs) > 0 && rs[0].Channels[0] == "pager" {
 				return "", InvalidError{Reason: `notifications.routes[0]: unknown channel "pager"`}
