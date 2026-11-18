@@ -113,3 +113,36 @@ func TestLogsEndpoint(t *testing.T) {
 		t.Errorf("another stack's container: %d", rec.Code)
 	}
 }
+
+func TestDNSRecordsEndpoint(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	admin, _, _ := store.Create("admin", auth.ScopeAdmin, nil, time.Hour)
+	edit, _, _ := store.Create("edit", auth.ScopeEdit, nil, time.Hour)
+	var zone string
+	h := Handler(Options{Tokens: store, DNSRecords: func(_ context.Context, z, _ string) (DNSRecordsResult, error) {
+		if z == "nocaddy.org" {
+			return DNSRecordsResult{}, InvalidError{Reason: "no Caddy stack runs on this host"}
+		}
+		zone = z
+		return DNSRecordsResult{Stack: "caddy", Commit: "abc"}, nil
+	}})
+	post := func(token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/dns-records", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := post(edit, `{"zone":"example.org"}`); rec.Code == http.StatusOK {
+		t.Error("an edit token turned DNS records on")
+	}
+	if rec := post(admin, `{"zone":"example.org"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"stack":"caddy"`) || zone != "example.org" {
+		t.Errorf("admin: %d %s", rec.Code, rec.Body)
+	}
+	if rec := post(admin, `{}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("no zone: %d", rec.Code)
+	}
+	if rec := post(admin, `{"zone":"nocaddy.org"}`); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "no Caddy") {
+		t.Errorf("refused: %d %s", rec.Code, rec.Body)
+	}
+}

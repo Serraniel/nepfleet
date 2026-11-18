@@ -117,3 +117,10 @@ func TestDoctorRepairAction(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorDNSAction(t *testing.T) {
+	got := parseDoctor([]byte(`[{"name":"DNS","status":"fail","detail":"x","action":"dns-records"},{"name":"DNS","status":"ok","detail":"y","action":"dns-records"},{"name":"Disk","status":"fail","detail":"z","action":"dns-records"}]`))
+	if len(got) != 3 || got[0].Action != "dns-records" || got[1].Action != "" || got[2].Action != "" {
+		t.Errorf("%+v", got)
+	}
+}

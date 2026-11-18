@@ -579,6 +579,35 @@ paths:
             application/vnd.cyclonedx+json:
               schema: { type: object }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/dns-records:
+    post:
+      tags: [server]
+      operationId: dnsRecords
+      summary: Let Caddy keep the sites' DNS records
+      description: >-
+        Turns on the Caddy stack's option "Create the sites' DNS records" for a zone
+        (DNS_RECORDS on, DNS_ZONE), in its stack.yaml, committed in the token's
+        name. It doesn't apply: the Caddy stack's plan shows the change. Needs a
+        Caddy stack on this host from a template with the option, and a DNS provider.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [zone]
+              properties:
+                zone: { type: string, description: "The domain the DNS provider holds, e.g. example.org" }
+      responses:
+        "200":
+          description: The Caddy stack and the commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DNSRecordsResult" }
+        "400": { description: No zone }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: The Caddy stack has uncommitted changes on the server }
+        "422": { description: "Why not: no Caddy here, no DNS provider, a template without the option, or a zone that isn't one" }
   /api/v1/doctor:
     get:
       tags: [server]
@@ -1620,6 +1649,13 @@ components:
         status: { type: string, enum: [ok, warn, fail] }
         detail: { type: string }
         fix: { type: string }
+        action: { type: string, enum: [dns-records], description: "A fix the app can start: dns-records is POST /api/v1/dns-records" }
+    DNSRecordsResult:
+      type: object
+      required: [stack, commit]
+      properties:
+        stack: { type: string }
+        commit: { type: string }
     SecurityFinding:
       type: object
       required: [check, level, message]

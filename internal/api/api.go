@@ -162,6 +162,8 @@ type Options struct {
 	SBOM func(ctx context.Context, stack string, allow func(string) bool, contents bool) (any, error)
 	// Doctor checks the server's host, as nepfleet doctor and doctor --security.
 	Doctor func(ctx context.Context) (DoctorReport, error)
+	// DNSRecords turns on Caddy's DNS records for a zone and commits it.
+	DNSRecords func(ctx context.Context, zone, by string) (DNSRecordsResult, error)
 	// Channels names fleet.yaml's notification channels; TestChannel sends
 	// one a test message (ErrNoChannel for an unknown name).
 	Channels    func() ([]string, error)
@@ -389,6 +391,7 @@ func Handler(o Options) http.Handler {
 	registerTokens(mux, o, l)
 	registerSBOM(mux, o, l)
 	registerDoctor(mux, o, l)
+	registerDNSRecords(mux, o, l)
 	registerUsers(mux, o, l)
 	registerRender(mux, o, l)
 	registerMatch(mux, o, l)
