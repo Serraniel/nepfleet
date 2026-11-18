@@ -924,6 +924,17 @@ func stackLinks(f *fleet.Fleet, all []*fleet.Stack, s *fleet.Stack) []api.StackL
 	for _, k := range f.Spec.UptimeKuma {
 		links = append(links, api.StackLink{Name: "Monitors in " + k.Name, URL: strings.TrimRight(k.URL, "/") + "/dashboard"})
 	}
+	// Uptime Kuma stacks on the same host that fleet.yaml doesn't name.
+	for _, other := range all {
+		t := other.Spec.Template
+		if t == nil || t.Name != "uptime-kuma" || other.Spec.Target != s.Spec.Target ||
+			slices.ContainsFunc(f.Spec.UptimeKuma, func(k fleet.KumaInstance) bool { return k.Name == other.Metadata.Name }) {
+			continue
+		}
+		if u := stackAddress(f, other); u != "" {
+			links = append(links, api.StackLink{Name: "Monitors in " + other.Metadata.Name, URL: u + "/dashboard"})
+		}
+	}
 	return links
 }
 
