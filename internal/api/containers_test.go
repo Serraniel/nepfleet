@@ -177,8 +177,13 @@ func TestFollowLogs(t *testing.T) {
 		}
 		return resp
 	}
+	status := func(path string) int {
+		resp := get(path)
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode
+	}
 	resp := get("/api/v1/stacks/web/containers/web-web-1/logs?follow=1")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("follow: %d", resp.StatusCode)
 	}
@@ -191,13 +196,13 @@ func TestFollowLogs(t *testing.T) {
 	if line, _ := r.ReadString('\n'); line != "second\n" {
 		t.Errorf("second: %q", line)
 	}
-	if nf := get("/api/v1/stacks/web/containers/other-1/logs?follow=1"); nf.StatusCode != http.StatusNotFound {
-		t.Errorf("unknown container: %d", nf.StatusCode)
+	if code := status("/api/v1/stacks/web/containers/other-1/logs?follow=1"); code != http.StatusNotFound {
+		t.Errorf("unknown container: %d", code)
 	}
 	old := maxLogFollows
 	maxLogFollows = 0
 	t.Cleanup(func() { maxLogFollows = old })
-	if busy := get("/api/v1/stacks/web/containers/web-web-1/logs?follow=1"); busy.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("over the limit: %d", busy.StatusCode)
+	if code := status("/api/v1/stacks/web/containers/web-web-1/logs?follow=1"); code != http.StatusServiceUnavailable {
+		t.Errorf("over the limit: %d", code)
 	}
 }
