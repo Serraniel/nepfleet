@@ -13,9 +13,15 @@ import (
 )
 
 func TestParseHostUpdates(t *testing.T) {
-	h := parseHostUpdates([]byte("os=arch\npkg=linux\npkg=openssl\npkg=bad name; rm\nsecurity=1\nreboot=yes\nnote=arch-audit\x1b[31m output\nnoise\n"))
+	h := parseHostUpdates([]byte("os=arch\nfresh=no\nlistsfrom=1794700000\npkg=linux\npkg=openssl\npkg=bad name; rm\nsecurity=1\nreboot=yes\nnote=arch-audit\x1b[31m output\nnoise\n"))
 	if h.OS != "arch" || !h.Supported || h.Pending != 2 || h.Security != 1 || h.RebootRequired == nil || !*h.RebootRequired {
 		t.Fatalf("%+v", h)
+	}
+	if h.Fresh || !h.ListsFrom.Equal(time.Unix(1794700000, 0)) {
+		t.Errorf("freshness: %v %v", h.Fresh, h.ListsFrom)
+	}
+	if f := parseHostUpdates([]byte("os=fedora\nfresh=yes\n")); !f.Fresh || !f.ListsFrom.IsZero() {
+		t.Errorf("fresh: %+v", f)
 	}
 	if strings.Join(h.Packages, ",") != "linux,openssl" {
 		t.Errorf("packages %v", h.Packages)
