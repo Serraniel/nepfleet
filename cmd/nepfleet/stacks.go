@@ -844,15 +844,19 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 // addMaintenanceStep lists the Uptime Kuma window apply will open, before
 // the first step that touches containers.
 func (e *env) addMaintenanceStep(p *prepared) {
-	if len(e.fleet.Spec.UptimeKuma) == 0 || !touchesRuntime(p.plan) {
+	if !touchesRuntime(p.plan) {
 		return
 	}
 	refs := kuma.MonitorRefs(p.out.Files[render.ComposeFile], render.EnvValues(p.out.Files[render.EnvFile]))
 	if len(refs) == 0 {
 		return
 	}
+	kumas, err := e.kumas()
+	if err != nil || len(kumas) == 0 {
+		return
+	}
 	var windows, incidents []string
-	w, inc := e.kumaSplit(p)
+	w, inc := e.kumaSplit(p, kumas)
 	for _, k := range w {
 		windows = append(windows, k.Name)
 	}
@@ -897,25 +901,25 @@ type kumaCloser interface {
 // update, where every monitored service keeps running replicas, gets what
 // each Kuma's rollingUpdates says instead (an incident by default).
 func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared, maxDuration time.Duration) []kumaCloser {
-	if len(e.fleet.Spec.UptimeKuma) == 0 {
-		return nil
-	}
 	runtime := touchesRuntime(p.plan)
 	compose := p.out.Files[render.ComposeFile]
 	refs := kuma.MonitorRefs(compose, render.EnvValues(p.out.Files[render.EnvFile]))
 	if !runtime || len(refs) == 0 {
 		return nil
 	}
-	fleetSecrets, err := e.store.Load(filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile))
+	kumas, err := e.kumas()
 	if err != nil {
-		fmt.Fprintf(stdout, "%s: ⚠ Uptime Kuma: cannot read %s: %v\n", p.stack.Metadata.Name, fleet.FleetSecretsFile, err)
+		fmt.Fprintf(stdout, "%s: ⚠ Uptime Kuma: cannot read its login: %v\n", p.stack.Metadata.Name, err)
 		return nil
 	}
-	target := func(k fleet.KumaInstance) kuma.Target {
-		return kuma.Target{Name: k.Name, URL: k.URL, Username: k.Username, Password: fleetSecrets[k.PasswordSecret]}
+	if len(kumas) == 0 {
+		return nil
+	}
+	target := func(k kumaInstance) kuma.Target {
+		return kuma.Target{Name: k.Name, URL: k.URL, Username: k.Username, Password: k.password}
 	}
 	var windows, incidents []kuma.Target
-	w, inc := e.kumaSplit(p)
+	w, inc := e.kumaSplit(p, kumas)
 	for _, k := range w {
 		windows = append(windows, target(k))
 	}
@@ -951,9 +955,9 @@ func (e *env) openMaintenance(ctx context.Context, stdout io.Writer, p *prepared
 // kumaSplit sorts the fleet's Kuma instances into those that get a
 // maintenance window and those that get an incident (a swarm rolling update,
 // rollingUpdates: incident); rollingUpdates: none gets neither.
-func (e *env) kumaSplit(p *prepared) (windows, incidents []fleet.KumaInstance) {
+func (e *env) kumaSplit(p *prepared, kumas []kumaInstance) (windows, incidents []kumaInstance) {
 	rolling := p.plan.Mode == "swarm" && !p.plan.First && rollingUpdate(p.out.Files[render.ComposeFile])
-	for _, k := range e.fleet.Spec.UptimeKuma {
+	for _, k := range kumas {
 		switch {
 		case !rolling || k.RollingUpdates == "maintenance":
 			windows = append(windows, k)

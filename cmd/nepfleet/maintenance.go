@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"path/filepath"
 	"time"
 
 	"github.com/Serraniel/neptide/pkg/kuma"
@@ -13,23 +12,21 @@ import (
 	"github.com/Serraniel/nepfleet/internal/fleet"
 )
 
-// fleetMaintenance lists the maintenance windows of every Uptime Kuma in
-// fleet.yaml. One that can't be reached is listed with its error.
+// fleetMaintenance lists the maintenance windows of every Uptime Kuma of
+// this host: those in fleet.yaml, and uptime-kuma stacks. One that can't be
+// reached is listed with its error.
 func fleetMaintenance(ctx context.Context, c common) ([]api.KumaMaintenance, error) {
 	e, err := c.open()
 	if err != nil {
 		return nil, err
 	}
-	if len(e.fleet.Spec.UptimeKuma) == 0 {
-		return nil, nil
-	}
-	secrets, err := e.store.Load(filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile))
+	kumas, err := e.kumas()
 	if err != nil {
 		return nil, err
 	}
 	var out []api.KumaMaintenance
-	for _, k := range e.fleet.Spec.UptimeKuma {
-		out = append(out, kumaMaintenance(ctx, k, secrets[k.PasswordSecret]))
+	for _, k := range kumas {
+		out = append(out, kumaMaintenance(ctx, k.KumaInstance, k.password))
 	}
 	return out, nil
 }
