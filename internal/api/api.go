@@ -118,6 +118,8 @@ type Options struct {
 	ServiceAction ServiceActionFunc
 	// Logs returns the last lines of one of a stack's containers.
 	Logs LogsFunc
+	// FollowLogs streams one of a stack's containers' output as it comes.
+	FollowLogs FollowLogsFunc
 	// Maintenance lists the maintenance windows of the fleet's Uptime Kuma
 	// instances.
 	Maintenance func(ctx context.Context) ([]KumaMaintenance, error)

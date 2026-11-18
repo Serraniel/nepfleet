@@ -5,9 +5,12 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
+	"sync/atomic"
+	"time"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
 )
@@ -95,10 +98,6 @@ type LogsFunc func(ctx context.Context, stack, container string, lines int) (str
 func registerLogs(mux *http.ServeMux, o Options, l *limiter) {
 	// Edit scope: logs often hold what reading secrets would show.
 	mux.HandleFunc("GET /api/v1/stacks/{name}/containers/{container}/logs", requireAuth(o, l, auth.ScopeEdit, forStack(auth.ScopeEdit, func(w http.ResponseWriter, r *http.Request, name string) {
-		if o.Logs == nil {
-			http.Error(w, "no fleet", http.StatusServiceUnavailable)
-			return
-		}
 		container := r.PathValue("container")
 		if !serviceName.MatchString(container) {
 			http.Error(w, ErrNotFound.Error(), http.StatusNotFound)
@@ -113,6 +112,14 @@ func registerLogs(mux *http.ServeMux, o Options, l *limiter) {
 			}
 			lines = n
 		}
+		if r.URL.Query().Get("follow") == "1" {
+			followLogs(w, r, o, name, container, lines)
+			return
+		}
+		if o.Logs == nil {
+			http.Error(w, "no fleet", http.StatusServiceUnavailable)
+			return
+		}
 		out, err := o.Logs(r.Context(), name, container, lines)
 		if writeErr(w, err) {
 			return
@@ -121,6 +128,78 @@ func registerLogs(mux *http.ServeMux, o Options, l *limiter) {
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(out))
 	})))
+}
+
+// FollowLogsFunc writes a container's last lines and then its new output to
+// out as it comes, until ctx ends (Options.FollowLogs). An unknown container
+// is ErrNotFound, returned before anything is written.
+type FollowLogsFunc func(ctx context.Context, stack, container string, lines int, out io.Writer) error
+
+// Following logs: at most so many at once, each for so long (a token can be
+// revoked meanwhile; the app starts a new one).
+var (
+	maxLogFollows     int64 = 16
+	logFollowLifetime       = 30 * time.Minute
+)
+
+var logFollows atomic.Int64
+
+// streamWriter sends each write at once, with its own write deadline: the
+// server's limit is for short answers. The status line goes with the first.
+type streamWriter struct {
+	w       http.ResponseWriter
+	rc      *http.ResponseController
+	started bool
+}
+
+func (s *streamWriter) Write(p []byte) (int, error) {
+	if !s.started {
+		h := s.w.Header()
+		h.Set("Content-Type", "text/plain; charset=utf-8")
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Accel-Buffering", "no")
+		s.w.WriteHeader(http.StatusOK)
+		s.started = true
+	}
+	if err := s.rc.SetWriteDeadline(time.Now().Add(streamWriteWindow)); err != nil {
+		return 0, err
+	}
+	n, err := s.w.Write(p)
+	if err != nil {
+		return n, err
+	}
+	return n, s.rc.Flush()
+}
+
+func followLogs(w http.ResponseWriter, r *http.Request, o Options, stack, container string, lines int) {
+	if o.FollowLogs == nil {
+		http.Error(w, "following logs isn't supported here", http.StatusNotImplemented)
+		return
+	}
+	if logFollows.Add(1) > maxLogFollows {
+		logFollows.Add(-1)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "too many logs followed at once", http.StatusServiceUnavailable)
+		return
+	}
+	defer logFollows.Add(-1)
+	ctx, cancel := context.WithTimeout(r.Context(), logFollowLifetime)
+	defer cancel()
+	sw := &streamWriter{w: w, rc: http.NewResponseController(w)}
+	err := o.FollowLogs(ctx, stack, container, lines, sw)
+	if !sw.started {
+		if err == nil {
+			sw.started = true
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		writeErr(w, err)
+		return
+	}
+	if err != nil && ctx.Err() == nil {
+		logf("api: following %s/%s: %v", stack, container, err)
+	}
 }
 
 // ContainersFunc lists a stack's containers (Options.Containers).
