@@ -92,6 +92,14 @@ func TestGuard(t *testing.T) {
 			t.Errorf("%s: reached the API", c.name)
 		}
 	}
+	// The app saves secrets, files and settings with PUT, through the daemon
+	// to the server's API: the preflight must allow what that API takes.
+	allowed := do(http.MethodOptions, good, "http://localhost:5173", "").Header().Get("Access-Control-Allow-Methods")
+	for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+		if !strings.Contains(allowed, m) {
+			t.Errorf("preflight doesn't allow %s: %q", m, allowed)
+		}
+	}
 }
 
 func TestEnableHTTP(t *testing.T) {
