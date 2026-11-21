@@ -315,6 +315,19 @@ func values(in Input, env map[string]string, out *Output) error {
 		known[g.Name] = true
 		out.Secret[g.Name] = true
 		v, ok := in.Secrets[g.Name]
+		if g.Kind == template.KindBcrypt {
+			// Of the value above it: kept while it still matches, so the
+			// rendered files stay the same; made again when that changed.
+			h, err := g.Hash(env[g.From], v)
+			if err != nil {
+				return err
+			}
+			if h != v {
+				out.Generated[g.Name] = h
+			}
+			env[g.Name] = h
+			continue
+		}
 		if !ok {
 			var err error
 			if v, err = g.Value(); err != nil {

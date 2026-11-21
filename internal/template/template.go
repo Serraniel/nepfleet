@@ -189,15 +189,22 @@ func (s *Spec) HelpText(in Input, values map[string]string) string {
 // KindNotifyToken generates an API token of scope notify for the stack.
 const KindNotifyToken = "notify-token"
 
+// KindBcrypt generates the bcrypt hash of another value (From).
+const KindBcrypt = "bcrypt"
+
 // Generate is a value NepFleet creates once at install time.
 type Generate struct {
 	Name string `yaml:"name" schema:"required;pattern=^[A-Z][A-Z0-9_]*$" json:"name,omitempty"`
 	// Kind secret is random text of Length; notify-token is an API token of
 	// scope notify, which NepFleet registers when the stack is applied and
-	// renews before it expires. It needs no length or encoding.
-	Kind     string `yaml:"kind" schema:"required;enum=secret|notify-token" json:"kind,omitempty"`
+	// renews before it expires. It needs no length or encoding. bcrypt is
+	// the hash of From (a generated value above it, or an input), for apps
+	// that take a password hash (htpasswd, users files); it's made again only
+	// when From changes.
+	Kind     string `yaml:"kind" schema:"required;enum=secret|notify-token|bcrypt" json:"kind,omitempty"`
 	Length   int    `yaml:"length" schema:"minimum=16;maximum=256" json:"length,omitempty"`
 	Encoding string `yaml:"encoding" schema:"enum=base64url|hex|alnum" json:"encoding,omitempty"`
+	From     string `yaml:"from" schema:"pattern=^[A-Z][A-Z0-9_]*$" json:"from,omitempty"`
 }
 
 // File is an extra file rendered into the stack directory.
@@ -251,7 +258,7 @@ var (
 	encodings     = []string{"", "base64url", "hex", "alnum"}
 	tracks        = []string{"patch", "minor", "major"}
 	tiers         = []string{"system", "app"}
-	generateKinds = []string{"secret", KindNotifyToken}
+	generateKinds = []string{"secret", KindNotifyToken, KindBcrypt}
 	backups       = []string{"required", "recommended", "none"}
 	rollbacks     = []string{"restore", "revert"}
 )
@@ -348,13 +355,23 @@ func (t *Template) Validate() error {
 		}
 	}
 	for _, g := range s.Generate {
+		// declared so far: the inputs and the generated values above, which
+		// is what a bcrypt hash may be made from.
+		from := declared[g.From] && !slices.Contains(Builtins, g.From)
 		declare("spec.generate", g.Name)
 		if !slices.Contains(generateKinds, g.Kind) {
-			bad("spec.generate %q: kind must be secret or notify-token", g.Name)
+			bad("spec.generate %q: kind must be secret, notify-token or bcrypt", g.Name)
 		}
-		if g.Kind == KindNotifyToken {
+		if g.Kind != KindBcrypt && g.From != "" {
+			bad("spec.generate %q: only a bcrypt hash has from", g.Name)
+		}
+		switch g.Kind {
+		case KindNotifyToken, KindBcrypt:
 			if g.Length != 0 || g.Encoding != "" {
-				bad("spec.generate %q: a notify-token has no length or encoding", g.Name)
+				bad("spec.generate %q: a %s has no length or encoding", g.Name, g.Kind)
+			}
+			if g.Kind == KindBcrypt && !from {
+				bad("spec.generate %q: from must name an input or a generated value above it", g.Name)
 			}
 			continue
 		}

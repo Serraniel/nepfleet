@@ -389,3 +389,32 @@ func TestInputHelpPerValue(t *testing.T) {
 		}
 	}
 }
+
+func TestBcryptValidation(t *testing.T) {
+	tpl, err := Load("testdata/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := tpl.Spec.Generate
+	for _, tc := range []struct {
+		g    Generate
+		want string // "" for valid
+	}{
+		{Generate{Name: "KEY_HASH", Kind: KindBcrypt, From: "SECRET_KEY"}, ""},
+		{Generate{Name: "DOMAIN_HASH", Kind: KindBcrypt, From: "DOMAIN"}, ""},
+		{Generate{Name: "KEY_HASH", Kind: KindBcrypt}, "from must name"},
+		{Generate{Name: "KEY_HASH", Kind: KindBcrypt, From: "LATER"}, "from must name"},
+		{Generate{Name: "KEY_HASH", Kind: KindBcrypt, From: "TZ"}, "from must name"},
+		{Generate{Name: "KEY_HASH", Kind: KindBcrypt, From: "SECRET_KEY", Length: 32}, "no length or encoding"},
+		{Generate{Name: "PW", Kind: "secret", Length: 32, From: "SECRET_KEY"}, "only a bcrypt hash has from"},
+	} {
+		tpl.Spec.Generate = append(slices.Clone(base), tc.g)
+		err := tpl.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%+v: %v", tc.g, err)
+		}
+	}
+	if _, err := (Generate{Name: "KEY_HASH", Kind: KindBcrypt, From: "SECRET_KEY"}).Value(); err == nil {
+		t.Error("Value on a bcrypt kind")
+	}
+}
