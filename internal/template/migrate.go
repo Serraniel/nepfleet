@@ -39,6 +39,21 @@ func parseSemver(s string) (semver, error) {
 	return semver{nums[0], nums[1], nums[2], pre}, nil
 }
 
+// NewerWithinMajor says whether template version to is newer than from, and
+// whether both share a major version: a move that needs no migration unless
+// the template declares one.
+func NewerWithinMajor(from, to string) (newer, sameMajor bool, err error) {
+	a, err := parseSemver(from)
+	if err != nil {
+		return false, false, err
+	}
+	b, err := parseSemver(to)
+	if err != nil {
+		return false, false, err
+	}
+	return a.compare(b) < 0, !a.breaking(b), nil
+}
+
 func comparePre(a, b string) int {
 	switch {
 	case a == b:

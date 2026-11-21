@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Serraniel/nepfleet/internal/deploy"
+	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/notify"
 )
 
@@ -93,15 +94,36 @@ func (r *reconciler) once(ctx context.Context) bool {
 		fmt.Fprintf(r.log, "reconcile: %v\n", err)
 		return true
 	}
+	// A repository that syncs from origin takes changes from there: a
+	// commit here would stop sync as diverged.
+	_, upstreamErr := gitOut(e.fleet.Dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	synced := upstreamErr == nil
 	for _, s := range all {
 		if ctx.Err() != nil {
 			return true
 		}
 		name := s.Metadata.Name
-		if s.Spec.Apply != "auto" || (s.Spec.Target != "local" && s.Spec.Target != e.host) {
+		if s.Spec.Target != "local" && s.Spec.Target != e.host {
 			continue
 		}
-		p, err := e.prepare(s)
+		// A newer template: auto stacks move to it within a major version,
+		// with its image updates; the rest is announced once.
+		takeUpdates := false
+		if moved, err := r.templateMove(e, s, synced); err != nil {
+			fmt.Fprintf(r.log, "reconcile: %s: template: %v\n", name, err)
+		} else if moved {
+			if s, err = e.fleet.LoadStack(name); err != nil {
+				fmt.Fprintf(r.log, "reconcile: %s: %v\n", name, err)
+				continue
+			}
+			takeUpdates = true
+		}
+		if s.Spec.Apply != "auto" {
+			continue
+		}
+		e.updateLock = takeUpdates
+		p, _, err := e.preparePlan(ctx, s, io.Discard)
+		e.updateLock = false
 		if err != nil {
 			r.hold(e, name, "error:"+err.Error(), notify.Event{Name: "apply.pending", Severity: notify.Warning, Stack: name,
 				Title: name + " can't be planned", Message: cleanReason(err, e.fleet.Dir)})
@@ -123,7 +145,7 @@ func (r *reconciler) once(ctx context.Context) bool {
 			continue
 		}
 		fmt.Fprintf(r.log, "reconcile: applying %s\n", name)
-		o := applyOptions{yes: true, wait: applyWait, check: func(pl *deploy.Plan) error {
+		o := applyOptions{yes: true, wait: applyWait, updateLock: takeUpdates, check: func(pl *deploy.Plan) error {
 			if needsPerson(pl) != "" {
 				return errNeedsPerson
 			}
@@ -143,6 +165,33 @@ func (r *reconciler) once(ctx context.Context) bool {
 		commitAPIApply(r.c, name, reconcileAuthor, r.log)
 	}
 	return true
+}
+
+// templateMove moves an auto stack to a newer template version of the same
+// major, committing the new pin, and reports whether it did. A newer major,
+// a manual stack, or a repository that syncs from origin (the move belongs
+// there) is announced once instead.
+func (r *reconciler) templateMove(e *env, s *fleet.Stack, synced bool) (bool, error) {
+	u, err := e.newerTemplate(s)
+	if err != nil || u == nil {
+		return false, err
+	}
+	name := s.Metadata.Name
+	if s.Spec.Apply == "auto" && u.sameMajor && !synced {
+		fmt.Fprintf(r.log, "reconcile: %s: template %s %s → %s\n", name, s.Spec.Template.Name, u.from, u.to)
+		return true, e.moveTemplate(s, u, reconcileAuthor)
+	}
+	why := "review it and set spec.template.version to " + u.to
+	switch {
+	case !u.sameMajor:
+		why = "a new major version can change data: " + why + ", and its plan shows the migration"
+	case synced:
+		why = "the fleet repository syncs from origin: set spec.template.version to " + u.to + " there"
+	}
+	r.hold(e, name+"#template", u.to, notify.Event{Name: "update.available", Severity: notify.Info, Stack: name,
+		Title:   fmt.Sprintf("%s: template %s %s is out", name, s.Spec.Template.Name, u.to),
+		Message: fmt.Sprintf("It runs %s; %s.", u.from, why)})
+	return false, nil
 }
 
 // needsPerson says why a plan can't apply by itself, or "".

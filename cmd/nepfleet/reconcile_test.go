@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/deploy"
 )
 
@@ -108,5 +110,91 @@ func TestReconcile(t *testing.T) {
 	r.once(ctx)
 	if strings.Contains(log.String(), "applying") {
 		t.Errorf("applied twice:\n%s", log.String())
+	}
+}
+
+func TestSetTemplateVersion(t *testing.T) {
+	raw := "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec:\n  target: local\n  # which template\n  template:\n    source: official\n    name: caddy\n    version: 0.2.0\n"
+	out, err := setTemplateVersion([]byte(raw), "0.3.1")
+	if err != nil || !strings.Contains(string(out), "version: 0.3.1") || !strings.Contains(string(out), "# which template") || strings.Contains(string(out), "0.2.0") {
+		t.Errorf("%s %v", out, err)
+	}
+}
+
+// An auto stack moves to a newer template of the same major by itself, and
+// is applied with it; a new major version is only announced.
+func TestReconcileTemplateUpdate(t *testing.T) {
+	c, dir := newStackFleet(t)
+	t.Cleanup(func() { removeTestProject(t, c.stateDir) })
+	if _, err := newStackAPI(c, api.NewStack{Template: "hello", Source: "local", Name: "greeter", Values: map[string]string{"GREETING": "hi"}}, "Ada"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var log bytes.Buffer
+	if err := runApply(ctx, c, []string{"greeter"}, applyOptions{yes: true, wait: applyWait}, &log, &log); err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	tgit(t, dir, "add", "-A")
+	tgit(t, dir, "commit", "-qm", "applied", "--no-verify", "--allow-empty")
+
+	// The template source gets 0.2.0, which adds a value.
+	e, err := c.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.fleet.LoadStack("greeter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := ""
+	for _, ts := range e.fleet.Spec.TemplateSources {
+		if ts.Name == "local" {
+			src = ts.Path
+		}
+	}
+	bump := func(version, compose string) {
+		t.Helper()
+		tplFile := filepath.Join(src, "apps", "hello", "template.yaml")
+		raw, err := os.ReadFile(tplFile) //nolint:gosec // the test's template
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := regexp.MustCompile(`(?m)^  version: .*$`).ReplaceAllString(string(raw), "  version: "+version)
+		if err := os.WriteFile(tplFile, []byte(out), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(src, "apps", "hello", "compose.yaml"), []byte(compose), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bump("0.2.0", "services:\n  web:\n    image: nginx:1.29-alpine\n    environment:\n      GREETING: ${GREETING}\n      LEVEL: ${LEVEL}\n      NEW: \"yes\"\n")
+	if s.Spec.Template.Version != "0.1.0" {
+		t.Fatalf("pin: %s", s.Spec.Template.Version)
+	}
+
+	r := newReconciler(c, reconcileEvery, &log)
+	log.Reset()
+	r.once(ctx)
+	if !strings.Contains(log.String(), "template hello 0.1.0 → 0.2.0") || !strings.Contains(log.String(), "applied and healthy") {
+		t.Fatalf("not moved and applied:\n%s", log.String())
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "stacks", "greeter", "stack.yaml")) //nolint:gosec // the test's fleet
+	if !strings.Contains(string(raw), "version: 0.2.0") {
+		t.Errorf("stack.yaml: %s", raw)
+	}
+	if got := tgit(t, dir, "log", "--format=%an|%s", "-3"); !strings.Contains(got, "nepfleet|chore(greeter): template hello 0.1.0 → 0.2.0") {
+		t.Errorf("commits:\n%s", got)
+	}
+
+	// 1.0.0: announced, not moved.
+	bump("1.0.0", "services:\n  web:\n    image: nginx:1.29-alpine\n")
+	log.Reset()
+	r.once(ctx)
+	if strings.Contains(log.String(), "→ 1.0.0") || !strings.Contains(log.String(), "a new major version") {
+		t.Errorf("major:\n%s", log.String())
+	}
+	raw, _ = os.ReadFile(filepath.Join(dir, "stacks", "greeter", "stack.yaml")) //nolint:gosec // the test's fleet
+	if !strings.Contains(string(raw), "version: 0.2.0") {
+		t.Errorf("moved across a major: %s", raw)
 	}
 }
