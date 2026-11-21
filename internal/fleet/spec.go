@@ -229,7 +229,7 @@ type Stack struct {
 type StackSpec struct {
 	Target   string       `yaml:"target" schema:"required"`
 	Mode     string       `yaml:"mode" schema:"enum=compose|swarm;default=compose"` // compose | swarm
-	Apply    string       `yaml:"apply" schema:"enum=manual|auto;default=manual"`   // manual | auto
+	Apply    string       `yaml:"apply" schema:"enum=manual|auto;default=auto"`     // auto | manual (opt-in: every apply waits for a person)
 	Template *TemplateRef `yaml:"template"`
 	// Values are template inputs (or env variables of a plain stack): a
 	// literal, or {from: <stack>, value|secret: <name>} to use another
@@ -603,7 +603,7 @@ func loadStack(dir string) (*Stack, error) {
 		bad("spec.mode must be compose or swarm")
 	}
 	if s.Spec.Apply == "" {
-		s.Spec.Apply = "manual"
+		s.Spec.Apply = "auto"
 	}
 	if !slices.Contains(applyPolicies, s.Spec.Apply) {
 		bad("spec.apply must be manual or auto")

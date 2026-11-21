@@ -154,7 +154,7 @@ metadata:
 spec:
   target: home-nas            # host name, or a swarm cluster name
   mode: compose               # compose | swarm
-  apply: manual               # manual | auto
+  apply: auto                 # auto (default) | manual: every apply waits for a person
   template:                   # omit for a plain compose stack
     source: official
     name: vaultwarden

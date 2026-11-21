@@ -239,7 +239,7 @@ func (e *env) writeNewStack(tpl *template.Template, source, name, target, access
 		"metadata":   map[string]string{"name": name},
 		"spec": map[string]any{
 			"target":   target,
-			"apply":    "manual",
+			"apply":    "auto",
 			"template": map[string]string{"source": source, "name": tpl.Metadata.Name, "version": tpl.Spec.Version},
 		},
 	}

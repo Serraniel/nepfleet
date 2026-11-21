@@ -57,8 +57,8 @@
           ]
         },
         "apply": {
-          "default": "manual",
-          "description": "manual | auto",
+          "default": "auto",
+          "description": "auto | manual (opt-in: every apply waits for a person)",
           "enum": [
             "",
             "manual",

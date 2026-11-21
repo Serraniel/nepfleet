@@ -45,7 +45,7 @@ func rollbackFleet(t *testing.T) (common, string, string) {
 			t.Fatal(err)
 		}
 	}
-	write("stack.yaml", "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec: {target: local}\n")
+	write("stack.yaml", "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec: {target: local, apply: manual}\n")
 	write("compose.yaml", "services:\n  web:\n    image: nginx:1.28-alpine\n")
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		tgit(t, dir, "init", "-q")
