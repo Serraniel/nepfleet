@@ -99,6 +99,10 @@ func TestHostUpdatePlan(t *testing.T) {
 	if err != nil || len(arch) != 3 || !strings.Contains(arch[1].Script, "archlinux-keyring") || !strings.Contains(arch[2].Script, "pacman -Su") {
 		t.Fatalf("arch: %+v %v", arch, err)
 	}
+	// The checkers come with the full upgrade, only when missing.
+	if s := arch[2].Script; !strings.Contains(s, "pacman-contrib arch-audit") || !strings.Contains(s, "pacman -Qq") || !strings.Contains(s, "pacman -Su --noconfirm --needed $extra") {
+		t.Errorf("arch checkers: %q", s)
+	}
 	for _, s := range arch[1:] {
 		if !s.Root || strings.Contains(s.Script, "reboot") {
 			t.Errorf("%q: root and no reboot", s.Text)
