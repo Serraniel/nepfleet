@@ -32,11 +32,19 @@ const reconcileEvery = 15 * time.Minute
 // reconcileAuthor commits what an automatic apply records (lock.yaml).
 const reconcileAuthor = "nepfleet"
 
+// updatesEvery is how often serve takes image updates (updates apply) for
+// stacks with updates: auto, within fleet.yaml's updates.window.
+const updatesEvery = 6 * time.Hour
+
 type reconciler struct {
 	c     common
 	every time.Duration
-	log   io.Writer
-	kick  chan struct{}
+	// updates: how often image updates run; 0 never.
+	updates time.Duration
+	log     io.Writer
+	kick    chan struct{}
+	// adopted: the written-out defaults were looked at (once per start).
+	adopted bool
 
 	mu sync.Mutex
 	// held: per stack, the plan that failed or waits for a person. It isn't
@@ -62,10 +70,31 @@ func (r *reconciler) run(ctx context.Context) {
 	defer t.Stop()
 	first := time.NewTimer(time.Minute)
 	defer first.Stop()
+	// Image updates: ten minutes after start, then every r.updates.
+	var updatesTick <-chan time.Time
+	upd := time.NewTimer(10 * time.Minute)
+	defer upd.Stop()
+	if r.updates <= 0 {
+		upd.Stop()
+	} else {
+		ut := time.NewTicker(r.updates)
+		defer ut.Stop()
+		updatesTick = ut.C
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-upd.C:
+			if !r.takeUpdates(ctx) {
+				upd.Reset(time.Minute)
+			}
+			continue
+		case <-updatesTick:
+			if !r.takeUpdates(ctx) {
+				upd.Reset(time.Minute)
+			}
+			continue
 		case <-first.C:
 		case <-t.C:
 		case <-r.kick:
@@ -75,6 +104,20 @@ func (r *reconciler) run(ctx context.Context) {
 			first.Reset(time.Minute)
 		}
 	}
+}
+
+// takeUpdates runs updates apply: stacks with updates: auto take rebuilt
+// images, health-gated, and the others hear what's new. It reports false
+// when the API was busy.
+func (r *reconciler) takeUpdates(ctx context.Context) bool {
+	if !apiMu.TryLock() {
+		return false
+	}
+	defer apiMu.Unlock()
+	if err := runUpdates(ctx, r.c, nil, false, applyWait, r.log, r.log); err != nil {
+		fmt.Fprintf(r.log, "updates: %v\n", err)
+	}
+	return true
 }
 
 // once looks at every auto stack on this host once. It reports false when the
@@ -88,6 +131,10 @@ func (r *reconciler) once(ctx context.Context) bool {
 	if err != nil {
 		fmt.Fprintf(r.log, "reconcile: %v\n", err)
 		return true
+	}
+	if !r.adopted {
+		r.adopted = true
+		adoptDefaults(e, r.log)
 	}
 	all, err := e.fleet.Stacks()
 	if err != nil {

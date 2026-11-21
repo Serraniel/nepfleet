@@ -235,7 +235,7 @@ type StackSpec struct {
 	// literal, or {from: <stack>, value|secret: <name>} to use another
 	// stack's value or secret.
 	Values  map[string]Value `yaml:"values"`
-	Updates string           `yaml:"updates" schema:"enum=off|notify|auto;default=notify"` // off | notify | auto
+	Updates string           `yaml:"updates" schema:"enum=off|notify|auto;default=auto"` // auto (default) | notify | off
 	// Logging overrides the fleet's default log settings for this stack.
 	Logging *Logging `yaml:"logging"`
 	// Access says how the stack's web UI is reached: through Caddy on its
@@ -609,7 +609,7 @@ func loadStack(dir string) (*Stack, error) {
 		bad("spec.apply must be manual or auto")
 	}
 	if s.Spec.Updates == "" {
-		s.Spec.Updates = "notify"
+		s.Spec.Updates = "auto"
 	}
 	if !slices.Contains(updatePolicies, s.Spec.Updates) {
 		bad("spec.updates must be off, notify or auto")
