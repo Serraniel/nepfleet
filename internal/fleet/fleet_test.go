@@ -329,3 +329,32 @@ func TestHostMountRules(t *testing.T) {
 		}
 	}
 }
+
+// Changes apply by themselves unless a stack opts into review.
+func TestApplyDefaultsToAuto(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "web")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte("services:\n  web:\n    image: nginx:1.29-alpine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(apply string) *Stack {
+		t.Helper()
+		y := "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec:\n  target: local\n" + apply
+		if err := os.WriteFile(filepath.Join(dir, "stack.yaml"), []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s, err := loadStack(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if got := write("").Spec.Apply; got != "auto" {
+		t.Errorf("default: %q", got)
+	}
+	if got := write("  apply: manual\n").Spec.Apply; got != "manual" {
+		t.Errorf("opt-in: %q", got)
+	}
+}

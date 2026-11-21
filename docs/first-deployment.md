@@ -143,7 +143,7 @@ spec:
 
 ```sh
 nepfleet plan                 # diffs, secrets masked; ⚠ marks destructive changes
-nepfleet apply                # asks per stack with apply: manual; waits for health checks
+nepfleet apply                # applies; asks first for stacks with apply: manual; waits for health checks
 git add -A && git commit -m "feat: initial fleet" && git push
 ```
 

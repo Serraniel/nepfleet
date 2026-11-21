@@ -17,6 +17,7 @@ import (
 func syncFleet(t *testing.T) (c common, dir, other string) {
 	t.Helper()
 	c, dir, _ = rollbackFleet(t)
+	t.Cleanup(func() { removeTestProject(t, c.stateDir) })
 	origin := filepath.Join(t.TempDir(), "origin.git")
 	tgit(t, t.TempDir(), "init", "-q", "--bare", origin)
 	branch := tgit(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
