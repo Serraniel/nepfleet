@@ -953,12 +953,6 @@ func stackLinks(f *fleet.Fleet, all []*fleet.Stack, s *fleet.Stack) []api.StackL
 // resolved to their current digests), so the reviewed plan is what applies.
 func (e *env) prepareAPI(ctx context.Context, s *fleet.Stack, updateLock bool) (*prepared, error) {
 	e.updateLock = updateLock
-	p, err := e.prepare(s)
-	if err != nil || !updateLock {
-		return p, err
-	}
-	if _, err := e.previewUpdate(ctx, p, io.Discard); err != nil {
-		return nil, err
-	}
-	return p, nil
+	p, _, err := e.preparePlan(ctx, s, io.Discard)
+	return p, err
 }
