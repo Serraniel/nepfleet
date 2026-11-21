@@ -450,8 +450,25 @@ func serve(args []string, stderr io.Writer) error {
 			return removeChannelAPI(c, name, by)
 		},
 		SecretKeys: func(_ context.Context, stack string) ([]string, error) { return secretKeys(c, stack) },
-		SetSecret: func(_ context.Context, stack, key string, value *string, by string) (string, error) {
-			return setSecretAPI(c, stack, key, value, by)
+		SetSecret: func(ctx context.Context, stack, key string, value *string, by string) (string, error) {
+			// Waits for a running apply rather than refusing at once.
+			if !lockAPI(ctx) {
+				return "", api.ErrBusy
+			}
+			commit, err := setSecretLocked(c, stack, key, value, by)
+			apiMu.Unlock()
+			if err == nil && reconcile != nil {
+				reconcile.Now() // a value a stack waited for applies now
+			}
+			return commit, err
+		},
+		StackInputs: func(_ context.Context, stack string) ([]api.StackInput, error) { return stackInputsAPI(c, stack) },
+		SetInputs: func(ctx context.Context, stack string, values map[string]string, by string) (string, error) {
+			commit, err := setInputsAPI(ctx, c, stack, values, by)
+			if err == nil && reconcile != nil {
+				reconcile.Now()
+			}
+			return commit, err
 		},
 		StackFiles: func(_ context.Context, stack string) ([]api.StackFile, error) {
 			out, err := withStack(c, stack, func(_ *env, s *fleet.Stack) (any, error) { return stackFiles(s) })

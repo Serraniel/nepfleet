@@ -65,6 +65,11 @@ func setSecretAPI(c common, stack, key string, value *string, by string) (string
 		return "", api.ErrBusy
 	}
 	defer apiMu.Unlock()
+	return setSecretLocked(c, stack, key, value, by)
+}
+
+// setSecretLocked is setSecretAPI with the API lock already held.
+func setSecretLocked(c common, stack, key string, value *string, by string) (string, error) {
 	e, err := c.open()
 	if err != nil {
 		return "", err
