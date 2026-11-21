@@ -36,16 +36,15 @@ func controlSocket() string { return filepath.Join(controlDir(), "control.sock")
 // cmdControl: nepfleet control [status] — the local daemon.
 func cmdControl(args []string, stdout, stderr io.Writer) error {
 	if len(args) > 0 && args[0] == "status" {
-		var info struct {
-			Version string    `json:"version"`
-			PID     int       `json:"pid"`
-			Started time.Time `json:"started"`
-		}
+		var info controlInfo
 		if err := controlCall(context.Background(), http.MethodGet, "/v1/info", nil, &info); err != nil {
 			return errors.New("the control daemon is not running; start it with nepfleet control")
 		}
-		fmt.Fprintf(stdout, "running: version %s, pid %d, since %s\n", info.Version, info.PID, info.Started.Local().Format(time.RFC1123))
+		printControlInfo(stdout, info)
 		return nil
+	}
+	if len(args) > 0 && args[0] == "restart" {
+		return cmdControlRestart(stdout)
 	}
 	if len(args) > 0 && args[0] == "token" {
 		t, err := control.LoadHTTPToken(controlDir())
@@ -66,14 +65,14 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return errors.New("usage: nepfleet control [--http ADDR --allowed-origins URLS] | control http ADDR --allowed-origins URLS | control status | control token")
+		return errors.New("usage: nepfleet control [--http ADDR --allowed-origins URLS] | control http ADDR --allowed-origins URLS | control status | control restart | control token")
 	}
 	l, err := control.Listen(controlSocket())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = l.Close() }()
-	s := &control.Server{Dir: controlDir(), Version: version, Connector: remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}, Probe: func(ctx context.Context, t remote.Target) (*remote.Report, error) {
+	s := &control.Server{Dir: controlDir(), Version: version, Commit: commit, Connector: remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}, Probe: func(ctx context.Context, t remote.Target) (*remote.Report, error) {
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		return remote.Probe(ctx, remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}.Run, t)
@@ -130,6 +129,7 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	s.Stop = stop
 	if *httpAddr != "" {
 		// Before listening on the socket's clients: a bad flag stops the start.
 		if err := os.MkdirAll(controlDir(), 0o700); err != nil {
@@ -210,7 +210,7 @@ func controlCall(ctx context.Context, method, path string, body, out any) error 
 			Error string `json:"error"`
 		}
 		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&e)
-		return errors.New(e.Error)
+		return &controlError{Status: res.StatusCode, Message: e.Error}
 	}
 	if out == nil || res.StatusCode == http.StatusNoContent {
 		return nil

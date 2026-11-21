@@ -109,6 +109,8 @@ type Setup struct {
 	jobs map[string]*setupJob
 	// starting: remotes whose setup is being checked before it starts.
 	starting map[string]bool
+	// stopping: POST /v1/stop accepted; no setup starts any more.
+	stopping bool
 }
 
 type setupJob struct {
@@ -274,6 +276,11 @@ func (s *Server) startSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	// Reserve the remote before probing, so two requests can't both start.
 	s.Setup.mu.Lock()
+	if s.Setup.stopping {
+		s.Setup.mu.Unlock()
+		fail(w, http.StatusServiceUnavailable, "the control daemon is stopping")
+		return
+	}
 	if j := s.Setup.jobs[name]; (j != nil && j.snapshot().State == "running") || s.Setup.starting[name] {
 		s.Setup.mu.Unlock()
 		fail(w, http.StatusConflict, "a setup runs on this remote already")

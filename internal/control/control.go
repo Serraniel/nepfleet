@@ -59,7 +59,13 @@ type ProbeFunc func(ctx context.Context, t remote.Target) (*remote.Report, error
 type Server struct {
 	Dir     string // owner-only state directory
 	Version string
-	Probe   ProbeFunc
+	// Commit is the git commit the binary was built from: with an edge build
+	// (always version "edge") it tells an updated binary from the running one.
+	Commit string
+	Probe  ProbeFunc
+	// Stop, if set, ends Serve: POST /v1/stop calls it, so the next start runs
+	// the binary installed now.
+	Stop func()
 	// Connector, if set, lets the daemon keep tunnels to remotes.
 	Connector Connector
 	// Setup prepares remotes and installs NepFleet on them, for clients.
@@ -131,8 +137,9 @@ func (s *Server) save() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/info", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"version": s.Version, "pid": os.Getpid(), "started": s.started})
+		writeJSON(w, http.StatusOK, map[string]any{"version": s.Version, "commit": s.Commit, "pid": os.Getpid(), "started": s.started})
 	})
+	mux.HandleFunc("POST /v1/stop", s.stop)
 	mux.HandleFunc("GET /v1/remotes", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
