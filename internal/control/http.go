@@ -103,7 +103,8 @@ func guard(next http.Handler, addr, token string, origins func() []string) http.
 			}
 			h.Set("Access-Control-Allow-Origin", o)
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE")
+			// What the server API takes too: requests to remotes pass through.
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE")
 			h.Set("Access-Control-Max-Age", "600")
 			h.Add("Vary", "Origin")
 			if r.Method == http.MethodOptions {
