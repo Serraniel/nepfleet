@@ -197,8 +197,15 @@ func HostUpdatePlan(r *Report) ([]Step, error) {
 		return []Step{diskCheck("/var/cache/pacman/pkg"),
 			{Text: "update the package signing keys first (archlinux-keyring)", Root: true,
 				Script: "pacman -Sy --needed --noconfirm archlinux-keyring\n"},
-			{Text: "install every pending update (pacman -Su)" + restarts, Root: true,
-				Script: "pacman -Su --noconfirm\n"},
+			// The checkers come with the full upgrade, never on their own:
+			// pacman-contrib's checkupdates gives the check a fresh answer,
+			// arch-audit counts security fixes.
+			{Text: "install every pending update (pacman -Su), with pacman-contrib and arch-audit if they're missing, for fresh checks" + restarts, Root: true,
+				Script: "extra=\nfor p in pacman-contrib arch-audit; do\n" +
+					"\tpacman -Qq \"$p\" >/dev/null 2>&1 || { pacman -Siq \"$p\" >/dev/null 2>&1 && extra=\"$extra $p\"; }\n" +
+					"done\n" +
+					"# shellcheck disable=SC2086 # the package names are fixed words\n" +
+					"pacman -Su --noconfirm --needed $extra\n"},
 		}, nil
 	case "debian", "ubuntu", "raspbian":
 		return []Step{diskCheck("/var/cache/apt/archives"),
