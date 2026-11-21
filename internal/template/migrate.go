@@ -75,12 +75,11 @@ func (v semver) compare(o semver) int {
 }
 
 // breaking says whether going from v to o may break things by version alone:
-// another major, or another minor below 1.0.
+// another major. Templates mark a breaking change with a new major version
+// and a migration, also below 1.0, where a minor adds features (the template
+// sources' contributing rules), so a minor needs no migration there either.
 func (v semver) breaking(o semver) bool {
-	if v.major != o.major {
-		return true
-	}
-	return v.major == 0 && v.minor != o.minor
+	return v.major != o.major
 }
 
 var comparatorRe = regexp.MustCompile(`^(>=|<=|>|<|=)?(.+)$`)

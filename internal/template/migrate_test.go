@@ -52,9 +52,13 @@ func TestUpgradePath(t *testing.T) {
 	if got, err := UpgradePath([]Migration{mig(">=1.2.0 <1.3.0", "1.3.0")}, "1.2.5", "1.4.0"); err != nil || len(got) != 1 {
 		t.Errorf("%v %v", got, err)
 	}
-	// Below 1.0 a minor can break.
-	if _, err := UpgradePath(nil, "0.1.0", "0.2.0"); err == nil {
-		t.Error("0.1 → 0.2 without a migration")
+	// Templates mark a breaking change with a new major version, also below
+	// 1.0: a minor needs no migration there either (caddy 0.2.0 → 0.3.1).
+	if got, err := UpgradePath(nil, "0.2.0", "0.3.1"); err != nil || len(got) != 0 {
+		t.Errorf("0.2 → 0.3.1: %v %v", got, err)
+	}
+	if _, err := UpgradePath(nil, "0.9.0", "1.0.0"); err == nil {
+		t.Error("0.x → 1.0 without a migration")
 	}
 	if _, err := UpgradePath(nil, "0.1.0", "0.1.5"); err != nil {
 		t.Error(err)
