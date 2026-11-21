@@ -343,6 +343,54 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "A file changed since it was read, or another operation runs" }
         "422": { description: The stack would no longer load or render; nothing was saved }
+  /api/v1/stacks/{name}/inputs:
+    get:
+      tags: [stacks]
+      operationId: stackInputs
+      summary: The inputs of the stack's template, and whether each is set (read scope)
+      description: >-
+        Values only for inputs that aren't secret. missing means a required input
+        without a default has no value, as when a newer template version asks for
+        one.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      responses:
+        "200":
+          description: The inputs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StackInputs" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [stacks]
+      operationId: setStackInputs
+      summary: Set several of the stack's inputs in one commit
+      description: >-
+        Secret inputs are encrypted into values.secret.yaml, the others written to
+        stack.yaml; each value is checked against its input, and an empty one
+        leaves an input as it is. Waits up to 2 minutes for a running apply. Needs
+        the edit scope; a person also needs a recent verification. An apply: auto
+        stack applies right after.
+      parameters:
+        - { $ref: "#/components/parameters/StackName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InputValues" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "400": { description: "No values, or a name that isn't a variable name" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't edit, or a person must verify first }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: An apply kept running for 2 minutes, or the files have uncommitted changes }
+        "422": { description: "A value doesn't fit its input, or isn't an input of the template (names the inputs, never the values)" }
   /api/v1/stacks/{name}/secrets:
     get:
       tags: [stacks]
@@ -1754,6 +1802,35 @@ components:
       properties:
         token: { $ref: "#/components/schemas/TokenInfo" }
         secret: { type: string, description: Shown only in this answer }
+    StackInputs:
+      type: object
+      required: [inputs]
+      properties:
+        inputs:
+          type: array
+          items:
+            type: object
+            required: [name, type]
+            properties:
+              name: { type: string }
+              type: { type: string }
+              title: { type: string }
+              description: { type: string }
+              required: { type: boolean }
+              default: { type: string }
+              options: { type: array, items: { type: string } }
+              pattern: { type: string }
+              secret: { type: boolean, description: "Kept encrypted: written, never read back" }
+              set: { type: boolean }
+              value: { type: string, description: "The current value; never for secret inputs" }
+              missing: { type: boolean, description: "Required, no default, and not set" }
+    InputValues:
+      type: object
+      required: [values]
+      properties:
+        values:
+          type: object
+          additionalProperties: { type: string }
     SecretKeys:
       type: object
       required: [keys]

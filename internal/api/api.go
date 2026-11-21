@@ -187,6 +187,10 @@ type Options struct {
 	// never read back.
 	SecretKeys func(ctx context.Context, stack string) ([]string, error)
 	SetSecret  func(ctx context.Context, stack, key string, value *string, by string) (commit string, err error)
+	// StackInputs lists a stack's template inputs and whether each is set;
+	// SetInputs sets several in one commit (secret ones encrypted).
+	StackInputs func(ctx context.Context, stack string) ([]StackInput, error)
+	SetInputs   func(ctx context.Context, stack string, values map[string]string, by string) (commit string, err error)
 	// StackFiles lists a stack's editable files, without encrypted values (edit scope:
 	// files/ may hold plain configuration a read token shouldn't see).
 	StackFiles func(ctx context.Context, stack string) ([]StackFile, error)
@@ -391,6 +395,7 @@ func Handler(o Options) http.Handler {
 	registerSync(mux, o, l)
 	registerNewStack(mux, o, l)
 	registerSecrets(mux, o, l)
+	registerInputs(mux, o, l)
 	registerFeatures(mux, o, l)
 	registerChannels(mux, o, l)
 	registerRoutes(mux, o, l)
