@@ -82,6 +82,9 @@ spec:
       encoding: base64url      # base64url | hex | alnum
     - name: ALERTS_TOKEN
       kind: notify-token       # an API token of scope notify: no length or encoding
+    - name: ADMIN_PASSWORD_HASH
+      kind: bcrypt             # the hash of another value, for apps that take one
+      from: ADMIN_TOKEN
   files:                       # rendered into the working directory, mounted as ./config/…
     - { src: files/config.yaml, dest: config/config.yaml }
     - { src: files/settings.yaml, dest: config/settings.yaml, keep: true }   # the app edits it: written only when missing
@@ -151,6 +154,8 @@ Inside the compose file and `files/`, you can use the following variables:
   - `NEPFLEET_API_URL`, `NEPFLEET_API_HOST` (the same without `http://`, for URLs such as shoutrrr's) and `NEPFLEET_API_NETWORK`: NepFleet's API for stacks that talk to it (log alerts, dashboard widgets). Put the services that need it on the network: `networks: {nepfleet-api: {name: ${NEPFLEET_API_NETWORK}, external: true}}`. The server joins this internal network as `nepfleet` when it starts, so the URL is `http://nepfleet:7480` (with the port it listens on). The network reaches only the API, never the outside.
 
 A `generate` entry of `kind: notify-token` is an API token of scope `notify` for the stack (it sends alerts and reads nothing). NepFleet registers it when the stack is applied, named `stack:<stack>/<NAME>`, so it's listed on Access and can be revoked there. It lasts a year. The first apply in its last two months makes a new one and retires the old, as does an apply after it was revoked.
+
+A `generate` entry of `kind: bcrypt` is the bcrypt hash of another value, `from`: an input, or a generated value listed above it. It is for apps that take a password hash, such as an htpasswd line or a users file: generate the password as a secret, and its hash next to it (`{name: ADMIN_PASSWORD_HASH, kind: bcrypt, from: ADMIN_PASSWORD}`). It is stored like the others, so files rendered from it stay the same, and made again only when `from` changes. A hash contains `$`: use it in files, not in `compose.yaml`, where Compose would read `$` as a variable.
 
 Tools that notify through shoutrrr URLs can send to NepFleet, whose channels then deliver (deduplicated and routed like its own events): `generic://${NEPFLEET_API_HOST}/api/v1/alerts?disabletls=yes&template=json&@Authorization=Bearer%20${NOTIFY_TOKEN}`, with `NOTIFY_TOKEN` a notify-token. The alert's title and message become its rule and detail, and the token names the stack as its source.
 

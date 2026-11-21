@@ -4,6 +4,7 @@ package render
 
 import (
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -507,5 +508,30 @@ func TestForSwarmOneShots(t *testing.T) {
 	}
 	if got := doc.Services["custom"].Deploy.RestartPolicy["condition"]; got != "none" {
 		t.Errorf("the template's own policy was replaced: %q", got)
+	}
+}
+
+func TestBcryptGenerated(t *testing.T) {
+	f, tpl := setup(t)
+	tpl.Spec.Generate = append(tpl.Spec.Generate, template.Generate{Name: "KEY_HASH", Kind: template.KindBcrypt, From: "KEY"})
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl})
+	must(t, err)
+	key, hash := out.Generated["KEY"], out.Generated["KEY_HASH"]
+	if key == "" || !strings.HasPrefix(hash, "$2a$") || bcrypt.CompareHashAndPassword([]byte(hash), []byte(key)) != nil {
+		t.Fatalf("key %q hash %q", key, hash)
+	}
+	// Kept while it matches: the next render writes the same files.
+	out, err = Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl,
+		Secrets: map[string]string{"KEY": key, "KEY_HASH": hash}})
+	must(t, err)
+	if _, again := out.Generated["KEY_HASH"]; again {
+		t.Error("a matching hash was made again")
+	}
+	// The value changed: a new hash of it.
+	out, err = Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl,
+		Secrets: map[string]string{"KEY": "another", "KEY_HASH": hash}})
+	must(t, err)
+	if h := out.Generated["KEY_HASH"]; h == "" || bcrypt.CompareHashAndPassword([]byte(h), []byte("another")) != nil {
+		t.Errorf("not made again for the new value: %q", h)
 	}
 }

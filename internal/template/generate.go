@@ -8,14 +8,29 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/Serraniel/nepfleet/internal/auth"
+	"golang.org/x/crypto/bcrypt"
 	"math/big"
 )
 
 const alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
+// Hash is a bcrypt kind's value for from, the value it's made from. A stored
+// hash that still matches from is kept: the hash stays the same across
+// renders, and is made again only when from changes.
+func (g Generate) Hash(from, stored string) (string, error) {
+	if stored != "" && bcrypt.CompareHashAndPassword([]byte(stored), []byte(from)) == nil {
+		return stored, nil
+	}
+	h, err := bcrypt.GenerateFromPassword([]byte(from), bcrypt.DefaultCost)
+	return string(h), err
+}
+
 // Value produces the generated value. Length is the length of the result in
-// characters, not of the entropy behind it.
+// characters, not of the entropy behind it. A bcrypt kind uses Hash.
 func (g Generate) Value() (string, error) {
+	if g.Kind == KindBcrypt {
+		return "", fmt.Errorf("%s: a bcrypt hash is made from %s", g.Name, g.From)
+	}
 	if g.Kind == KindNotifyToken {
 		// The shape of an API token: NepFleet registers it when the stack
 		// is applied (auth.Store.Register).

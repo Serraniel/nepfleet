@@ -189,11 +189,16 @@
                 ],
                 "type": "string"
               },
+              "from": {
+                "pattern": "^[A-Z][A-Z0-9_]*$",
+                "type": "string"
+              },
               "kind": {
-                "description": "Kind secret is random text of Length; notify-token is an API token of scope notify, which NepFleet registers when the stack is applied and renews before it expires. It needs no length or encoding.",
+                "description": "Kind secret is random text of Length; notify-token is an API token of scope notify, which NepFleet registers when the stack is applied and renews before it expires. It needs no length or encoding. bcrypt is the hash of From (a generated value above it, or an input), for apps that take a password hash (htpasswd, users files); it's made again only when From changes.",
                 "enum": [
                   "secret",
-                  "notify-token"
+                  "notify-token",
+                  "bcrypt"
                 ],
                 "type": "string"
               },
