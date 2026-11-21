@@ -108,8 +108,10 @@ nepfleet remote connect nas      # keep a tunnel to its API; survives restarts o
 nepfleet remote disconnect nas
 nepfleet remote remove nas
 nepfleet control status
+nepfleet control restart         # after updating nepfleet: run the version installed now
 ```
 
+- **After an update:** the daemon keeps running the binary it started with. `nepfleet control restart` stops it and starts the one installed now; tunnels and the app's port come back by themselves. It refuses while a setup runs, as stopping would cut it off halfway. The daemon's `GET /v1/info` says its `version` and `commit`, and `POST /v1/stop` stops it (`409` while a setup runs).
 - **Access:** a Unix socket that only you can open, in a private directory (`~/.local/state/nepfleet/control`). It refuses a directory that others can enter.
 - **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
 - **To start it at login:** run `nepfleet control` from a systemd user unit.
