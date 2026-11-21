@@ -153,6 +153,15 @@ With TLS on, the server allows TLS 1.2 and newer and sends HSTS.
 
 Changes over the API are commits in the fleet repository, authored by the token's name (`ci <ci@tokens.nepfleet.invalid>`). This covers rollbacks, and what an apply writes: `lock.yaml` and generated secrets. git's own identity stays the committer, and signing follows git's config, so a server set up to sign needs its key available, or the commit fails. A failed commit after an apply only warns in the job's log; the files are there to commit by hand.
 
+## Applying by itself
+
+Stacks are `apply: auto` unless they opt into `apply: manual`. Besides what git sync pulls, `nepfleet serve` applies them whenever their plan has changes: a minute after it starts (a NepFleet update restarts it), right after an edit over the API, and every 15 minutes (`--reconcile 15m`; `0` turns it off). That brings in what no commit carries, such as built-in values a newer NepFleet adds, without anyone applying stacks by hand.
+
+- **Health-gated as any apply:** a stack that doesn't become healthy is rolled back, and `apply.failed` or `apply.rolled_back` says so.
+- **What waits for a person:** destructive changes, data migrations, and plans that can't be made. An `apply.pending` notification says why, once per plan.
+- **No retry loop:** a plan that failed or waits isn't tried again until it changes.
+- **Never the first apply:** a stack that was never applied waits for someone to apply it.
+
 ## Git sync
 
 `nepfleet serve --sync 5m` keeps the server's fleet repository at its origin: it fetches every 5 minutes and fast-forwards, never merging or forcing. Then:

@@ -284,6 +284,7 @@ func serve(args []string, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	addr := fs.String("listen", "127.0.0.1:7480", "address to listen on")
 	syncEvery := fs.Duration("sync", 0, "pull the fleet repository from its origin this often (e.g. 5m) and apply changed stacks set to apply: auto; 0: only on webhooks, if NEPFLEET_SYNC_SECRET is set")
+	reconcileFlag := fs.Duration("reconcile", reconcileEvery, "this often (and after edits and at start), apply stacks set to apply: auto whose plan has changes, e.g. after a NepFleet update; 0: off")
 	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
 	stateDir := fs.String("state", envOr("NEPFLEET_STATE", defaultState()), "state directory (API tokens live in <state>/api)")
 	name := fs.String("name", hostname(), "name shown to frontends")
@@ -352,6 +353,10 @@ func serve(args []string, stderr io.Writer) error {
 		}
 	}
 	c := common{fleetDir: *fleetDir, stateDir: *stateDir, host: *host}
+	var reconcile *reconciler
+	if *reconcileFlag > 0 {
+		reconcile = newReconciler(c, *reconcileFlag, stderr)
+	}
 	// Git sync: on a timer, on forges' webhooks, or both.
 	var gitSync *syncer
 	var syncStatus func() api.SyncStatus
@@ -423,7 +428,11 @@ func serve(args []string, stderr io.Writer) error {
 		Channels: func() ([]string, error) { return channelNames(c) },
 		Doctor:   func(ctx context.Context) (api.DoctorReport, error) { return doctorAPI(ctx, c) },
 		DNSRecords: func(_ context.Context, zone, by string) (api.DNSRecordsResult, error) {
-			return dnsRecordsAPI(c, zone, by)
+			res, err := dnsRecordsAPI(c, zone, by)
+			if err == nil && reconcile != nil {
+				reconcile.Now()
+			}
+			return res, err
 		},
 		TestChannel: func(_ context.Context, name string) error {
 			return testChannel(c, name)
@@ -450,7 +459,13 @@ func serve(args []string, stderr io.Writer) error {
 			return out.([]api.StackFile), nil
 		},
 		EditStack: func(_ context.Context, stack string, e api.StackEdit, by string, stacks []string) (api.EditResult, error) {
-			return editStack(c, stack, e, by, stacks)
+			res, err := editStack(c, stack, e, by, stacks)
+			// An edit of an auto stack applies by itself, as soon as the API
+			// lock is free.
+			if err == nil && reconcile != nil {
+				reconcile.Now()
+			}
+			return res, err
 		},
 		ComposeProjects: func(ctx context.Context) ([]api.ComposeProject, error) { return composeProjectsAPI(ctx, c) },
 		ImportCompose: func(ctx context.Context, req api.ImportCompose, by string) (api.ImportResult, error) {
@@ -540,6 +555,9 @@ func serve(args []string, stderr io.Writer) error {
 	defer stop()
 	if gitSync != nil {
 		go gitSync.run(ctx)
+	}
+	if reconcile != nil {
+		go reconcile.run(ctx)
 	}
 	errc := make(chan error, 1)
 	srv.TLSConfig = tlsConfig
