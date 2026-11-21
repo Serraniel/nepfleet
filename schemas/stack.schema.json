@@ -257,8 +257,8 @@
           ]
         },
         "updates": {
-          "default": "notify",
-          "description": "off | notify | auto",
+          "default": "auto",
+          "description": "auto (default) | notify | off",
           "enum": [
             "",
             "off",

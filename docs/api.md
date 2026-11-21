@@ -161,6 +161,8 @@ Stacks are `apply: auto` unless they opt into `apply: manual`. Besides what git 
 - **What waits for a person:** destructive changes, data migrations, and plans that can't be made. An `apply.pending` notification says why, once per plan.
 - **No retry loop:** a plan that failed or waits isn't tried again until it changes.
 - **Never the first apply:** a stack that was never applied waits for someone to apply it.
+- **Stacks created before auto was the default:** NepFleet used to write `apply: manual` into every stack it created. When the server starts, a stack whose `apply` line no commit has changed since the one that created it takes the default, in a commit by `nepfleet` (`chore(<stack>): apply changes by itself, as new stacks do`). A `manual` someone set stays, and a fleet that syncs from origin is left alone.
+- **Image updates:** stacks take rebuilt images by themselves too (`updates: auto`, the default), every 6 hours; see [automatic updates](spec/fleet-repo.md#automatic-updates).
 - **Newer templates:** when a stack's template source has a newer version of its template in the same major version, an `auto` stack moves to it by itself. The new `spec.template.version` is committed as `nepfleet` (`chore(<stack>): template <name> 0.2.0 → 0.3.1`), and it's applied with the template's image updates, as a new template version may need an image rebuilt under the same tag. A new major version, a `manual` stack, or a fleet that syncs from origin (the change belongs there, or sync would stop as diverged) gets an `update.available` notification once instead.
 
 ## Git sync

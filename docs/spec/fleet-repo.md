@@ -161,16 +161,16 @@ spec:
     version: 1.0.0
   values:
     DOMAIN: vault.example.org
-  updates: notify             # off | notify | auto
+  updates: auto               # auto (default) | notify | off
 ```
 
 A plain compose stack is a valid stack. You can paste any `compose.yaml` and NepFleet versions it just the same.
 
 ### Automatic updates
 
-`nepfleet updates apply` is for a timer. Each run, per stack:
+`nepfleet serve` runs `updates apply` itself: ten minutes after it starts, then every 6 hours (`--updates 6h`; `0` turns it off), within `spec.updates.window` when one is set. Run it from a timer only when no server runs. Each run, per stack:
 
-- **`updates: auto`:** a tag rebuilt upstream, such as a security rebuild of `:1`, is applied with the usual health gate and rollback, and the new digest is committed to `lock.yaml`. The commit's author is `automatic updates`.
+- **`updates: auto` (the default):** a tag rebuilt upstream, such as a security rebuild of `:1`, is applied with the usual health gate and rollback, and the new digest is committed to `lock.yaml`. The commit's author is `automatic updates`.
 - **`updates: notify`:** sends `update.available`, once per change.
 - **`updates: off`:** nothing.
 

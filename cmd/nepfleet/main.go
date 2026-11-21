@@ -285,6 +285,7 @@ func serve(args []string, stderr io.Writer) error {
 	addr := fs.String("listen", "127.0.0.1:7480", "address to listen on")
 	syncEvery := fs.Duration("sync", 0, "pull the fleet repository from its origin this often (e.g. 5m) and apply changed stacks set to apply: auto; 0: only on webhooks, if NEPFLEET_SYNC_SECRET is set")
 	reconcileFlag := fs.Duration("reconcile", reconcileEvery, "this often (and after edits and at start), apply stacks set to apply: auto whose plan has changes, e.g. after a NepFleet update; 0: off")
+	updatesFlag := fs.Duration("updates", updatesEvery, "this often (from 10 minutes after start), stacks with updates: auto take rebuilt images within fleet.yaml's updates.window, health-gated; the others hear what's new; 0: off")
 	fleetDir := fs.String("fleet", envOr("NEPFLEET_FLEET", "."), "fleet repository")
 	stateDir := fs.String("state", envOr("NEPFLEET_STATE", defaultState()), "state directory (API tokens live in <state>/api)")
 	name := fs.String("name", hostname(), "name shown to frontends")
@@ -356,6 +357,7 @@ func serve(args []string, stderr io.Writer) error {
 	var reconcile *reconciler
 	if *reconcileFlag > 0 {
 		reconcile = newReconciler(c, *reconcileFlag, stderr)
+		reconcile.updates = *updatesFlag
 	}
 	// Git sync: on a timer, on forges' webhooks, or both.
 	var gitSync *syncer
