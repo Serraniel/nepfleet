@@ -607,7 +607,9 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			continue
 		}
 		unlock = release
-		p, err := e.prepare(s)
+		// With --update-lock, resolved before confirming and before the check,
+		// so both see the plan with the image changes, as the API showed it.
+		p, updated, err := e.preparePlan(ctx, s, stderr)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -621,14 +623,6 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		if err := e.checkMounts(p); err != nil {
 			errs = append(errs, err)
 			continue
-		}
-		var updated *lock.Lock
-		if *updateLock {
-			// Resolve before confirming, so the plan shows the image changes.
-			if updated, err = e.previewUpdate(ctx, p, stderr); err != nil {
-				errs = append(errs, err)
-				continue
-			}
 		}
 		printPlan(stdout, p.plan)
 		if p.plan.MigrationError != "" {
@@ -839,6 +833,21 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 		e.finishPlan(p)
 	}
 	return updated, err
+}
+
+// preparePlan is the plan apply checks and applies, and the API shows: with
+// e.updateLock, the image updates are in it. Both go through here, so the
+// plan a client reviewed is the one the job checks (its ID matches).
+func (e *env) preparePlan(ctx context.Context, s *fleet.Stack, stderr io.Writer) (*prepared, *lock.Lock, error) {
+	p, err := e.prepare(s)
+	if err != nil || !e.updateLock {
+		return p, nil, err
+	}
+	updated, err := e.previewUpdate(ctx, p, stderr)
+	if err != nil {
+		return nil, nil, err
+	}
+	return p, updated, nil
 }
 
 // addMaintenanceStep lists the Uptime Kuma window apply will open, before
