@@ -117,3 +117,25 @@ func TestCheckMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestNewerWithinMajor(t *testing.T) {
+	for _, tc := range []struct {
+		from, to      string
+		newer, sameMj bool
+	}{
+		{"0.2.0", "0.3.1", true, true},
+		{"0.3.1", "0.3.1", false, true},
+		{"0.3.1", "0.3.0", false, true},
+		{"0.9.0", "1.0.0", true, false},
+		{"1.2.0", "1.10.0", true, true},
+		{"1.2.0", "2.0.0", true, false},
+	} {
+		newer, same, err := NewerWithinMajor(tc.from, tc.to)
+		if err != nil || newer != tc.newer || same != tc.sameMj {
+			t.Errorf("%s → %s: newer %v same major %v (%v)", tc.from, tc.to, newer, same, err)
+		}
+	}
+	if _, _, err := NewerWithinMajor("", "1.0.0"); err == nil {
+		t.Error("an empty version")
+	}
+}
