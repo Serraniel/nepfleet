@@ -56,6 +56,7 @@ Or run it as a container: `ghcr.io/serraniel/nepfleet:latest` (`:edge` for the n
 - [Trusted TLS on a home network](docs/home-tls.md)
 - [Backups and restore](docs/backups.md)
 - [Notifications](docs/notifications.md): Discord, Slack, Telegram, ntfy, webhooks …
+- [Mail](docs/mail.md): one SMTP server for every stack
 - [Maintenance windows](docs/maintenance.md): Uptime Kuma during applies
 - [Releases](docs/releases.md) and [supply chain / SBOMs](docs/supply-chain.md)
 

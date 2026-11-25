@@ -6,10 +6,12 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/Serraniel/nepfleet/internal/fleet"
 	"github.com/Serraniel/nepfleet/internal/template"
 )
 
@@ -17,6 +19,27 @@ import (
 // (template.Builtins).
 func IsBuiltin(name string) bool {
 	return slices.Contains(template.Builtins, name)
+}
+
+// mailEnv adds the fleet's mail settings (spec.mail) as
+// ${NEPFLEET_SMTP_*}, all empty when the fleet has none. The password is a
+// secret: masked in plans and output.
+func mailEnv(in Input, env map[string]string, out *Output) {
+	var m fleet.Mail
+	if in.Fleet.Spec.Mail != nil {
+		m = *in.Fleet.Spec.Mail
+	}
+	port := ""
+	if m.Port != 0 {
+		port = strconv.Itoa(m.Port)
+	}
+	env["NEPFLEET_SMTP_HOST"] = m.Host
+	env["NEPFLEET_SMTP_PORT"] = port
+	env["NEPFLEET_SMTP_USER"] = m.User
+	env["NEPFLEET_SMTP_PASSWORD"] = in.MailPassword
+	env["NEPFLEET_SMTP_FROM"] = m.From
+	env["NEPFLEET_SMTP_TLS"] = m.TLS
+	out.Secret["NEPFLEET_SMTP_PASSWORD"] = true
 }
 
 // varRef matches what Compose interpolates: ${NAME…} (also with a default or

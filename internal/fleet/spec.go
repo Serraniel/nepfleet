@@ -91,6 +91,9 @@ type Spec struct {
 	// volumes can live on (stack.yaml spec.volumes).
 	Storage map[string]Storage `yaml:"storage"`
 	Egress  *Egress            `yaml:"egress"`
+	// Mail is the SMTP server stacks send mail through, as the built-ins
+	// ${NEPFLEET_SMTP_*} (docs/mail.md).
+	Mail *Mail `yaml:"mail"`
 }
 
 // NotifyChannel is one notification destination.
@@ -446,6 +449,9 @@ func Load(dir string) (*Fleet, error) {
 		return nil, err
 	}
 	if err := checkStorage(&f); err != nil {
+		return nil, err
+	}
+	if err := checkMail(&f); err != nil {
 		return nil, err
 	}
 	if err := checkEgress(f.Spec.Egress); err != nil {

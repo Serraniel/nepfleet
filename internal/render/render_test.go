@@ -542,6 +542,35 @@ func TestNullEnvironmentSurvivesRender(t *testing.T) {
 	}
 }
 
+// The fleet's mail settings reach the stacks that use them; the password is
+// masked like other secrets, and a stack input set wins over the built-in.
+func TestMailBuiltins(t *testing.T) {
+	f, tpl := setup(t)
+	f.Spec.Mail = &fleet.Mail{Host: "smtp.example.test", Port: 587, User: "fleet@example.test", PasswordSecret: "MAIL_PASSWORD", From: "fleet@example.test", TLS: "starttls"}
+	write(t, filepath.Join(tpl.Dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    environment:\n"+
+		"      D: '${DOMAIN}'\n      SMTP_HOST: '${MODE:-${NEPFLEET_SMTP_HOST}}'\n      SMTP_PORT: '${NEPFLEET_SMTP_PORT}'\n      SMTP_PASSWORD: '${NEPFLEET_SMTP_PASSWORD}'\n")
+	write(t, filepath.Join(tpl.Dir, "files/app.conf"), "password ${NEPFLEET_SMTP_PASSWORD}\n")
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, MailPassword: "s3cret-pw"})
+	must(t, err)
+	env := EnvValues(out.Files[EnvFile])
+	if env["NEPFLEET_SMTP_HOST"] != "smtp.example.test" || env["NEPFLEET_SMTP_PORT"] != "587" || env["NEPFLEET_SMTP_PASSWORD"] != "s3cret-pw" {
+		t.Errorf("env = %v", env)
+	}
+	if _, ok := env["NEPFLEET_SMTP_USER"]; ok {
+		t.Error("NEPFLEET_SMTP_USER written though nothing uses it")
+	}
+	if !out.Secret["NEPFLEET_SMTP_PASSWORD"] || strings.Contains(string(out.Masked(EnvFile)), "s3cret-pw") || strings.Contains(string(out.Masked("conf/app.conf")), "s3cret-pw") {
+		t.Errorf("the password isn't masked:\n%s\n%s", out.Masked(EnvFile), out.Masked("conf/app.conf"))
+	}
+	// Without spec.mail the built-ins are empty, and the render still works.
+	f.Spec.Mail = nil
+	out, err = Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl})
+	must(t, err)
+	if env := EnvValues(out.Files[EnvFile]); env["NEPFLEET_SMTP_HOST"] != "" || env["NEPFLEET_SMTP_PORT"] != "" {
+		t.Errorf("no mail: %v", env)
+	}
+}
+
 func TestDockerGIDBuiltin(t *testing.T) {
 	f, tpl := setup(t)
 	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, DockerGID: "972"})

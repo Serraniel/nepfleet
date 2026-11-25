@@ -450,6 +450,22 @@ func serve(args []string, stderr io.Writer) error {
 		RemoveChannel: func(_ context.Context, name, by string) (string, error) {
 			return removeChannelAPI(c, name, by)
 		},
+		Mail: func(context.Context) (api.MailSettings, error) { return mailAPI(c) },
+		SetMail: func(_ context.Context, m api.MailUpdate, by string) (string, error) {
+			commit, err := setMailAPI(c, m, by)
+			if err == nil && reconcile != nil {
+				reconcile.Now() // stacks using the built-ins pick it up
+			}
+			return commit, err
+		},
+		RemoveMail: func(_ context.Context, by string) (string, error) {
+			commit, err := removeMailAPI(c, by)
+			if err == nil && reconcile != nil {
+				reconcile.Now()
+			}
+			return commit, err
+		},
+		TestMail:   func(ctx context.Context, to string) error { return testMailAPI(ctx, c, to) },
 		SecretKeys: func(_ context.Context, stack string) ([]string, error) { return secretKeys(c, stack) },
 		SetSecret: func(ctx context.Context, stack, key string, value *string, by string) (string, error) {
 			// Waits for a running apply rather than refusing at once.

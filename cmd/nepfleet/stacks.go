@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/x509"
@@ -12,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net"
 	"net/http"
@@ -228,6 +230,10 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
+	mailPw, err := e.mailPassword(s, tpl)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
+	}
 	var host *fleet.Host
 	if s.Spec.Access != nil && s.Spec.Access.Mode == "port" {
 		if host, err = e.fleet.LoadHost(e.targetHost(s.Spec.Target)); err != nil {
@@ -238,7 +244,7 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 		}
 	}
 	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret,
-		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/"), DockerGID: doctor.DockerGID("/"), APIURL: servedAPIURL})
+		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/"), DockerGID: doctor.DockerGID("/"), APIURL: servedAPIURL, MailPassword: mailPw})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -280,6 +286,54 @@ func (e *env) storagePasswords(s *fleet.Stack) (map[string]string, error) {
 		out[k] = sec[e.fleet.Spec.Storage[k].PasswordSecret]
 	}
 	return out, nil
+}
+
+// mailPassword reads the fleet's SMTP password from fleet.secret.yaml, only
+// for a stack whose files mention ${NEPFLEET_SMTP_PASSWORD}: a stack that
+// loads all of .env (env_file) doesn't get it unasked.
+func (e *env) mailPassword(s *fleet.Stack, tpl *template.Template) (string, error) {
+	m := e.fleet.Spec.Mail
+	if m == nil || m.PasswordSecret == "" || !mentions(s, tpl, "NEPFLEET_SMTP_PASSWORD") {
+		return "", nil
+	}
+	sec, err := e.store.Load(filepath.Join(e.fleet.Dir, fleet.FleetSecretsFile))
+	if err != nil {
+		return "", err
+	}
+	pw, ok := sec[m.PasswordSecret]
+	if !ok {
+		return "", fmt.Errorf("the mail password (%s in %s) is not set (nepfleet secret set --global %s)", m.PasswordSecret, fleet.FleetSecretsFile, m.PasswordSecret)
+	}
+	return pw, nil
+}
+
+// mentions reports whether name appears in the files a stack renders from:
+// the template's compose file and files, or a plain stack's compose.yaml,
+// and the stack's files/ folder.
+func mentions(s *fleet.Stack, tpl *template.Template, name string) bool {
+	var paths []string
+	if tpl != nil {
+		paths = append(paths, filepath.Join(tpl.Dir, tpl.Spec.Compose))
+		for _, f := range tpl.Spec.Files {
+			paths = append(paths, filepath.Join(tpl.Dir, f.Src))
+		}
+	} else if s.Dir != "" {
+		paths = append(paths, filepath.Join(s.Dir, render.ComposeFile))
+	}
+	if s.Dir != "" {
+		_ = filepath.WalkDir(filepath.Join(s.Dir, render.StackFilesDir), func(p string, d fs.DirEntry, err error) error {
+			if err == nil && d.Type().IsRegular() {
+				paths = append(paths, p)
+			}
+			return nil
+		})
+	}
+	for _, p := range paths {
+		if raw, err := os.ReadFile(p); err == nil && bytes.Contains(raw, []byte(name)) {
+			return true
+		}
+	}
+	return false
 }
 
 // targetHost is the host a target names ("local" is this host).

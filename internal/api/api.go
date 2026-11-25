@@ -182,6 +182,16 @@ type Options struct {
 	Routes        RoutesFunc
 	SetRoutes     SetRoutesFunc
 	RemoveChannel func(ctx context.Context, name, by string) (string, error)
+	// Mail reads fleet.yaml's spec.mail, without the password. SetMail
+	// writes it, and the password (encrypted in fleet.secret.yaml) as
+	// MailUpdate says, in one commit; RemoveMail deletes both (ErrNoMail
+	// when there are none). Errors: InvalidError, ErrBusy, ErrUncommitted.
+	// TestMail sends a test mail to an address with the saved settings
+	// (ErrNoMail); its errors never contain the password.
+	Mail       func(ctx context.Context) (MailSettings, error)
+	SetMail    func(ctx context.Context, m MailUpdate, by string) (commit string, err error)
+	RemoveMail func(ctx context.Context, by string) (commit string, err error)
+	TestMail   func(ctx context.Context, to string) error
 	// Features are the opt-in system stacks and the stacks providing them.
 	Features func() ([]Feature, error)
 	// SecretKeys lists the keys of a stack's encrypted values, or of the
@@ -401,6 +411,7 @@ func Handler(o Options) http.Handler {
 	registerInputs(mux, o, l)
 	registerFeatures(mux, o, l)
 	registerChannels(mux, o, l)
+	registerMail(mux, o, l)
 	registerRoutes(mux, o, l)
 	registerTokens(mux, o, l)
 	registerSBOM(mux, o, l)

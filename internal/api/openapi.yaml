@@ -589,6 +589,71 @@ paths:
         "403": { description: The scope isn't admin }
         "404": { description: No channel of that name }
         "502": { description: "Sending failed; the reason, with URLs removed" }
+  /api/v1/mail:
+    get:
+      tags: [server]
+      operationId: mail
+      summary: The fleet's mail settings, never the password (admin scope)
+      responses:
+        "200":
+          description: The settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MailSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+    put:
+      tags: [server]
+      operationId: setMail
+      summary: Set the fleet's mail settings and password, in one commit (admin scope)
+      description: Writes fleet.yaml's spec.mail; the password goes encrypted into fleet.secret.yaml (MAIL_PASSWORD, or the key spec.mail.passwordSecret already names). Stacks that use ${NEPFLEET_SMTP_*} pick the change up on their next apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MailUpdate" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "400": { description: "Not valid settings; the reason" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "409": { description: "Another operation runs, or the files have uncommitted changes on the server" }
+    delete:
+      tags: [server]
+      operationId: removeMail
+      summary: Remove the fleet's mail settings and the password the app stored, in one commit (admin scope)
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "404": { description: No mail settings }
+        "409": { description: "Another operation runs, or the files have uncommitted changes on the server" }
+  /api/v1/mail/test:
+    post:
+      tags: [server]
+      operationId: testMail
+      summary: Send a test mail with the saved settings (admin scope, at most 5 in 10 minutes)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MailTest" }
+      responses:
+        "204": { description: Sent }
+        "400": { description: Not a mail address }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: The scope isn't admin }
+        "404": { description: No mail settings }
+        "429": { description: Too many test mails; Retry-After says when to try again }
+        "502": { description: "Sending failed; the server's reason, never the password" }
   /api/v1/tokens:
     get:
       tags: [server]
@@ -1777,6 +1842,36 @@ components:
       required: [channels]
       properties:
         channels: { type: array, items: { type: string } }
+    MailSettings:
+      type: object
+      description: fleet.yaml's spec.mail. The password is never returned, only whether it is stored.
+      required: [configured, host, port, user, from, tls, passwordSet]
+      properties:
+        configured: { type: boolean, description: "fleet.yaml has spec.mail; the other fields are empty otherwise" }
+        host: { type: string }
+        port: { type: integer }
+        user: { type: string }
+        from: { type: string }
+        tls: { type: string, enum: ["", starttls, tls, none] }
+        passwordSet: { type: boolean }
+    MailUpdate:
+      type: object
+      required: [host]
+      properties:
+        host: { type: string }
+        port: { type: integer, description: "0 or absent: 587 for starttls, 465 for tls, 25 for none" }
+        user: { type: string }
+        from: { type: string, description: "The sender, e.g. `NepFleet <fleet@example.org>`" }
+        tls: { type: string, enum: [starttls, tls, none], default: starttls }
+        password:
+          type: string
+          maxLength: 1024
+          description: "Absent keeps the stored password, empty removes it, anything else replaces it (encrypted in fleet.secret.yaml)."
+    MailTest:
+      type: object
+      required: [to]
+      properties:
+        to: { type: string, description: A mail address }
     TokenInfo:
       type: object
       required: [id, name, scope, created, expires, expired]
