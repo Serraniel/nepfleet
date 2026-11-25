@@ -41,6 +41,48 @@ func output(compose, env string) *render.Output {
 	}
 }
 
+// An env file from an earlier NepFleet holds built-ins nothing uses: they are
+// left out now, and that alone is not a change. A used one that differs is.
+func TestUnusedBuiltinsAreNoChange(t *testing.T) {
+	dir := t.TempDir()
+	compose := "services:\n  web: {image: 'nginx:1', user: '${NEPFLEET_DOCKER_GID}'}\n"
+	old := "# Rendered by NepFleet.\nNEPFLEET_API_URL='http://nepfleet:7480'\nNEPFLEET_DOCKER_GID='972'\nTZ='UTC'\nX='1'\n"
+	if _, err := Apply(context.Background(), &fakeRunner{}, &Plan{Stack: "app", Dir: dir, Mode: "compose"}, output(compose, old), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	unused := func(o *render.Output, kv map[string]string) *render.Output {
+		o.UnusedBuiltins = kv
+		return o
+	}
+	cur := unused(output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='972'\nX='1'\n"),
+		map[string]string{"NEPFLEET_API_URL": "http://nepfleet:7480", "TZ": "UTC"})
+	if p, err := PlanStack("app", "compose", dir, cur, nil); err != nil || !p.Empty() {
+		t.Fatalf("unused built-ins left out: plan %+v, %v", p, err)
+	}
+	// TZ is still used (environment: [TZ] passes it through): render keeps
+	// it, so an env file without it is a change.
+	cur = unused(output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='972'\nX='1'\n"),
+		map[string]string{"NEPFLEET_API_URL": "http://nepfleet:7480"})
+	if p, _ := PlanStack("app", "compose", dir, cur, nil); len(p.Changes) != 1 || !strings.Contains(p.Changes[0].Diff, "TZ") {
+		t.Fatalf("a dropped used built-in must show: plan %+v", p)
+	}
+	// TZ='UTC' was the stack's own value, the built-in is another: removing
+	// the value is a change.
+	cur = unused(output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='972'\nX='1'\n"),
+		map[string]string{"NEPFLEET_API_URL": "http://nepfleet:7480", "TZ": "Europe/Berlin"})
+	if p, _ := PlanStack("app", "compose", dir, cur, nil); len(p.Changes) != 1 || !strings.Contains(p.Changes[0].Diff, "TZ") {
+		t.Fatalf("a removed stack value must show: plan %+v", p)
+	}
+	cur = output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='973'\nX='1'\n")
+	if p, _ := PlanStack("app", "compose", dir, cur, nil); len(p.Changes) != 1 || p.Changes[0].Path != render.EnvFile {
+		t.Fatalf("a used built-in changed: plan %+v", p)
+	}
+	cur = output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='972'\nX='2'\n")
+	if p, _ := PlanStack("app", "compose", dir, cur, nil); len(p.Changes) != 1 {
+		t.Fatalf("a value changed: plan %+v", p)
+	}
+}
+
 func TestPlanApplyRollback(t *testing.T) {
 	dir := t.TempDir()
 	r := &fakeRunner{}

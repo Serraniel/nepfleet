@@ -159,6 +159,8 @@ A `generate` entry of `kind: bcrypt` is the bcrypt hash of another value, `from`
 
 Tools that notify through shoutrrr URLs can send to NepFleet, whose channels then deliver (deduplicated and routed like its own events): `generic://${NEPFLEET_API_HOST}/api/v1/alerts?disabletls=yes&template=json&@Authorization=Bearer%20${NOTIFY_TOKEN}`, with `NOTIFY_TOKEN` a notify-token. The alert's title and message become its rule and detail, and the token names the stack as its source.
 
+The stack's `.env` holds only the builtins its rendered files refer to (as `${VAR}`, `${VAR:-default}` or `$VAR`), so a builtin a newer NepFleet adds changes only the stacks that use it. A compose file that loads `.env` into a container (`env_file: .env`) gets them all.
+
 Using any other `${VAR}` is a validation error, so a typo never silently becomes an empty string. Write `$${VAR}` to get a literal `${VAR}`.
 
 Values are written to the env file single-quoted, so a `$` inside a value (Argon2 or bcrypt hashes, for example) stays literal.

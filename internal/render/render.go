@@ -77,6 +77,10 @@ type Output struct {
 	// Keep are files written only when missing from the working directory:
 	// the app owns them once it runs (see template.File.Keep).
 	Keep map[string]bool
+	// UnusedBuiltins are the built-ins left out of the env file because
+	// nothing uses them, with their values: an env file an earlier NepFleet
+	// wrote with them is no different (deploy.PlanStack).
+	UnusedBuiltins map[string]string
 	// Secret names, for masking in plans and logs.
 	Secret map[string]bool
 	// secretValues are the values of Secret, for MaskSecrets.
@@ -108,6 +112,12 @@ func Render(in Input) (*Output, error) {
 		"NEPFLEET_API_HOST":          strings.TrimPrefix(apiURL, "http://"),
 		"NEPFLEET_API_NETWORK":       APINetwork,
 	}
+	// The keys that hold a built-in; a plain stack's value of the same name
+	// replaces it.
+	builtin := map[string]bool{"NEPFLEET_URL": true}
+	for k := range env {
+		builtin[k] = true
+	}
 	var compose []byte
 	var err error
 
@@ -123,10 +133,12 @@ func Render(in Input) (*Output, error) {
 				return nil, err
 			}
 			env[k] = r
+			delete(builtin, k)
 		}
 		for k, v := range in.Secrets {
 			env[k] = v
 			out.Secret[k] = true
+			delete(builtin, k)
 		}
 	} else {
 		if portMode(in.Stack) {
@@ -189,12 +201,13 @@ func Render(in Input) (*Output, error) {
 		}
 	}
 	out.Files[ComposeFile] = compose
+	out.collectSecretValues(env)
+	out.UnusedBuiltins = unusedBuiltins(env, builtin, out.Files)
 	envFile, err := dotenv(env)
 	if err != nil {
 		return nil, err
 	}
 	out.Files[EnvFile] = envFile
-	out.collectSecretValues(env)
 	return out, nil
 }
 
