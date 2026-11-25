@@ -3,7 +3,6 @@
 package render
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -131,14 +130,7 @@ func WithBotCheck(compose []byte, in Input, env map[string]string, out *Output) 
 	mapSet(side, "labels", caddy)
 	services.Content = append(services.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, side)
 	out.Files[AnubisPolicyFile] = anubisPolicy(allow, b.Difficulty)
-
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return encodeYAML(&doc, 2)
 }
 
 // anubisLabels turns the web service's Caddy labels into Anubis's: the one route

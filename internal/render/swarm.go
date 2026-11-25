@@ -94,7 +94,7 @@ func ForSwarm(compose []byte) ([]byte, error) {
 		}
 		dl.Content = append(dl.Content, move...)
 	}
-	return yaml.Marshal(&doc)
+	return encodeYAML(&doc, 4)
 }
 
 // swarmDependsOn turns depends_on's long form (conditions) into the list
@@ -234,7 +234,7 @@ func PinImages(compose []byte, pins map[string]string) ([]byte, error) {
 			}
 		}
 	}
-	return yaml.Marshal(&doc)
+	return encodeYAML(&doc, 4)
 }
 
 func mapGet(m *yaml.Node, key string) *yaml.Node {

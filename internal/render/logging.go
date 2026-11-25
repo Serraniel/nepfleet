@@ -3,8 +3,6 @@
 package render
 
 import (
-	"bytes"
-
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Serraniel/nepfleet/internal/fleet"
@@ -47,13 +45,7 @@ func WithLogging(compose []byte, l *fleet.Logging) ([]byte, error) {
 	if !changed {
 		return compose, nil
 	}
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), enc.Close()
+	return encodeYAML(&doc, 2)
 }
 
 // hasLogging reports a logging key on m, directly or through merge keys.

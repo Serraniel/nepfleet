@@ -3,7 +3,6 @@
 package render
 
 import (
-	"bytes"
 	"fmt"
 
 	"go.yaml.in/yaml/v3"
@@ -69,13 +68,7 @@ func WithHardware(compose []byte, hw []template.Hardware, env map[string]string,
 	if !changed {
 		return compose, nil
 	}
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), enc.Close()
+	return encodeYAML(&doc, 2)
 }
 
 // appendSeq appends a scalar to the list m[key], creating it if needed. A

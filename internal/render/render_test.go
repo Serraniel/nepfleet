@@ -495,6 +495,53 @@ func TestOnlyUsedBuiltins(t *testing.T) {
 	}
 }
 
+// An environment entry without a value takes it from .env. The compose steps
+// that rewrite the file (blocked hosts, logging, swarm…) keep it without a
+// value, in flow and block style, rather than writing an empty string.
+func TestNullEnvironmentSurvivesRender(t *testing.T) {
+	f, tpl := setup(t)
+	write(t, filepath.Join(tpl.Dir, "compose.yaml"), "services:\n"+
+		"  flow:\n    image: nginx:1.29\n    environment: {TZ: , NEPFLEET_STACK: null, X: ''}\n"+
+		"  block:\n    image: nginx:1.29\n    environment:\n      TZ:\n      X: ''\n")
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl})
+	must(t, err)
+	compose := out.Files[ComposeFile]
+	if !strings.Contains(string(compose), "extra_hosts") || !strings.Contains(string(compose), "logging") {
+		t.Fatalf("the compose steps did not rewrite the file:\n%s", compose)
+	}
+	if !strings.Contains(string(compose), "      TZ:\n") {
+		t.Errorf("block style changed:\n%s", compose)
+	}
+	pinned, _, err := PinData(compose, "myapp")
+	must(t, err)
+	swarm, err := ForSwarm(compose)
+	must(t, err)
+	images, err := PinImages(compose, map[string]string{"nginx:1.29": "sha256:abc"})
+	must(t, err)
+	for name, raw := range map[string][]byte{"render": compose, "pin data": pinned, "swarm": swarm, "pin images": images} {
+		var doc struct {
+			Services map[string]struct {
+				Environment map[string]*string `yaml:"environment"`
+			} `yaml:"services"`
+		}
+		must(t, yaml.Unmarshal(raw, &doc))
+		for svc, keys := range map[string][]string{"flow": {"TZ", "NEPFLEET_STACK"}, "block": {"TZ"}} {
+			env := doc.Services[svc].Environment
+			for _, k := range keys {
+				if v, ok := env[k]; !ok || v != nil {
+					t.Errorf("%s: %s.%s must stay without a value:\n%s", name, svc, k, raw)
+				}
+			}
+			if v := env["X"]; v == nil || *v != "" {
+				t.Errorf("%s: %s.X must stay an empty string:\n%s", name, svc, raw)
+			}
+		}
+	}
+	if env := EnvValues(out.Files[EnvFile]); env["TZ"] != "Europe/Berlin" || env["NEPFLEET_STACK"] != "myapp" {
+		t.Errorf("passed-through built-ins not in .env: %v", env)
+	}
+}
+
 func TestDockerGIDBuiltin(t *testing.T) {
 	f, tpl := setup(t)
 	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, DockerGID: "972"})
