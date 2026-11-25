@@ -139,6 +139,8 @@ func PlanStack(name, mode, dir string, out *render.Output, pins map[string]strin
 			p.Changes = append(p.Changes, Change{Path: path, Kind: Added, Diff: diff(nil, masked(out, path, out.Files[path]))})
 		case err != nil:
 			return nil, err
+		case path == render.EnvFile && bytes.Equal(withoutUnusedBuiltins(old, out.Files[path]), out.Files[path]):
+			// Only built-ins nothing uses any more: not a change.
 		case !bytes.Equal(old, out.Files[path]):
 			p.Changes = append(p.Changes, Change{Path: path, Kind: Changed, Diff: diff(masked(out, path, old), masked(out, path, out.Files[path]))})
 		}
@@ -183,6 +185,22 @@ func masked(out *render.Output, path string, content []byte) []byte {
 			// A keyed mark lets a diff show *that* a secret changed, never
 			// anything about its value.
 			line = fmt.Sprintf("%s='•••••• (%s)'\n", k, fingerprint(line))
+		}
+		b.WriteString(line)
+	}
+	return []byte(b.String())
+}
+
+// withoutUnusedBuiltins drops from an env file written by an earlier NepFleet
+// the built-ins the new one leaves out because nothing refers to them.
+func withoutUnusedBuiltins(old, cur []byte) []byte {
+	keep := render.EnvValues(cur)
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(string(old), "\n") {
+		if k, _, ok := strings.Cut(line, "="); ok && render.IsBuiltin(k) {
+			if _, used := keep[k]; !used {
+				continue
+			}
 		}
 		b.WriteString(line)
 	}

@@ -113,6 +113,65 @@ func TestReconcile(t *testing.T) {
 	}
 }
 
+// After a NepFleet update renders an auto stack differently, with nothing
+// changed in the fleet repository, the next round applies it. Built-ins the
+// stack doesn't use are no change at all.
+func TestReconcileRenderChange(t *testing.T) {
+	c, dir, _ := rollbackFleet(t)
+	st := filepath.Join(dir, "stacks", "web")
+	for name, y := range map[string]string{
+		"stack.yaml":   "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec: {target: local, apply: auto}\n",
+		"compose.yaml": "services:\n  web:\n    image: nginx:1.29-alpine\n    environment: {STACK: '${NEPFLEET_STACK}'}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(st, name), []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tgit(t, dir, "commit", "-qam", "auto", "--no-verify")
+	var log bytes.Buffer
+	ctx := context.Background()
+	t.Cleanup(func() { removeTestProject(t, c.stateDir) })
+	if err := runApply(ctx, c, []string{"web"}, applyOptions{yes: true, wait: applyWait}, &log, &log); err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	envFile := filepath.Join(deploy.StackDir(c.stateDir, "web"), ".env")
+	rendered, err := os.ReadFile(envFile) //nolint:gosec // the test's state
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rendered), "NEPFLEET_API_URL") {
+		t.Fatalf("an unused built-in was written:\n%s", rendered)
+	}
+	r := newReconciler(c, reconcileEvery, &log)
+
+	// An older NepFleet wrote every built-in: not a change.
+	if err := os.WriteFile(envFile, append(rendered, "NEPFLEET_API_URL='http://nepfleet:7480'\n"...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	log.Reset()
+	r.once(ctx)
+	if strings.Contains(log.String(), "applying web") {
+		t.Fatalf("unused built-ins were applied:\n%s", log.String())
+	}
+
+	// It rendered a used one differently: applied.
+	old := strings.Replace(string(rendered), "NEPFLEET_STACK='web'", "NEPFLEET_STACK='old'", 1)
+	if old == string(rendered) {
+		t.Fatalf("NEPFLEET_STACK not in .env:\n%s", rendered)
+	}
+	if err := os.WriteFile(envFile, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	log.Reset()
+	r.once(ctx)
+	if !strings.Contains(log.String(), "applying web") || !strings.Contains(log.String(), "applied and healthy") {
+		t.Fatalf("a render change was not applied:\n%s", log.String())
+	}
+	if now, _ := os.ReadFile(envFile); string(now) != string(rendered) { //nolint:gosec // the test's state
+		t.Errorf(".env after apply:\n%s", now)
+	}
+}
+
 func TestSetTemplateVersion(t *testing.T) {
 	raw := "apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec:\n  target: local\n  # which template\n  template:\n    source: official\n    name: caddy\n    version: 0.2.0\n"
 	out, err := setTemplateVersion([]byte(raw), "0.3.1")

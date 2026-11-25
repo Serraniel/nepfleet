@@ -41,6 +41,29 @@ func output(compose, env string) *render.Output {
 	}
 }
 
+// An env file from an earlier NepFleet holds built-ins nothing uses: they are
+// left out now, and that alone is not a change. A used one that differs is.
+func TestUnusedBuiltinsAreNoChange(t *testing.T) {
+	dir := t.TempDir()
+	compose := "services:\n  web: {image: 'nginx:1', user: '${NEPFLEET_DOCKER_GID}'}\n"
+	old := "# Rendered by NepFleet.\nNEPFLEET_API_URL='http://nepfleet:7480'\nNEPFLEET_DOCKER_GID='972'\nTZ='UTC'\nX='1'\n"
+	if _, err := Apply(context.Background(), &fakeRunner{}, &Plan{Stack: "app", Dir: dir, Mode: "compose"}, output(compose, old), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	cur := output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='972'\nX='1'\n")
+	if p, err := PlanStack("app", "compose", dir, cur, nil); err != nil || !p.Empty() {
+		t.Fatalf("unused built-ins left out: plan %+v, %v", p, err)
+	}
+	cur = output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='973'\nX='1'\n")
+	if p, _ := PlanStack("app", "compose", dir, cur, nil); len(p.Changes) != 1 || p.Changes[0].Path != render.EnvFile {
+		t.Fatalf("a used built-in changed: plan %+v", p)
+	}
+	cur = output(compose, "# Rendered by NepFleet.\nNEPFLEET_DOCKER_GID='972'\nX='2'\n")
+	if p, _ := PlanStack("app", "compose", dir, cur, nil); len(p.Changes) != 1 {
+		t.Fatalf("a value changed: plan %+v", p)
+	}
+}
+
 func TestPlanApplyRollback(t *testing.T) {
 	dir := t.TempDir()
 	r := &fakeRunner{}

@@ -159,6 +159,7 @@ Changes over the API are commits in the fleet repository, authored by the token'
 
 Stacks are `apply: auto` unless they opt into `apply: manual`. Besides what git sync pulls, `nepfleet serve` applies them whenever their plan has changes: a minute after it starts (a NepFleet update restarts it), right after an edit over the API, and every 15 minutes (`--reconcile 15m`; `0` turns it off). That brings in what no commit carries, such as built-in values a newer NepFleet adds, without anyone applying stacks by hand.
 
+- **After a NepFleet update:** a stack that the new version renders differently shows changes in its plan without a commit. Auto stacks apply them in the first round after the server starts; manual stacks wait for you. A new built-in changes only the stacks whose files use it.
 - **Health-gated as any apply:** a stack that doesn't become healthy is rolled back, and `apply.failed` or `apply.rolled_back` says so.
 - **What waits for a person:** destructive changes, data migrations, and plans that can't be made. An `apply.pending` notification says why, once per plan.
 - **No retry loop:** a plan that failed or waits isn't tried again until it changes.

@@ -37,7 +37,10 @@ spec:
   files:
     - {src: files/app.conf, dest: conf/app.conf}
 `)
-	write(t, filepath.Join(dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    environment: {D: '${DOMAIN}', K: '${KEY}', M: '${MODE}', T: '${ADMIN_TOKEN}'}\n")
+	// Every built-in, in the forms Compose interpolates: only those used are written.
+	write(t, filepath.Join(dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    environment: {D: '${DOMAIN}', K: '${KEY}', M: '${MODE}', T: '${ADMIN_TOKEN}'}\n"+
+		"    labels: {s: '${NEPFLEET_STACK}', z: $TZ, i: '${NEPFLEET_INGRESS_NETWORK:-none}', a: '${NEPFLEET_AGE_RECIPIENTS?}', b: '${NEPFLEET_NO_BACKUP_VOLUMES}',\n"+
+		"      g: '${NEPFLEET_DOCKER_GID-0}', u: '${NEPFLEET_API_URL}', h: '$NEPFLEET_API_HOST', n: '${NEPFLEET_API_NETWORK}'}\n")
 	write(t, filepath.Join(dir, "files/app.conf"), "server ${DOMAIN};\nliteral $${DOMAIN};\nkeep {$CADDY_STYLE}\n")
 	tpl, err := template.Load(dir)
 	must(t, err)
@@ -418,6 +421,49 @@ func TestAccessPortMode(t *testing.T) {
 	s.Spec.Access = &fleet.Access{Mode: "port", Port: 8060}
 	if _, err := Render(Input{Fleet: f, Stack: s, Template: tpl, Host: host}); err == nil {
 		t.Error("port mode without spec.web must fail")
+	}
+}
+
+// Only the built-ins a stack refers to are written, so a new built-in changes
+// only the stacks that use it. $$ is a literal dollar, not a reference.
+func TestOnlyUsedBuiltins(t *testing.T) {
+	f, tpl := setup(t)
+	write(t, filepath.Join(tpl.Dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    environment: {D: '${DOMAIN}', T: '${TZ:-UTC}', L: '$$NEPFLEET_API_URL'}\n")
+	write(t, filepath.Join(tpl.Dir, "files/app.conf"), "stack $NEPFLEET_STACK\n")
+	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, DockerGID: "972"})
+	must(t, err)
+	env := EnvValues(out.Files[EnvFile])
+	if env["TZ"] != "Europe/Berlin" || env["DOMAIN"] != "app.example.org" || env["MODE"] != "a" {
+		t.Errorf("used values missing: %v", env)
+	}
+	// The template file was substituted at render time; a reference left
+	// in it ($NAME) is kept, as an env file Compose reads may hold it.
+	if env["NEPFLEET_STACK"] != "myapp" {
+		t.Errorf("NEPFLEET_STACK = %q", env["NEPFLEET_STACK"])
+	}
+	for _, k := range []string{"NEPFLEET_API_URL", "NEPFLEET_DOCKER_GID", "NEPFLEET_INGRESS_NETWORK", "NEPFLEET_URL", "NEPFLEET_NO_BACKUP_VOLUMES"} {
+		if _, ok := env[k]; ok {
+			t.Errorf("%s written though nothing uses it", k)
+		}
+	}
+
+	// A service that loads .env itself gets every built-in.
+	write(t, filepath.Join(tpl.Dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    env_file: [{path: ./.env, required: true}]\n    environment: {D: '${DOMAIN}'}\n")
+	out, err = Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, DockerGID: "972"})
+	must(t, err)
+	if env := EnvValues(out.Files[EnvFile]); env["NEPFLEET_DOCKER_GID"] != "972" || env["NEPFLEET_API_URL"] != DefaultAPIURL {
+		t.Errorf("env_file: .env must keep all built-ins: %v", env)
+	}
+
+	// A plain stack's own value of a built-in's name is a value: kept.
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, ComposeFile), "services:\n  web:\n    image: nginx:1.29\n")
+	s := stack(map[string]string{"TZ": "UTC"})
+	s.Dir = dir
+	out, err = Render(Input{Fleet: f, Stack: s})
+	must(t, err)
+	if env := EnvValues(out.Files[EnvFile]); env["TZ"] != "UTC" || len(env) != 1 {
+		t.Errorf("plain stack env = %v, want only its TZ value", env)
 	}
 }
 

@@ -108,6 +108,12 @@ func Render(in Input) (*Output, error) {
 		"NEPFLEET_API_HOST":          strings.TrimPrefix(apiURL, "http://"),
 		"NEPFLEET_API_NETWORK":       APINetwork,
 	}
+	// The keys that hold a built-in; a plain stack's value of the same name
+	// replaces it.
+	builtin := map[string]bool{"NEPFLEET_URL": true}
+	for k := range env {
+		builtin[k] = true
+	}
 	var compose []byte
 	var err error
 
@@ -123,10 +129,12 @@ func Render(in Input) (*Output, error) {
 				return nil, err
 			}
 			env[k] = r
+			delete(builtin, k)
 		}
 		for k, v := range in.Secrets {
 			env[k] = v
 			out.Secret[k] = true
+			delete(builtin, k)
 		}
 	} else {
 		if portMode(in.Stack) {
@@ -189,12 +197,13 @@ func Render(in Input) (*Output, error) {
 		}
 	}
 	out.Files[ComposeFile] = compose
+	out.collectSecretValues(env)
+	unusedBuiltins(env, builtin, out.Files)
 	envFile, err := dotenv(env)
 	if err != nil {
 		return nil, err
 	}
 	out.Files[EnvFile] = envFile
-	out.collectSecretValues(env)
 	return out, nil
 }
 

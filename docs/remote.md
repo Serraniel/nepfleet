@@ -88,6 +88,8 @@ It probes the machine and shows a plan, then asks:
 
 Changes made to `/srv/nepfleet/compose.yaml` by hand are in `compose.yaml.previous` afterwards: carry them over.
 
+A newer NepFleet can render some stacks differently, for example with a new built-in value a template uses. Such a stack then shows changes in its plan, though nothing in the fleet repository changed. `apply: auto` stacks apply them by themselves a minute after the server starts, health-gated as usual ([applying by itself](api.md#applying-by-itself)). `apply: manual` stacks wait for you to review and apply them.
+
 ## Checking NepFleet on a machine
 
 `nepfleet doctor` on a machine checks Docker, the age key and its backup, disk, ports, log rotation, that the stacks' domains resolve, and more, and says how to fix what it finds. From the desktop app, Fleets runs it on a machine over SSH (the control daemon's `POST /v1/remotes/<name>/doctor`). That also works when the machine's API doesn't answer, which is when it matters most:
