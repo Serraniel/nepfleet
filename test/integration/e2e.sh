@@ -16,7 +16,8 @@ sed -i "s#      url: https://github.com/Serraniel/nepfleet-templates#      path:
 mkdir -p stacks/registry stacks/web
 printf 'apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: registry}\nspec:\n  target: local\n  template: {source: official, name: registry}\n  values: {DOMAIN: registry.example.org}\n' > stacks/registry/stack.yaml
 printf 'apiVersion: nepfleet/v1alpha1\nkind: Stack\nmetadata: {name: web}\nspec:\n  target: local\n  apply: auto\n' > stacks/web/stack.yaml
-printf 'services:\n  web:\n    image: nginx:1.29-alpine\n    healthcheck: {test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"], interval: 2s, retries: 3}\n' > stacks/web/compose.yaml
+# setup is a run-once service that nothing waits on: apply must not fail when it exits 0.
+printf 'services:\n  web:\n    image: nginx:1.29-alpine\n    healthcheck: {test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"], interval: 2s, retries: 3}\n  setup:\n    image: nginx:1.29-alpine\n    restart: "no"\n    entrypoint: ["sh", "-c", "sleep 2; echo setup-done"]\n' > stacks/web/compose.yaml
 printf '%s' 'alice:$2y$05$abcdefghijklmnopqrstuv' | "$NF" secret set --state "$T/state" registry HTPASSWD >/dev/null
 grep -q alice stacks/registry/values.secret.yaml && fail "secret stored in plaintext"
 git add -A && git commit -qm init
@@ -35,4 +36,21 @@ grep -q "rolled back" <<<"$out" || fail "no rollback on unhealthy apply"
 
 "$NF" rollback --state "$T/state" --yes web | grep 'up to date' >/dev/null || fail "git rollback"
 git log -1 --format=%s | grep -q '^revert(web)' || fail "rollback commit missing"
+
+sed -i 's#echo setup-done#echo setup-broke; exit 3#' stacks/web/compose.yaml && git commit -qam "break setup"
+out=$("$NF" apply --state "$T/state" --wait 30s web 2>&1) && fail "apply with a failing run-once service must exit non-zero"
+grep -q "run-once service setup exited with code 3" <<<"$out" || fail "run-once failure not reported: $out"
+grep -q "setup-broke" <<<"$out" || fail "run-once failure without its log: $out"
+grep -q "rolled back" <<<"$out" || fail "no rollback on a failing run-once service"
+
+# seed is a run-once service that worker waits for (service_completed_successfully).
+# Keeps web and setup: dropping a service is a destructive change.
+seed() { printf 'services:\n  web:\n    image: nginx:1.29-alpine\n  setup:\n    image: nginx:1.29-alpine\n    restart: "no"\n    entrypoint: ["true"]\n  seed:\n    image: nginx:1.29-alpine\n    entrypoint: ["sh", "-c", "%s"]\n  worker:\n    image: nginx:1.29-alpine\n    depends_on: {seed: {condition: service_completed_successfully}}\n' "$1" > stacks/web/compose.yaml; }
+seed "echo seed-done" && git commit -qam "seed before worker"
+"$NF" apply --yes --state "$T/state" --wait 30s web | grep -q '✓ applied' || fail "apply with a completed dependency"
+[ "$(docker compose -p web ps --format '{{.Service}}' worker)" = worker ] || fail "worker not running after its seed completed"
+seed "echo seed-broke; exit 4" && git commit -qam "break seed"
+out=$("$NF" apply --state "$T/state" --wait 30s web 2>&1) && fail "apply with a failing dependency must exit non-zero"
+grep -q "run-once service seed exited with code 4" <<<"$out" || fail "failed dependency not reported: $out"
+grep -q "seed-broke" <<<"$out" || fail "failed dependency without its log: $out"
 echo PASS
