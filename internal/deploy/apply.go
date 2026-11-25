@@ -191,7 +191,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 	}
 	if err == nil {
 		prog.next("pull, start and wait until healthy")
-		err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout)
+		err = up(ctx, r, p.Stack, p.Mode, p.Dir, pins, o.WaitTimeout, out)
 	}
 	if err == nil && o.Migration != nil {
 		prog.next("migration steps after the update")
@@ -255,7 +255,7 @@ func Apply(ctx context.Context, r Runner, p *Plan, out *render.Output, o Options
 			}
 		}
 	}
-	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, rollbackPins, o.WaitTimeout); rerr != nil {
+	if rerr := up(ctx, r, p.Stack, p.Mode, p.Dir, rollbackPins, o.WaitTimeout, out); rerr != nil {
 		return res, fmt.Errorf("%w; the previous version did not come back up either: %w", err, rerr)
 	}
 	g.discard(ctx)
@@ -423,14 +423,18 @@ func compose(stack, dir string, args ...string) []string {
 		"--file", filepath.Join(dir, render.ComposeFile), "--env-file", filepath.Join(dir, render.EnvFile)}, args...)
 }
 
-func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]string, wait time.Duration) error {
+// up starts the stack and waits until it is healthy. out masks secrets in the
+// logs that go into errors; the rollback passes the new version's output too,
+// whose secrets are the previous version's unless the apply changed them.
+func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]string, wait time.Duration, out *render.Output) error {
 	if mode != "swarm" {
 		for img, d := range pins {
 			if err := pinLocal(ctx, r, img, d); err != nil {
 				return fmt.Errorf("pin %s: %w", img, err)
 			}
 		}
-		return upCompose(ctx, r, stack, dir, wait)
+		mask := func(s string) string { return string(out.MaskSecrets([]byte(s))) }
+		return upCompose(ctx, r, stack, dir, wait, mask)
 	}
 	// Swarm needs nothing like upCompose: render.ForSwarm turns a run-once
 	// service into a job, and docker stack deploy waits until it completed.

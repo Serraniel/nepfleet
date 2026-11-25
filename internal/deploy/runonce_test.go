@@ -4,6 +4,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,12 +19,21 @@ type onceRunner struct {
 	states []string // ps output per poll; the last one repeats
 	logs   string
 	calls  []string
+	// startErr fails the first `up` (no --wait); hang makes it block until
+	// its context ends, failing with startErr.
+	startErr error
+	hang     bool
 }
 
-func (f *onceRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+func (f *onceRunner) Run(ctx context.Context, _ string, args ...string) ([]byte, error) {
 	call := strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	switch {
+	case strings.HasSuffix(call, " up --detach --remove-orphans"):
+		if f.hang {
+			<-ctx.Done()
+		}
+		return nil, f.startErr
 	case strings.Contains(call, " config --format json"):
 		return []byte(f.config), nil
 	case strings.Contains(call, " ps --all --format json"):
@@ -56,6 +66,8 @@ func ps(state string, code int) string {
 	return `{"Name":"st-setup-1","Service":"setup","State":"` + state + `","ExitCode":` + strconv.Itoa(code) + "}\n"
 }
 
+func noMask(s string) string { return s }
+
 func withFastPoll(t *testing.T) {
 	old := runOncePoll
 	runOncePoll = time.Millisecond
@@ -65,7 +77,7 @@ func withFastPoll(t *testing.T) {
 func TestUpWaitsForRunOnceService(t *testing.T) {
 	withFastPoll(t)
 	r := &onceRunner{config: onceConfig, states: []string{ps("running", 0), ps("exited", 0)}}
-	if err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute); err != nil {
+	if err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute, noMask); err != nil {
 		t.Fatal(err)
 	}
 	got := r.composeCalls()
@@ -91,7 +103,7 @@ func TestUpWaitsForRunOnceService(t *testing.T) {
 func TestUpRunOnceFailureShowsLog(t *testing.T) {
 	withFastPoll(t)
 	r := &onceRunner{config: onceConfig, states: []string{ps("exited", 3)}, logs: "connecting\nadmin: password too short\n"}
-	err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute)
+	err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute, noMask)
 	if err == nil {
 		t.Fatal("a run-once service that exited 3 must fail the apply")
 	}
@@ -108,7 +120,7 @@ func TestUpRunOnceFailureShowsLog(t *testing.T) {
 func TestUpRunOnceTimeout(t *testing.T) {
 	withFastPoll(t)
 	r := &onceRunner{config: onceConfig, states: []string{ps("running", 0)}}
-	err := upCompose(context.Background(), r, "st", t.TempDir(), 20*time.Millisecond)
+	err := upCompose(context.Background(), r, "st", t.TempDir(), 20*time.Millisecond, noMask)
 	if err == nil || !strings.Contains(err.Error(), "run-once service setup did not finish within") {
 		t.Fatalf("err = %v", err)
 	}
@@ -117,7 +129,7 @@ func TestUpRunOnceTimeout(t *testing.T) {
 func TestUpWithoutRunOnceIsOneCall(t *testing.T) {
 	// No explicit restart: "no" (db leaves restart unset): compose's own wait.
 	r := &onceRunner{config: `{"services":{"app":{"restart":"always"},"db":{}}}`}
-	if err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute); err != nil {
+	if err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute, noMask); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"config --format json", "up --detach --remove-orphans --wait --wait-timeout 60"}
@@ -130,7 +142,7 @@ func TestUpOnlyRunOnce(t *testing.T) {
 	// A stack of only run-once services (binfmt): nothing for compose to wait on.
 	withFastPoll(t)
 	r := &onceRunner{config: `{"services":{"setup":{"restart":"no"}}}`, states: []string{ps("exited", 0)}}
-	if err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute); err != nil {
+	if err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute, noMask); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range r.composeCalls() {
@@ -152,5 +164,53 @@ func TestParsePS(t *testing.T) {
 	}
 	if got, err := parsePS(nil); err != nil || len(got) != 0 {
 		t.Errorf("parsePS(empty) = %+v, %v", got, err)
+	}
+}
+
+func TestUpRunOnceLogIsMasked(t *testing.T) {
+	withFastPoll(t)
+	r := &onceRunner{config: onceConfig, states: []string{ps("exited", 1)}, logs: "login as admin / hunter2-secret failed\n"}
+	mask := func(s string) string { return strings.ReplaceAll(s, "hunter2-secret", "••••••") }
+	err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute, mask)
+	if err == nil || strings.Contains(err.Error(), "hunter2") || !strings.Contains(err.Error(), "admin / ••••••") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUpRunOnceWithoutContainer(t *testing.T) {
+	withFastPoll(t)
+	r := &onceRunner{config: onceConfig, states: []string{""}}
+	err := upCompose(context.Background(), r, "st", t.TempDir(), time.Minute, noMask)
+	if err == nil || !strings.Contains(err.Error(), "run-once service setup has no container") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUpStartTimeoutShowsCompose(t *testing.T) {
+	r := &onceRunner{config: onceConfig, hang: true, startErr: errors.New("signal: killed: Container st-app-1 Waiting")}
+	err := upCompose(context.Background(), r, "st", t.TempDir(), 20*time.Millisecond, noMask)
+	if err == nil || !strings.Contains(err.Error(), "st did not start within") || !strings.Contains(err.Error(), "Container st-app-1 Waiting") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A setup that app waits for with service_completed_successfully counts as
+// run-once even without restart: "no", and when it fails compose's first up
+// fails: the error carries the setup's log.
+func TestUpCompletedDependencyFailureShowsLog(t *testing.T) {
+	cfg := `{"services":{
+	  "app":{"depends_on":{"setup":{"condition":"service_completed_successfully","required":true}}},
+	  "setup":{}}}`
+	r := &onceRunner{config: cfg, states: []string{ps("exited", 2)}, logs: "seed: table missing\n",
+		startErr: errors.New("service \"setup\" didn't complete successfully: exit 2")}
+	once, rest, err := runOnceServices(context.Background(), r, "st", t.TempDir())
+	if err != nil || !slices.Equal(once, []string{"setup"}) || !slices.Equal(rest, []string{"app"}) {
+		t.Fatalf("once %v, rest %v, %v", once, rest, err)
+	}
+	err = upCompose(context.Background(), r, "st", t.TempDir(), time.Minute, noMask)
+	for _, want := range []string{"didn't complete successfully", "run-once service setup exited with code 2", "seed: table missing"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, lacks %q", err, want)
+		}
 	}
 }

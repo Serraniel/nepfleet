@@ -15,10 +15,12 @@ import (
 // runOncePoll is how often the wait checks whether run-once services finished.
 var runOncePoll = time.Second
 
-// runOnceServices splits a stack's services into run-once ones (an explicit
-// restart: "no": a setup step that exits when done) and the rest. An unset
-// restart is "no" to Docker too, but hand-written stacks often leave it out
-// on services that run for good: waiting for those to exit would never end.
+// runOnceServices splits a stack's services into run-once ones and the rest.
+// A service is run-once when it says restart: "no" explicitly (a setup step
+// that exits when done), or when another service waits for it with
+// service_completed_successfully. An unset restart is "no" to Docker too, but
+// hand-written stacks often leave it out on services that run for good:
+// waiting for those to exit would never end.
 func runOnceServices(ctx context.Context, r Runner, stack, dir string) (once, rest []string, err error) {
 	out, err := r.Run(ctx, dir, compose(stack, dir, "config", "--format", "json")...)
 	if err != nil {
@@ -29,14 +31,25 @@ func runOnceServices(ctx context.Context, r Runner, stack, dir string) (once, re
 	}
 	var cfg struct {
 		Services map[string]struct {
-			Restart string `json:"restart"`
+			Restart   string `json:"restart"`
+			DependsOn map[string]struct {
+				Condition string `json:"condition"`
+			} `json:"depends_on"`
 		} `json:"services"`
 	}
 	if err := json.Unmarshal(out, &cfg); err != nil {
 		return nil, nil, fmt.Errorf("reading the compose config: %w", err)
 	}
+	completes := map[string]bool{}
+	for _, s := range cfg.Services {
+		for dep, d := range s.DependsOn {
+			if d.Condition == "service_completed_successfully" {
+				completes[dep] = true
+			}
+		}
+	}
 	for name, s := range cfg.Services {
-		if s.Restart == "no" {
+		if s.Restart == "no" || completes[name] {
 			once = append(once, name)
 		} else {
 			rest = append(rest, name)
@@ -47,7 +60,8 @@ func runOnceServices(ctx context.Context, r Runner, stack, dir string) (once, re
 	return once, rest, nil
 }
 
-// upCompose starts a compose stack and waits until it is healthy.
+// upCompose starts a compose stack and waits until it is healthy. mask hides
+// secret values in what it adds to errors: they reach notifications.
 //
 // compose up --wait fails as soon as any container exits, even one that is
 // meant to: a setup service that exits 0 when done, unless another service
@@ -55,7 +69,7 @@ func runOnceServices(ctx context.Context, r Runner, stack, dir string) (once, re
 // services, start everything, let compose wait for the other services only
 // (--no-deps leaves the finished ones alone), then wait for the run-once
 // services to exit: 0 is done, anything else fails the apply with its log.
-func upCompose(ctx context.Context, r Runner, stack, dir string, wait time.Duration) error {
+func upCompose(ctx context.Context, r Runner, stack, dir string, wait time.Duration, mask func(string) string) error {
 	once, rest, err := runOnceServices(ctx, r, stack, dir)
 	if err != nil {
 		return err
@@ -79,9 +93,15 @@ func upCompose(ctx context.Context, r Runner, stack, dir string, wait time.Durat
 	timedOut := uctx.Err() != nil && ctx.Err() == nil
 	cancel()
 	if timedOut {
-		return fmt.Errorf("%s did not start within %s: its depends_on conditions were not met", stack, wait)
+		// err carries the end of compose's output: what it was waiting for.
+		return fmt.Errorf("%s did not start within %s: %s", stack, wait, mask(errText(err)))
 	}
 	if err != nil {
+		// A run-once service others wait for with service_completed_successfully
+		// failed: compose only says so, the log says why.
+		if failed := runOnceFailure(ctx, r, stack, dir, once, mask); failed != nil {
+			return fmt.Errorf("%w; %w", err, failed)
+		}
 		return err
 	}
 	if len(rest) > 0 {
@@ -94,7 +114,14 @@ func upCompose(ctx context.Context, r Runner, stack, dir string, wait time.Durat
 			return err
 		}
 	}
-	return waitRunOnce(ctx, r, stack, dir, once, deadline, wait)
+	return waitRunOnce(ctx, r, stack, dir, once, deadline, wait, mask)
+}
+
+func errText(err error) string {
+	if err == nil {
+		return "compose was still starting the services"
+	}
+	return err.Error()
 }
 
 // psEntry is one container of `compose ps --format json`.
@@ -126,26 +153,46 @@ func parsePS(out []byte) ([]psEntry, error) {
 	return list, nil
 }
 
+// runOnceState reads the containers of the run-once services, sorted by name.
+func runOnceState(ctx context.Context, r Runner, stack, dir string, services []string) ([]psEntry, error) {
+	out, err := r.Run(ctx, dir, compose(stack, dir, append([]string{"ps", "--all", "--format", "json"}, services...)...)...)
+	if err != nil {
+		return nil, err
+	}
+	list, err := parsePS(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the state of %s: %w", strings.Join(services, ", "), err)
+	}
+	slices.SortFunc(list, func(a, b psEntry) int { return strings.Compare(a.Name, b.Name) })
+	return list, nil
+}
+
+// failed reports a container that stopped without succeeding.
+func (c psEntry) failed() bool {
+	return c.State == "dead" || c.State == "exited" && c.ExitCode != 0
+}
+
 // waitRunOnce waits until every container of the run-once services exited.
-func waitRunOnce(ctx context.Context, r Runner, stack, dir string, services []string, deadline time.Time, wait time.Duration) error {
+func waitRunOnce(ctx context.Context, r Runner, stack, dir string, services []string, deadline time.Time, wait time.Duration, mask func(string) string) error {
 	for {
-		out, err := r.Run(ctx, dir, compose(stack, dir, append([]string{"ps", "--all", "--format", "json"}, services...)...)...)
+		list, err := runOnceState(ctx, r, stack, dir, services)
 		if err != nil {
 			return err
 		}
-		list, err := parsePS(out)
-		if err != nil {
-			return fmt.Errorf("reading the state of %s: %w", strings.Join(services, ", "), err)
-		}
-		slices.SortFunc(list, func(a, b psEntry) int { return strings.Compare(a.Name, b.Name) })
 		pending := ""
+		seen := map[string]bool{}
 		for _, c := range list {
+			seen[c.Service] = true
 			switch {
-			case c.State == "exited" && c.ExitCode == 0:
-			case c.State == "exited" || c.State == "dead":
-				return runOnceFailed(ctx, r, stack, dir, c)
-			case pending == "":
+			case c.failed():
+				return runOnceFailed(ctx, r, stack, dir, c, mask)
+			case c.State != "exited" && pending == "":
 				pending = c.Service
+			}
+		}
+		for _, s := range services {
+			if !seen[s] {
+				return fmt.Errorf("run-once service %s has no container", s)
 			}
 		}
 		if pending == "" {
@@ -162,8 +209,24 @@ func waitRunOnce(ctx context.Context, r Runner, stack, dir string, services []st
 	}
 }
 
-// runOnceFailed reports a run-once service that failed, with its last log lines.
-func runOnceFailed(ctx context.Context, r Runner, stack, dir string, c psEntry) error {
+// runOnceFailure returns the failure of the first run-once service that
+// failed, with its log, or nil when none did (or their state can't be read).
+func runOnceFailure(ctx context.Context, r Runner, stack, dir string, services []string, mask func(string) string) error {
+	list, err := runOnceState(ctx, r, stack, dir, services)
+	if err != nil {
+		return nil
+	}
+	for _, c := range list {
+		if c.failed() {
+			return runOnceFailed(ctx, r, stack, dir, c, mask)
+		}
+	}
+	return nil
+}
+
+// runOnceFailed reports a run-once service that failed, with its last log
+// lines, secrets masked.
+func runOnceFailed(ctx context.Context, r Runner, stack, dir string, c psEntry, mask func(string) string) error {
 	err := fmt.Errorf("run-once service %s exited with code %d", c.Service, c.ExitCode)
 	if c.State == "dead" {
 		err = fmt.Errorf("run-once service %s is dead", c.Service)
@@ -172,5 +235,5 @@ func runOnceFailed(ctx context.Context, r Runner, stack, dir string, c psEntry) 
 	if lerr != nil || len(bytes.TrimSpace(logs)) == 0 {
 		return err
 	}
-	return fmt.Errorf("%w: %s", err, tail(string(logs), 10))
+	return fmt.Errorf("%w: %s", err, mask(tail(string(logs), 10)))
 }

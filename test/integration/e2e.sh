@@ -42,4 +42,14 @@ out=$("$NF" apply --state "$T/state" --wait 30s web 2>&1) && fail "apply with a 
 grep -q "run-once service setup exited with code 3" <<<"$out" || fail "run-once failure not reported: $out"
 grep -q "setup-broke" <<<"$out" || fail "run-once failure without its log: $out"
 grep -q "rolled back" <<<"$out" || fail "no rollback on a failing run-once service"
+
+# seed is a run-once service that worker waits for (service_completed_successfully).
+seed() { printf 'services:\n  web:\n    image: nginx:1.29-alpine\n  seed:\n    image: nginx:1.29-alpine\n    entrypoint: ["sh", "-c", "%s"]\n  worker:\n    image: nginx:1.29-alpine\n    depends_on: {seed: {condition: service_completed_successfully}}\n' "$1" > stacks/web/compose.yaml; }
+seed "echo seed-done" && git commit -qam "seed before worker"
+"$NF" apply --yes --state "$T/state" --wait 30s web | grep -q '✓ applied' || fail "apply with a completed dependency"
+[ "$(docker compose -p web ps --format '{{.Service}}' worker)" = worker ] || fail "worker not running after its seed completed"
+seed "echo seed-broke; exit 4" && git commit -qam "break seed"
+out=$("$NF" apply --state "$T/state" --wait 30s web 2>&1) && fail "apply with a failing dependency must exit non-zero"
+grep -q "run-once service seed exited with code 4" <<<"$out" || fail "failed dependency not reported: $out"
+grep -q "seed-broke" <<<"$out" || fail "failed dependency without its log: $out"
 echo PASS

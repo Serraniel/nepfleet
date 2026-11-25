@@ -211,10 +211,11 @@ services:
 ```
 
 - **Health gate:** apply waits until the other services are healthy and every setup service has exited. Exit code 0 means done. Any other code fails the apply (and rolls it back), and the error shows the setup service's last log lines.
-- **No service has to wait for it:** `depends_on` with `condition: service_completed_successfully` still works when another service needs the setup first, but it isn't required.
-- **Only an explicit `restart: "no"` counts.** Docker treats an unset `restart` the same way, but stacks often leave it out on services that run for good. Apply would wait for those to exit.
+- **No service has to wait for it:** `depends_on` with `condition: service_completed_successfully` still works when another service needs the setup first, but it isn't required. A service that another one waits for this way counts as a setup service too, and its log is shown when it fails.
+- **Secrets:** secret values in the log lines are masked before they reach the error and its notifications.
+- **Only an explicit `restart: "no"` counts** (or a `service_completed_successfully` dependency). Docker treats an unset `restart` the same way, but stacks often leave it out on services that run for good. Apply would wait for those to exit.
 - **Runs on every apply:** compose starts the setup service again each time the stack is applied, so it must be safe to run twice. Check first, then change only what is missing.
-- **Time:** setup services share the apply's wait (`--wait`).
+- **Time:** the time a setup service runs counts against the apply's wait (`--wait`, 3 minutes by default), together with the other services' start.
 - **Swarm:** a setup service runs as a job (`mode: replicated-job`, restarted on failure), and the deploy waits until it completes.
 
 ## Migrations
