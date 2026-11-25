@@ -3,7 +3,6 @@
 package render
 
 import (
-	"bytes"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -256,13 +255,7 @@ func egressSidecars(compose []byte, allow []string, logOnly bool) ([]byte, error
 		}
 	}
 	services.Content = append(services.Content, added...)
-	var b bytes.Buffer
-	enc := yaml.NewEncoder(&b)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	return b.Bytes(), nil
+	return encodeYAML(&doc, 2)
 }
 
 func str(s string) *yaml.Node {

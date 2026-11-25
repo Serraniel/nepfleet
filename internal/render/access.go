@@ -3,7 +3,6 @@
 package render
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -80,13 +79,7 @@ func WithAccess(compose []byte, t *template.Template, s *fleet.Stack) ([]byte, e
 	}
 	ports.Content = append(ports.Content, &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle,
 		Value: fmt.Sprintf("%d:%d", s.Spec.Access.Port, t.Spec.Web.Port)})
-	var b bytes.Buffer
-	enc := yaml.NewEncoder(&b)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	return b.Bytes(), nil
+	return encodeYAML(&doc, 2)
 }
 
 // dropCaddy removes caddy, caddy.* and caddy_N… labels (map or list form).

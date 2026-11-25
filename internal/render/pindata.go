@@ -70,7 +70,7 @@ func PinData(compose []byte, stack string) ([]byte, []string, error) {
 	if len(pinned) == 0 {
 		return compose, nil, nil
 	}
-	out, err := yaml.Marshal(&doc)
+	out, err := encodeYAML(&doc, 4)
 	return out, pinned, err
 }
 

@@ -3,7 +3,6 @@
 package render
 
 import (
-	"bytes"
 	"fmt"
 	"maps"
 	"slices"
@@ -63,11 +62,5 @@ func WithStorage(compose []byte, f *fleet.Fleet, s *fleet.Stack, passwords map[s
 		}
 		mapSet(vols, key, &node)
 	}
-	var b bytes.Buffer
-	enc := yaml.NewEncoder(&b)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	return b.Bytes(), nil
+	return encodeYAML(&doc, 2)
 }

@@ -3,7 +3,6 @@
 package render
 
 import (
-	"bytes"
 	"slices"
 	"strings"
 
@@ -56,13 +55,7 @@ func WithBlockedHosts(compose []byte, hosts []string) ([]byte, error) {
 			}
 		}
 	}
-	var b bytes.Buffer
-	enc := yaml.NewEncoder(&b)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	return b.Bytes(), nil
+	return encodeYAML(&doc, 2)
 }
 
 // mapped: the service already has an entry for host (list "host:ip" or
