@@ -427,9 +427,10 @@ func serve(args []string, stderr io.Writer) error {
 		NewStack: func(_ context.Context, req api.NewStack, by string) (api.NewStackResult, error) {
 			return newStackAPI(c, req, by)
 		},
-		Features: func() ([]api.Feature, error) { return featureList(c) },
-		Channels: func() ([]string, error) { return channelNames(c) },
-		Doctor:   func(ctx context.Context) (api.DoctorReport, error) { return doctorAPI(ctx, c) },
+		Features:   func() ([]api.Feature, error) { return featureList(c) },
+		Channels:   func() ([]string, error) { return channelNames(c) },
+		Deliveries: func() (map[string]api.ChannelDelivery, error) { return channelDeliveries(c) },
+		Doctor:     func(ctx context.Context) (api.DoctorReport, error) { return doctorAPI(ctx, c) },
 		DNSRecords: func(_ context.Context, zone, by string) (api.DNSRecordsResult, error) {
 			res, err := dnsRecordsAPI(c, zone, by)
 			if err == nil && reconcile != nil {

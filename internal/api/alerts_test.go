@@ -509,6 +509,14 @@ func TestChannelEndpoints(t *testing.T) {
 	admin, _, _ := store.Create("a", auth.ScopeAdmin, nil, time.Hour)
 	h := Handler(Options{Tokens: store,
 		Channels: func() ([]string, error) { return []string{"discord", "ntfy"}, nil },
+		Deliveries: func() (map[string]ChannelDelivery, error) {
+			at := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+			return map[string]ChannelDelivery{
+				"ntfy": {At: at, Error: "401 Unauthorized"},
+				// Removed from fleet.yaml since: not served.
+				"gone": {At: at, OK: true, Delivered: &at},
+			}, nil
+		},
 		TestChannel: func(_ context.Context, name string) error {
 			switch name {
 			case "discord":
@@ -525,7 +533,8 @@ func TestChannelEndpoints(t *testing.T) {
 		h.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := do("GET", "/api/v1/notifications/channels", read); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"channels":["discord","ntfy"]`) {
+	if rec := do("GET", "/api/v1/notifications/channels", read); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"channels":["discord","ntfy"]`) ||
+		!strings.Contains(rec.Body.String(), `"deliveries":{"ntfy":{"at":"2026-11-07T10:00:00Z","ok":false,"error":"401 Unauthorized"}}`) {
 		t.Errorf("list: %d %s", rec.Code, rec.Body)
 	}
 	if rec := do("POST", "/api/v1/notifications/channels/discord/test", read); rec.Code != http.StatusForbidden {

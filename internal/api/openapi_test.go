@@ -138,6 +138,7 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"SecretValue":       reflect.TypeFor[SecretValue](),
 		"SecretResult":      reflect.TypeFor[SecretResult](),
 		"NewStackResult":    reflect.TypeFor[NewStackResult](),
+		"ChannelDelivery":   reflect.TypeFor[ChannelDelivery](),
 	} {
 		s, ok := schemas[name]
 		if !ok {
