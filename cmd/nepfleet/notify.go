@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Serraniel/nepfleet/internal/api"
@@ -66,7 +67,37 @@ func (e *env) notifier() (*notify.Notifier, error) {
 	for _, r := range cfg.Routes {
 		routes = append(routes, notify.Route{Channels: r.Channels, Events: r.Events, Stacks: r.Stacks, MinSeverity: r.MinSeverity})
 	}
-	return notify.New(channels, routes)
+	n, err := notify.New(channels, routes)
+	if err != nil {
+		return nil, err
+	}
+	if e.stateDir != "" {
+		n.RecordTo(deliveryStore(e.stateDir))
+	}
+	return n, nil
+}
+
+var (
+	deliveriesMu sync.Mutex
+	deliveries   = map[string]*notify.Deliveries{}
+)
+
+// deliveryStore is the state directory's record of each channel's last
+// delivery, one per directory so serve keeps the last state in memory.
+func deliveryStore(stateDir string) *notify.Deliveries {
+	deliveriesMu.Lock()
+	defer deliveriesMu.Unlock()
+	d, ok := deliveries[stateDir]
+	if !ok {
+		d = &notify.Deliveries{Dir: filepath.Join(stateDir, "notify")}
+		deliveries[stateDir] = d
+	}
+	return d
+}
+
+// channelDeliveries is each channel's last delivery, for the app.
+func channelDeliveries(c common) (map[string]notify.Delivery, error) {
+	return deliveryStore(c.stateDir).All()
 }
 
 // emit sends an event; a failing channel only warns.

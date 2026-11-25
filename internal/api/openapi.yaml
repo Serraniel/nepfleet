@@ -476,11 +476,11 @@ paths:
     get:
       tags: [server]
       operationId: channels
-      summary: The notification channels of fleet.yaml, by name only
+      summary: The notification channels of fleet.yaml, by name only, with each one's last delivery
       description: Needs the read scope. Their URLs hold tokens and are never served.
       responses:
         "200":
-          description: The names
+          description: The names and last deliveries
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Channels" }
@@ -1839,9 +1839,21 @@ components:
         securityError: { type: string }
     Channels:
       type: object
-      required: [channels]
+      required: [channels, deliveries]
       properties:
         channels: { type: array, items: { type: string } }
+        deliveries:
+          type: object
+          description: Each channel's last send attempt, by name. Channels not sent to since the record began are missing.
+          additionalProperties: { $ref: "#/components/schemas/ChannelDelivery" }
+    ChannelDelivery:
+      type: object
+      required: [at, ok]
+      properties:
+        at: { type: string, format: date-time, description: The last attempt }
+        ok: { type: boolean, description: Whether it went out }
+        error: { type: string, description: "Why it failed, URLs removed" }
+        delivered: { type: string, format: date-time, description: The last attempt that went out, if any }
     MailSettings:
       type: object
       description: fleet.yaml's spec.mail. The password is never returned, only whether it is stored.

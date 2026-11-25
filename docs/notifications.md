@@ -34,6 +34,8 @@ Sent today: `apply.succeeded`, `apply.failed`, `apply.rolled_back`, `apply.pendi
 
 The app's Notifications page adds and removes channels. It stores a channel's URL encrypted as the fleet secret `NOTIFY_<NAME>`, writes the channel to `fleet.yaml` with a route of events at the chosen severity and above, and commits both (`PUT`/`DELETE /api/v1/notifications/channels/{name}`, admin). Send a test message afterwards to check it arrives. Routes edited by hand in `fleet.yaml` stay as they are.
 
+Each channel's last send attempt is kept in `<state>/notify/deliveries.json`: when, whether it went out, and why not, without URLs. Every send counts, test messages included. The app shows it next to the channel.
+
 ## Events
 
 | Event | Severity |

@@ -91,6 +91,8 @@ type Notifier struct {
 	senders  map[string]Sender
 	ownTitle map[string]bool
 	routes   []Route
+	// deliveries records each channel's last attempt (nil: not kept).
+	deliveries *Deliveries
 }
 
 // New creates senders for the channels. Without routes, every event goes to
@@ -138,6 +140,9 @@ func New(channels []Channel, routes []Route) (*Notifier, error) {
 // SetSender replaces a channel's sender (tests).
 func (n *Notifier) SetSender(channel string, s Sender) { n.senders[channel] = s }
 
+// RecordTo keeps each channel's last delivery in d.
+func (n *Notifier) RecordTo(d *Deliveries) { n.deliveries = d }
+
 // Channels returns the channels an event goes to, sorted.
 func (n *Notifier) Channels(e Event) []string {
 	if n == nil {
@@ -176,34 +181,38 @@ func (n *Notifier) SendTo(channels []string, e Event) error {
 	}
 	var errs []error
 	for _, c := range channels {
-		if w, ok := n.webhooks[c]; ok {
-			if err := w.send(e); err != nil {
-				errs = append(errs, fmt.Errorf("channel %s: %w", c, err))
+		if _, isWebhook := n.webhooks[c]; !isWebhook {
+			if _, ok := n.senders[c]; !ok {
+				errs = append(errs, fmt.Errorf("unknown channel %q", c))
+				continue
 			}
-			continue
 		}
-		s, ok := n.senders[c]
-		if !ok {
-			errs = append(errs, fmt.Errorf("unknown channel %q", c))
-			continue
-		}
-		title := "NepFleet: " + e.Title
-		if e.Host != "" {
-			title = "NepFleet@" + e.Host + ": " + e.Title
-		}
-		msg := e.text()
-		params := types.Params{types.TitleKey: title, types.LevelKey: e.Severity}
-		if n.ownTitle[c] {
-			delete(params, types.TitleKey)
-			msg = title + "\n" + msg
-		}
-		for _, err := range s.Send(msg, &params) {
-			if err != nil {
-				errs = append(errs, fmt.Errorf("channel %s: %w", c, err))
-			}
+		err := n.sendOne(c, e)
+		// Only for the app's display: a failure to note it never stops a send.
+		_ = n.deliveries.Record(c, err, time.Now())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("channel %s: %w", c, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// sendOne delivers an event to a known channel.
+func (n *Notifier) sendOne(c string, e Event) error {
+	if w, ok := n.webhooks[c]; ok {
+		return w.send(e)
+	}
+	title := "NepFleet: " + e.Title
+	if e.Host != "" {
+		title = "NepFleet@" + e.Host + ": " + e.Title
+	}
+	msg := e.text()
+	params := types.Params{types.TitleKey: title, types.LevelKey: e.Severity}
+	if n.ownTitle[c] {
+		delete(params, types.TitleKey)
+		msg = title + "\n" + msg
+	}
+	return errors.Join(n.senders[c].Send(msg, &params)...)
 }
 
 func (r Route) matches(e Event) bool {

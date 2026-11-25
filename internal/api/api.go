@@ -173,6 +173,8 @@ type Options struct {
 	// one a test message (ErrNoChannel for an unknown name).
 	Channels    func() ([]string, error)
 	TestChannel func(ctx context.Context, name string) error
+	// Deliveries is each channel's last send attempt (nil: not kept).
+	Deliveries func() (map[string]ChannelDelivery, error)
 	// SetChannel adds or replaces a channel: its shoutrrr URL stored
 	// encrypted, a route of events at minSeverity and above if none sends
 	// to it, committed. RemoveChannel deletes it (ErrNoChannel if unknown).

@@ -9,13 +9,19 @@ import (
 	"regexp"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
+	"github.com/Serraniel/nepfleet/internal/notify"
 )
 
 // Channels are the notification channels of fleet.yaml, by name only: their
-// URLs hold tokens.
+// URLs hold tokens. Deliveries has each one's last send attempt, for the
+// channels sent to since the record began.
 type Channels struct {
-	Channels []string `json:"channels"`
+	Channels   []string                   `json:"channels"`
+	Deliveries map[string]ChannelDelivery `json:"deliveries"`
 }
+
+// ChannelDelivery is a channel's last send attempt; its error has no URLs.
+type ChannelDelivery = notify.Delivery
 
 // ErrNoChannel means fleet.yaml has no channel of that name.
 var ErrNoChannel = errors.New("no channel of that name in fleet.yaml")
@@ -41,7 +47,20 @@ func registerChannels(mux *http.ServeMux, o Options, l *limiter) {
 		if cs == nil {
 			cs = []string{}
 		}
-		writeJSON(w, Channels{Channels: cs})
+		out := Channels{Channels: cs, Deliveries: map[string]ChannelDelivery{}}
+		if o.Deliveries != nil {
+			// Only shown, never needed: the list goes out without it.
+			ds, err := o.Deliveries()
+			if err != nil {
+				logf("api: reading channel deliveries: %v", err)
+			}
+			for _, c := range cs {
+				if d, ok := ds[c]; ok {
+					out.Deliveries[c] = d
+				}
+			}
+		}
+		writeJSON(w, out)
 	}))
 	mux.HandleFunc("POST /api/v1/notifications/channels/{name}/test", requireAuth(o, l, auth.ScopeAdmin, func(w http.ResponseWriter, r *http.Request) {
 		if o.TestChannel == nil {
