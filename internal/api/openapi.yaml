@@ -1741,7 +1741,7 @@ components:
         status: { type: string, enum: [ok, warn, fail] }
         detail: { type: string }
         fix: { type: string }
-        action: { type: string, enum: [dns-records], description: "A fix the app can start: dns-records is POST /api/v1/dns-records" }
+        action: { type: string, enum: [dns-records, key-backup], description: "A fix the app can start: dns-records is POST /api/v1/dns-records, key-backup is POST /api/v1/key/backup (which records the copy)" }
     NotifyRoute:
       type: object
       required: [channels, events, stacks]
