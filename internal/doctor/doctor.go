@@ -148,23 +148,7 @@ func Run(ctx context.Context, e Env, in Input) []Check {
 	add(ageKey(ctx, e, in))
 
 	// Disk.
-	if free, err := e.FreeBytes(info.DockerRootDir); err != nil {
-		if e.InContainer {
-			add(Check{"Disk", Warn, "cannot see " + info.DockerRootDir + " from inside the container", "check free space on the host: df -h " + info.DockerRootDir})
-		} else {
-			add(Check{"Disk", Warn, err.Error(), ""})
-		}
-	} else {
-		gb := float64(free) / (1 << 30)
-		c := Check{"Disk", OK, fmt.Sprintf("%.1f GiB free under %s", gb, info.DockerRootDir), ""}
-		switch {
-		case gb < 2:
-			c.Status, c.Fix = Fail, "free space: images and volume snapshots need room"
-		case gb < 10:
-			c.Status, c.Fix = Warn, "less than 10 GiB free; pulls and backups may fill it"
-		}
-		add(c)
-	}
+	add(diskCheck(ctx, e, info.DockerRootDir))
 
 	// Logs: json-file without options grows without bound.
 	switch {
