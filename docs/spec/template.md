@@ -193,6 +193,30 @@ labels:
 
 The system Prometheus stack discovers these services through the Docker socket proxy (`docker_sd_configs`, or `dockerswarm_sd_configs` with `role: tasks` on swarm). It keeps only services with `nepfleet.metrics.port` and labels their metrics with the stack and service, taken from the Compose or Stack labels. A service with metrics must be on the ingress network (`name: ${NEPFLEET_INGRESS_NETWORK}`), which validation checks: Prometheus scrapes there, so each container has exactly one address, the same network Caddy uses. Exporters and workers without a web UI join it for that reason too. Validation enforces the same rules as for the other integrations: the flag needs the labels, and the labels need the flag. A service with any `nepfleet.metrics.*` label also needs the port, and unknown keys are refused.
 
+## Setup services
+
+A setup service does one job and exits: it creates the admin from the stack's inputs, seeds a config, registers a runner. Mark it with `restart: "no"` and use the app's image unchanged:
+
+```yaml
+services:
+  app:
+    image: example/app:1.2.3
+    healthcheck: {test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]}
+  setup:
+    image: example/app:1.2.3
+    restart: "no"
+    entrypoint: ["sh", "/setup/setup.sh"]
+    depends_on:
+      app: { condition: service_healthy }
+```
+
+- **Health gate:** apply waits until the other services are healthy and every setup service has exited. Exit code 0 means done. Any other code fails the apply (and rolls it back), and the error shows the setup service's last log lines.
+- **No service has to wait for it:** `depends_on` with `condition: service_completed_successfully` still works when another service needs the setup first, but it isn't required.
+- **Only an explicit `restart: "no"` counts.** Docker treats an unset `restart` the same way, but stacks often leave it out on services that run for good. Apply would wait for those to exit.
+- **Runs on every apply:** compose starts the setup service again each time the stack is applied, so it must be safe to run twice. Check first, then change only what is missing.
+- **Time:** setup services share the apply's wait (`--wait`).
+- **Swarm:** a setup service runs as a job (`mode: replicated-job`, restarted on failure), and the deploy waits until it completes.
+
 ## Migrations
 
 A migration moves an installed stack from one template version to the next. NepFleet chains migrations to find an upgrade path, and it refuses to upgrade when no path exists.

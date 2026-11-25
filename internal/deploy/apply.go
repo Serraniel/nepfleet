@@ -430,10 +430,10 @@ func up(ctx context.Context, r Runner, stack, mode, dir string, pins map[string]
 				return fmt.Errorf("pin %s: %w", img, err)
 			}
 		}
-		_, err := r.Run(ctx, dir, compose(stack, dir, "up", "--detach", "--remove-orphans", "--wait",
-			"--wait-timeout", fmt.Sprint(int(wait.Seconds())))...)
-		return err
+		return upCompose(ctx, r, stack, dir, wait)
 	}
+	// Swarm needs nothing like upCompose: render.ForSwarm turns a run-once
+	// service into a job, and docker stack deploy waits until it completed.
 	// docker stack deploy does not read .env: interpolate with compose first.
 	cfg, err := r.Run(ctx, dir, compose(stack, dir, "config", "--format", "yaml")...)
 	if err != nil {
