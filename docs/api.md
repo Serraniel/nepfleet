@@ -55,7 +55,7 @@ The server describes itself in [OpenAPI 3.1](../internal/api/openapi.yaml) at `G
 | `POST /api/v1/stacks/{name}/egress/allow` | edit | adds host names, addresses or CIDR ranges to the stack's `spec.egress.allow`, as pasting `nepfleet egress suggest`: `{"add": [...]}` → `{commit, added}`. Keeps stack.yaml's comments, checks the stack still loads (`422`), commits as the person or token, doesn't apply. People need a recent verification |
 | `GET /api/v1/stacks/{name}/render` | read | the files the stack renders to, secrets masked, as `nepfleet render`: `[{path, content}]`; `422` with the reason when it doesn't render |
 | `GET /api/v1/stacks/{name}/match?source=official` | read | which templates run a plain stack's images, as `nepfleet template match`: `{template, matches: [{source, name, title, version, same: [{image, stack, template}], onlyStack, onlyTemplate}]}`, best first |
-| `GET /api/v1/sync` | read | where the fleet repository stands against its origin: last sync, commit, error, and the stacks the last pull applied, failed or left pending |
+| `GET /api/v1/sync` | read | where the fleet repository stands against its origin: last sync, commit, error, and the stacks the last pull applied, failed or left pending. `remote` says whether the repository has a git remote at all, with sync on or off (`false`: it lives on this server only); `remoteUrl` is that remote without user name, password or token |
 | `POST /api/v1/sync` | apply, or a signed webhook | pulls now, in the background (`202`); see [Git sync](#git-sync) |
 | `GET /api/v1/maintenance` | read | the maintenance windows of each Uptime Kuma in `fleet.yaml` (title, status, next slot), or the error reading them; fleet-wide, so a token limited to stacks gets `403` |
 | `GET /api/v1/jobs/{id}` | read | a job's state (`running`, `succeeded`, `failed`), error and log; while an apply runs, `progress`: `{step, steps, text}` (the phase it is in) |
@@ -174,6 +174,7 @@ Stacks are `apply: auto` unless they opt into `apply: manual`. Besides what git 
 - **Stacks the new commits changed** with `apply: auto` are applied, health-gated and rolled back on failure, as `nepfleet apply` does. A change to `fleet.yaml` counts for every stack.
 - **Destructive plans and `apply: manual` stacks** wait for a person: they are listed as pending (`GET /api/v1/sync`), and a `sync.pending` notification says so.
 - **It stops** when the server's repository has uncommitted changes or commits origin doesn't have, with a `sync.failed` notification, until someone resolves it.
+- **The remote** is the branch's upstream remote, else `origin`. A fleet repository without a remote (one created on the server) has nothing to sync from: changes made there apply directly. `GET /api/v1/sync` says which case a server is in (`remote`).
 
 **Signed commits only:** with this in `fleet.yaml`, sync brings in only commits signed by one of the listed keys: SSH keys as git's allowed-signers lines, OpenPGP (GPG) keys as `gpg --armor --export <key>` prints them:
 

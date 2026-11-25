@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -90,6 +92,62 @@ func (s *syncer) run(ctx context.Context) {
 type pulled struct {
 	from, to string
 	stacks   []string
+}
+
+// fleetRemote is the remote the fleet repository syncs from: its branch's
+// upstream remote, else origin, else the first one. ok is false when the
+// repository has no remote. The URL is for display only (see displayRemote).
+func fleetRemote(dir string) (url string, ok bool, err error) {
+	out, err := gitOut(dir, "remote")
+	if err != nil {
+		return "", false, err
+	}
+	names := strings.Fields(out)
+	if len(names) == 0 {
+		return "", false, nil
+	}
+	name := names[0]
+	if slices.Contains(names, "origin") {
+		name = "origin"
+	}
+	if b, err := gitOut(dir, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
+		r, _ := gitOut(dir, "config", "--get", "branch."+strings.TrimSpace(b)+".remote")
+		if r = strings.TrimSpace(r); slices.Contains(names, r) {
+			name = r
+		}
+	}
+	u, err := gitOut(dir, "remote", "get-url", name)
+	if err != nil {
+		return "", true, nil
+	}
+	return displayRemote(strings.TrimSpace(u)), true, nil
+}
+
+// scpRemote is git's user@host:path form; a user there is a name, never a
+// password.
+var scpRemote = regexp.MustCompile(`^([A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+:[^/]`)
+
+// displayRemote is a remote URL fit to show: without user info (tokens and
+// passwords go there), query or fragment. A form it doesn't know is not
+// shown at all ("").
+func displayRemote(raw string) string {
+	switch {
+	case strings.Contains(raw, "://"):
+		u, err := neturl.Parse(raw)
+		if err != nil || u.Host == "" && u.Scheme != "file" {
+			return ""
+		}
+		u.User, u.RawQuery, u.ForceQuery, u.Fragment, u.RawFragment = nil, "", false, "", ""
+		return u.String()
+	case strings.HasPrefix(raw, "/"), strings.HasPrefix(raw, "."):
+		return raw // a path on the server
+	case scpRemote.MatchString(raw):
+		// An @ after the colon may be user:password@host: not shown.
+		if _, path, _ := strings.Cut(raw, ":"); !strings.Contains(path, "@") {
+			return raw
+		}
+	}
+	return ""
 }
 
 var errDiverged = errors.New("the fleet repository has commits that origin doesn't: sync only fast-forwards, so it stopped; push or reset them")
