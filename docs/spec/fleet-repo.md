@@ -332,6 +332,19 @@ spec:
 - **No lookups elsewhere:** the DNS blocklist is off, so visitors' addresses aren't sent to a third party.
 - **Limits:** compose stacks in access mode `domain`, with one plain route to the web port (`caddy.reverse_proxy: "{{upstreams PORT}}"`). Templates that send paths to other ports or services are refused. Turning it on or off recreates the web service.
 
+## Sign-on
+
+`fleet.yaml` can name a Pocket ID stack as the fleet's identity provider. Stacks whose template supports sign-on then get a client in it, made by NepFleet. Each stack can opt out or use a provider of its own. See [sign-on](../sign-on.md).
+
+```yaml
+# fleet.yaml
+spec:
+  signOn: {provider: pocket-id}
+# stack.yaml
+spec:
+  signOn: {mode: integrated}   # integrated | custom (with issuer, clientID) | none
+```
+
 ## Rules
 
 - NepFleet commits only what it owns, such as `lock.yaml`, rendered output and imported stacks. Each commit message says why the change was made.

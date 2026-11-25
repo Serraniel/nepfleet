@@ -40,3 +40,6 @@ Templates are YAML plus a compose file. Generators, such as random secrets, are 
 
 ## D11 Notifications through shoutrrr URLs
 One URL format covers Discord, Slack, Telegram, Matrix, Teams, ntfy, Gotify, e-mail and webhooks. We use the maintained fork `nicholas-fedor/shoutrrr`, which Watchtower also uses. Events are routed by type, severity and stack. Details are in [notifications](notifications.md).
+
+## D12 Sign-on through a provider in the fleet
+One OpenID Connect provider per fleet, run as a stack (Pocket ID first). NepFleet registers a client per stack through the provider's admin API, keeps the client secret encrypted with the stack's other secrets, and fills the `NEPFLEET_OIDC_*` built-ins. How a stack signs in is a stack setting (`spec.signOn`), not a template input, because NepFleet acts on it. Planning asks the provider what is missing, so a provider that can't be reached holds the stack instead of applying it against a client that may not exist. Details are in [sign-on](sign-on.md).

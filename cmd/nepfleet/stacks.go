@@ -99,6 +99,9 @@ type prepared struct {
 	// lock is lock.yaml as this plan read it: apply pins exactly these
 	// digests, also if a pull changes the file meanwhile.
 	lock *lock.Lock
+	// signOn is the stack's client in the fleet's identity provider
+	// (integrated sign-on), nil without.
+	signOn *signOnPlanned
 }
 
 type env struct {
@@ -243,8 +246,13 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			return nil, err
 		}
 	}
+	oidc, signOn, err := e.signOn(s, tpl, sec)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
+	}
 	out, err := render.Render(render.Input{Fleet: e.fleet, Stack: s, Template: tpl, Secrets: sec, Refs: refs, RefSecret: refSecret,
-		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/"), DockerGID: doctor.DockerGID("/"), APIURL: servedAPIURL, MailPassword: mailPw})
+		NoBackupVolumes: noBackup, StoragePasswords: storagePw, Host: host, RenderGID: doctor.RenderGID("/"), DockerGID: doctor.DockerGID("/"), APIURL: servedAPIURL, MailPassword: mailPw,
+		OIDC: oidc})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
 	}
@@ -260,7 +268,10 @@ func (e *env) prepare(s *fleet.Stack) (*prepared, error) {
 			p.TemplateFrom = l.Template.Source + "@" + l.Template.Commit[:min(12, len(l.Template.Commit))]
 		}
 	}
-	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved, lock: l}
+	pr := &prepared{stack: s, tpl: tpl, out: out, plan: p, secrets: sec, pin: pin, pinMoved: pinMoved, lock: l, signOn: signOn}
+	if err := signOnCallbacks(pr); err != nil {
+		return nil, fmt.Errorf("%s: %w", s.Metadata.Name, err)
+	}
 	e.finishPlan(pr)
 	return pr, nil
 }
@@ -563,6 +574,10 @@ func cmdPlan(args []string, stdout, stderr io.Writer) error {
 				continue
 			}
 		}
+		if err := e.planSignOn(context.Background(), p); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		plans = append(plans, p.plan)
 	}
 	if *asJSON {
@@ -731,6 +746,16 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			}
 			fmt.Fprintf(stdout, "%s: generated secrets saved; commit %s\n", name, filepath.Join(s.Dir, fleet.SecretsFile))
 		}
+		// The client exists before the stack starts, with the secret it
+		// was rendered with (saved above).
+		if err := ensureSignOn(ctx, p); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			continue
+		}
+		if onlySignOn(p) {
+			fmt.Fprintf(stdout, "%s: ✓ sign-on client updated in %s\n", name, p.signOn.stack.Metadata.Name)
+			continue
+		}
 		opts := deploy.Options{
 			WaitTimeout: *wait, Commit: commit, Dirty: dirty, IngressNetwork: e.fleet.Spec.IngressNetwork,
 		}
@@ -892,13 +917,20 @@ func (e *env) previewUpdate(ctx context.Context, p *prepared, stderr io.Writer) 
 // preparePlan is the plan apply checks and applies, and the API shows: with
 // e.updateLock, the image updates are in it. Both go through here, so the
 // plan a client reviewed is the one the job checks (its ID matches).
+// It also asks the fleet's identity provider what the stack's client
+// lacks (integrated sign-on), so a provider it can't ask fails the plan.
 func (e *env) preparePlan(ctx context.Context, s *fleet.Stack, stderr io.Writer) (*prepared, *lock.Lock, error) {
 	p, err := e.prepare(s)
-	if err != nil || !e.updateLock {
-		return p, nil, err
-	}
-	updated, err := e.previewUpdate(ctx, p, stderr)
 	if err != nil {
+		return nil, nil, err
+	}
+	var updated *lock.Lock
+	if e.updateLock {
+		if updated, err = e.previewUpdate(ctx, p, stderr); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := e.planSignOn(ctx, p); err != nil {
 		return nil, nil, err
 	}
 	return p, updated, nil

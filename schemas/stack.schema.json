@@ -199,6 +199,42 @@
           ],
           "type": "string"
         },
+        "signOn": {
+          "additionalProperties": false,
+          "description": "SignOn: how the stack's users sign in (docs/sign-on.md).",
+          "properties": {
+            "clientID": {
+              "description": "ClientID is the client's ID at the provider (custom).",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "issuer": {
+              "description": "Issuer is the provider's issuer URL (custom).",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "mode": {
+              "description": "Mode: integrated (a client in the fleet's provider, made by NepFleet), custom (a provider of your own, Issuer and ClientID below, the secret in values.secret.yaml as NEPFLEET_OIDC_CLIENT_SECRET) or none (the app's own accounts). Default: integrated when the fleet has a provider and the template supports it, else none.",
+              "enum": [
+                "",
+                "integrated",
+                "custom",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "snapshot": {
           "default": "auto",
           "description": "Snapshot: auto copies the volumes before an apply that recreates running services and restores them on rollback; off skips that.",

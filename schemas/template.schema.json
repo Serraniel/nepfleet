@@ -504,6 +504,43 @@
             "null"
           ]
         },
+        "oidc": {
+          "additionalProperties": false,
+          "description": "OIDC declares sign-on through OpenID Connect: NepFleet registers a client for each stack in the fleet's provider (docs/sign-on.md).",
+          "properties": {
+            "logout": {
+              "description": "Logout is the path the provider may send users to after signing out.",
+              "pattern": "^/",
+              "type": "string"
+            },
+            "redirect": {
+              "description": "Redirect is the app's callback path, appended to the stack's URL. It may use inputs, as ${NAME}.",
+              "pattern": "^/",
+              "type": "string"
+            },
+            "scopes": {
+              "description": "Scopes the app asks for; default openid, profile and email.",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "redirect"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "supports": {
           "additionalProperties": false,
           "description": "Supports flags which NepFleet integrations a template wires up.",

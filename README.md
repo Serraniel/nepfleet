@@ -58,6 +58,7 @@ Or run it as a container: `ghcr.io/serraniel/nepfleet:latest` (`:edge` for the n
 - [Notifications](docs/notifications.md): Discord, Slack, Telegram, ntfy, webhooks …
 - [Mail](docs/mail.md): one SMTP server for every stack
 - [Maintenance windows](docs/maintenance.md): Uptime Kuma during applies
+- [Sign-on](docs/sign-on.md): one identity provider, clients registered per stack
 - [Releases](docs/releases.md) and [supply chain / SBOMs](docs/supply-chain.md)
 
 ## License

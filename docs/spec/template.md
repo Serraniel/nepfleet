@@ -122,6 +122,35 @@ spec:
 - **`supported: false`** refuses the check, for apps it would break however the paths are set, such as an API without a web page.
 - Paths are Go regular expressions, matched against the request path.
 
+## Sign-on
+
+A template whose app signs in through OpenID Connect declares it, so NepFleet can register a client for each stack in the fleet's identity provider ([sign-on](../sign-on.md)):
+
+```yaml
+spec:
+  supports: {sso: true}
+  oidc:
+    redirect: /auth/oidc/callback   # the app's callback path, appended to the stack's URL
+    logout: /                       # optional: where the provider may send users after signing out
+    scopes: [openid, profile, email, groups]   # optional; default openid profile email
+```
+
+Wire the app to the built-ins, whatever the stack's mode (integrated, custom or none):
+
+```yaml
+environment:
+  OIDC_ENABLED: ${NEPFLEET_OIDC_ENABLED}
+  OIDC_ISSUER: ${NEPFLEET_OIDC_ISSUER}
+  OIDC_CLIENT_ID: ${NEPFLEET_OIDC_CLIENT_ID}
+  OIDC_CLIENT_SECRET: ${NEPFLEET_OIDC_CLIENT_SECRET}
+  OIDC_SCOPES: ${NEPFLEET_OIDC_SCOPES}
+```
+
+- **Without sign-on** the values are empty and `NEPFLEET_OIDC_ENABLED` is `false`, so the app keeps its own accounts.
+- **Paths** start with `/` and may use inputs, such as `/user/oauth2/${OIDC_NAME}/callback`.
+- **Validation:** `spec.oidc` needs `supports.sso: true` and a use of `${NEPFLEET_OIDC_CLIENT_ID}`. The built-ins need `spec.oidc`. Scopes must include `openid`.
+- **`supports.sso` alone** still means the template has OIDC inputs of its own, which the user fills in.
+
 ## Hardware
 
 Devices and GPUs are inputs like any other, so the wizard can offer what the host has and a template still works without them:
@@ -151,6 +180,7 @@ Inside the compose file and `files/`, you can use the following variables:
   - `NEPFLEET_AGE_RECIPIENTS`: the fleet's age public keys, comma separated. Encrypt backups to these, and the fleet key can read them.
   - `NEPFLEET_NO_BACKUP_VOLUMES`: a regular expression alternation of the Docker volume names (`<stack>_<volume>`) that templates of stacks on the same host mark `backup: false`, such as caches and models. It's `$^` (matches nothing) when there are none, so `/backup/volumes/(${NEPFLEET_NO_BACKUP_VOLUMES})/` is a safe exclude. It's only computed for templates that use it.
   - `NEPFLEET_DOCKER_GID`: the group ID of the host's Docker socket (the socket NepFleet uses), for services that talk to Docker as a non-root user (`user: "65532:${NEPFLEET_DOCKER_GID}"`). It differs between hosts, so templates use this instead of asking. Empty when NepFleet can't see the socket.
+  - `NEPFLEET_OIDC_ENABLED` (`true` or `false`), `NEPFLEET_OIDC_ISSUER`, `NEPFLEET_OIDC_CLIENT_ID`, `NEPFLEET_OIDC_CLIENT_SECRET` and `NEPFLEET_OIDC_SCOPES` (space separated): the stack's sign-on, for templates with `spec.oidc` only (see [Sign-on](#sign-on)).
   - `NEPFLEET_API_URL`, `NEPFLEET_API_HOST` (the same without `http://`, for URLs such as shoutrrr's) and `NEPFLEET_API_NETWORK`: NepFleet's API for stacks that talk to it (log alerts, dashboard widgets). Put the services that need it on the network: `networks: {nepfleet-api: {name: ${NEPFLEET_API_NETWORK}, external: true}}`. The server joins this internal network as `nepfleet` when it starts, so the URL is `http://nepfleet:7480` (with the port it listens on). The network reaches only the API, never the outside.
   - `NEPFLEET_SMTP_HOST`, `NEPFLEET_SMTP_PORT`, `NEPFLEET_SMTP_USER`, `NEPFLEET_SMTP_PASSWORD`, `NEPFLEET_SMTP_FROM` and `NEPFLEET_SMTP_TLS` (`starttls`, `tls` or `none`): the fleet's [mail settings](../mail.md). All empty when the fleet has none. Use them as the fallback of the template's own inputs, so a stack's own value wins: `SMTP_HOST: ${SMTP_HOST:-${NEPFLEET_SMTP_HOST}}`. The password is masked like other secrets.
 

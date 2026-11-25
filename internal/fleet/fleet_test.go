@@ -111,6 +111,9 @@ func TestSchemaTagsMatchValidation(t *testing.T) {
 		for _, p := range path {
 			f, _ = ty.FieldByName(p)
 			ty = f.Type
+			if ty.Kind() == reflect.Pointer {
+				ty = ty.Elem()
+			}
 		}
 		for part := range strings.SplitSeq(f.Tag.Get("schema"), ";") {
 			if v, ok := strings.CutPrefix(part, "enum="); ok {
@@ -127,6 +130,7 @@ func TestSchemaTagsMatchValidation(t *testing.T) {
 		{enum(StackSpec{}, "Apply"), applyPolicies, "spec.apply"},
 		{enum(StackSpec{}, "Updates"), updatePolicies, "spec.updates"},
 		{enum(StackSpec{}, "Snapshot"), snapshotModes, "spec.snapshot"},
+		{enum(StackSpec{}, "SignOn", "Mode"), signOnModes, "spec.signOn.mode"},
 		{enum(Spec{}, "Updates", "Images"), updatePolicies, "fleet spec.updates.images"},
 		{enum(Spec{}, "Updates", "Host"), updatePolicies, "fleet spec.updates.host"},
 	} {
