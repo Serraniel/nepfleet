@@ -102,6 +102,41 @@ func TestMailEndpoints(t *testing.T) {
 	}
 }
 
+// A test that sent nothing (no settings, settings that can't send) doesn't
+// count against the limit.
+func TestMailTestRefunds(t *testing.T) {
+	store := &auth.Store{Dir: t.TempDir()}
+	admin, _, _ := store.Create("a", auth.ScopeAdmin, nil, time.Hour)
+	var next error
+	h := Handler(Options{Tokens: store, TestMail: func(context.Context, string) error { return next }})
+	do := func() int {
+		req := httptest.NewRequest("POST", "/api/v1/mail/test", strings.NewReader(`{"to":"a@example.test"}`))
+		req.Header.Set("Authorization", "Bearer "+admin)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for range 10 {
+		next = ErrNoMail
+		if c := do(); c != 404 {
+			t.Fatalf("no mail: %d", c)
+		}
+		next = InvalidError{Reason: "set a sender address (from) in the mail settings"}
+		if c := do(); c != 400 {
+			t.Fatalf("invalid: %d", c)
+		}
+	}
+	next = nil
+	for i := range 5 {
+		if c := do(); c != 204 {
+			t.Fatalf("test %d after refunds: %d", i, c)
+		}
+	}
+	if c := do(); c != 429 {
+		t.Errorf("over the limit: %d", c)
+	}
+}
+
 func TestMailTestLimit(t *testing.T) {
 	m := newMailTests()
 	now := time.Now()

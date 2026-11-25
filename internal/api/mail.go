@@ -79,6 +79,16 @@ func (m *mailTests) allow() bool {
 	return true
 }
 
+// refund takes back the newest attempt: one that sent nothing (no settings,
+// or settings that can't send) doesn't count.
+func (m *mailTests) refund() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.sent) > 0 {
+		m.sent = m.sent[:len(m.sent)-1]
+	}
+}
+
 // envUnsafe are what a .env value can't hold (render.dotenv).
 func envUnsafe(s string) bool {
 	return strings.ContainsAny(s, "'\r\n") || strings.HasSuffix(s, `\`)
@@ -181,11 +191,18 @@ func registerMail(mux *http.ServeMux, o Options, l *limiter) {
 		}
 		t, _ := TokenFrom(r.Context())
 		err := o.TestMail(r.Context(), req.To)
+		var invalid InvalidError
 		switch {
 		case errors.Is(err, ErrNoMail):
+			tests.refund()
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
+		case errors.As(err, &invalid):
+			tests.refund()
+			http.Error(w, invalid.Reason, http.StatusBadRequest)
+			return
 		case errors.Is(err, ErrBusy):
+			tests.refund()
 			writeErr(w, err)
 			return
 		case err != nil:

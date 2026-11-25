@@ -24,6 +24,9 @@ func TestMailValidation(t *testing.T) {
 		`{host: a, user: u, passwordSecret: "bad key"}`:      false,
 		`{host: a, user: "u\r\n"}`:                           false,
 		`{host: a, user: u, passwordSecret: P, password: x}`: false,
+		`{host: a, helo: mx.example.test}`:                   true,
+		`{host: a, helo: "mx example"}`:                      false,
+		`{host: a, helo: "-bad.example"}`:                    false,
 	} {
 		dir := t.TempDir()
 		y := strings.Replace(skeleton["fleet.yaml"], "spec:\n", "spec:\n  mail: "+raw+"\n", 1)

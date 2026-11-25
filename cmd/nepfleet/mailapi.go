@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -37,16 +38,27 @@ func mailAPI(c common) (api.MailSettings, error) {
 
 // setMailAPI is PUT /api/v1/mail: spec.mail in fleet.yaml and the password
 // in fleet.secret.yaml, committed together. A password key set by hand
-// (passwordSecret) is kept and written to.
+// (passwordSecret) is kept and written to. Without a user there is no login:
+// the stored password goes too, unless a new one is sent (refused). helo,
+// which the app doesn't show, stays as fleet.yaml has it.
 func setMailAPI(c common, u api.MailUpdate, by string) (string, error) {
 	m := fleet.Mail{Host: u.Host, Port: u.Port, User: u.User, From: u.From, TLS: u.TLS}
 	return changeChannels(c, by, "chore(fleet): set mail settings", func(e *env, secrets map[string]string) (bool, error) {
 		key := fleet.MailPasswordKey
-		if old := e.fleet.Spec.Mail; old != nil && old.PasswordSecret != "" {
-			key = old.PasswordSecret
+		if old := e.fleet.Spec.Mail; old != nil {
+			m.Helo = old.Helo
+			if old.PasswordSecret != "" {
+				key = old.PasswordSecret
+			}
 		}
 		changed := false
 		switch {
+		case u.Password == nil && u.User == "":
+			// A key set by hand may be shared: only the app's own goes.
+			if _, ok := secrets[key]; ok && key == fleet.MailPasswordKey {
+				delete(secrets, key)
+				changed = true
+			}
 		case u.Password == nil:
 			if _, ok := secrets[key]; ok {
 				m.PasswordSecret = key
@@ -111,10 +123,15 @@ func testMailAPI(ctx context.Context, c common, to string) error {
 			return fmt.Errorf("the password (%s in %s) is not set", m.PasswordSecret, fleet.FleetSecretsFile)
 		}
 	}
-	return mailer.Send(ctx, *m, password, mailer.Message{
+	err = mailer.Send(ctx, *m, password, mailer.Message{
 		To:      to,
 		Subject: "NepFleet test mail",
 		Body: "This is a test mail from NepFleet, fleet " + e.fleet.Metadata.Name + ".\n\n" +
 			"Stacks that use the fleet's mail settings send through the same server.\n",
 	})
+	var bad mailer.SettingsError
+	if errors.As(err, &bad) {
+		return api.InvalidError{Reason: bad.Reason}
+	}
+	return err
 }

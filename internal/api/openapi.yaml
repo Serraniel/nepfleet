@@ -648,10 +648,10 @@ paths:
             schema: { $ref: "#/components/schemas/MailTest" }
       responses:
         "204": { description: Sent }
-        "400": { description: Not a mail address }
+        "400": { description: "Not a mail address, or settings that can't send (no sender address); not counted" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: The scope isn't admin }
-        "404": { description: No mail settings }
+        "404": { description: No mail settings; not counted }
         "429": { description: Too many test mails; Retry-After says when to try again }
         "502": { description: "Sending failed; the server's reason, never the password" }
   /api/v1/tokens:
