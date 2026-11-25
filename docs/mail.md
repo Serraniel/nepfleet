@@ -23,7 +23,7 @@ Store the password encrypted with `nepfleet secret set --global MAIL_PASSWORD`.
 
 ## From the app
 
-Settings has a Mail form. It writes `spec.mail` to `fleet.yaml`, stores the password encrypted as the fleet secret `MAIL_PASSWORD` (or the key `passwordSecret` already names), and commits both. The password is never shown again: leave it empty to keep it. Changing these settings needs the admin scope and, in a browser session, a recent passkey check, as other secrets do.
+The Notifications page has a Mail form for each connected backend. It writes `spec.mail` to `fleet.yaml`, stores the password encrypted as the fleet secret `MAIL_PASSWORD` (or the key `passwordSecret` already names), and commits both. The password is never shown again: leave it empty to keep it. Changing these settings needs the admin scope and, in a browser session, a recent passkey check, as other secrets do.
 
 **Send a test mail** sends one to an address you give, with the saved settings. Save first. At most 5 test mails go out in 10 minutes. A failure shows the server's reason, never the password.
 
