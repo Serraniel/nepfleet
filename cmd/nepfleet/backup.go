@@ -215,10 +215,22 @@ func runMirror(c common, stdout io.Writer) error {
 		_ = json.Unmarshal(raw, &state)
 	}
 	var errs []error
+	secrets := newMirrorSecrets(e)
 	for _, m := range mirrors {
-		// No "git pull" advice: a mirror is not merged into.
-		if _, err := gitOut(dir, append([]string{"-c", "advice.pushUpdateRejected=false", "push", "--quiet", "--", m}, refspecs...)...); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w (a mirror that has commits of its own is not overwritten)", m, err))
+		env, done, err := secrets.pushEnv(c.stateDir, m)
+		if err == nil {
+			// No "git pull" advice: a mirror is not merged into.
+			_, err = gitOutEnv(dir, env, append([]string{"-c", "advice.pushUpdateRejected=false", "push", "--quiet", "--", m}, refspecs...)...)
+			done()
+		}
+		if err != nil {
+			hint := "a mirror that has commits of its own is not overwritten"
+			if secrets.auth(m) == "deploy-key" && strings.Contains(err.Error(), "Permission denied") {
+				// Right after adding a mirror, the usual reason; it shows
+				// in the app as well.
+				err = fmt.Errorf("%w (is the deploy key added to the forge, with write access?)", err)
+			}
+			errs = append(errs, fmt.Errorf("%s: %w (%s)", m, err, hint))
 			run := state[m]
 			run.Error = err.Error()
 			state[m] = run
@@ -233,6 +245,18 @@ func runMirror(c common, stdout io.Writer) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// gitOutEnv is gitOut with env added to git's environment.
+func gitOutEnv(dir string, env []string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
 }
 
 func writeState(dir, name string, raw []byte) error {
@@ -287,7 +311,7 @@ func backupChecks(e *env, stateDir, keyFromEnv string) []doctor.Check {
 	case len(failing) > 0:
 		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Fail, Detail: "the last nepfleet mirror failed for " + strings.Join(failing, ", "), Fix: "run nepfleet mirror to see why (a mirror with commits of its own is not overwritten)"})
 	case len(e.fleet.Spec.Mirrors) == 0:
-		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Warn, Detail: "the fleet repository has no second remote", Fix: "add spec.mirrors to fleet.yaml, then run nepfleet mirror"})
+		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Warn, Detail: noMirror, Fix: "add a mirror in the app (Sync), or add spec.mirrors to fleet.yaml, then run nepfleet mirror"})
 	case len(never) > 0:
 		out = append(out, doctor.Check{Name: "Repository mirror", Status: doctor.Warn, Detail: "not mirrored from this host yet: " + strings.Join(never, ", "), Fix: "nepfleet mirror (from a timer, or after pushing)"})
 	default:
@@ -392,9 +416,16 @@ func mirrorAPI(c common, run bool) ([]api.MirrorStatus, error) {
 	if raw, err := os.ReadFile(filepath.Join(c.stateDir, mirrorFile)); err == nil {
 		_ = json.Unmarshal(raw, &state)
 	}
+	secrets := newMirrorSecrets(e)
 	out := make([]api.MirrorStatus, 0, len(e.fleet.Spec.Mirrors))
 	for _, m := range e.fleet.Spec.Mirrors {
-		out = append(out, api.MirrorStatus{URL: m, OK: state[m].OK, Error: state[m].Error})
+		st := api.MirrorStatus{ID: api.MirrorID(m), URL: m, OK: state[m].OK, Error: state[m].Error, Auth: secrets.auth(m)}
+		// Shown again until the forge has it; a key that can't be read
+		// shows none rather than failing the list.
+		if key, ok, err := secrets.get(mirrorKeySecret(m)); err == nil && ok {
+			st.PublicKey = publicOf(key)
+		}
+		out = append(out, st)
 	}
 	return out, nil
 }

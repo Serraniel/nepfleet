@@ -133,6 +133,8 @@ func TestOpenAPISchemasMatchTypes(t *testing.T) {
 		"MatchedImage":      reflect.TypeFor[MatchedImage](),
 		"KeyBackupRequest":  reflect.TypeFor[KeyBackupRequest](),
 		"MirrorStatus":      reflect.TypeFor[MirrorStatus](),
+		"MirrorAdd":         reflect.TypeFor[MirrorAdd](),
+		"MirrorAdded":       reflect.TypeFor[MirrorAdded](),
 		"EgressAllowResult": reflect.TypeFor[EgressAllowResult](),
 		"PasskeyInfo":       reflect.TypeFor[PasskeyInfo](),
 		"SecretValue":       reflect.TypeFor[SecretValue](),

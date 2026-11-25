@@ -129,6 +129,12 @@ type Options struct {
 	// Mirror is how the pushes to spec.mirrors went; with run, it pushes first
 	// (nepfleet mirror).
 	Mirror func(ctx context.Context, run bool) ([]MirrorStatus, error)
+	// AddMirror adds a mirror to spec.mirrors, with a deploy key it makes
+	// (ssh) or the token (https) stored encrypted, and commits that.
+	AddMirror func(ctx context.Context, req MirrorAdd, kind MirrorKind, by string) (MirrorAdded, error)
+	// RemoveMirror takes a mirror out of spec.mirrors, with the secrets the
+	// app stored for it, and commits that. ErrNoMirror when there is none.
+	RemoveMirror func(ctx context.Context, id, by string) (string, error)
 	// StartUpdates runs updates apply (now: also outside the update window);
 	// like StartApply, it answers the run to start as a job.
 	StartUpdates func(ctx context.Context, now bool, by string) (func(log io.Writer) error, error)

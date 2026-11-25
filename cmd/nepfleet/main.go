@@ -573,6 +573,10 @@ func serve(args []string, stderr io.Writer) error {
 			return keyBackupAPI(ctx, c, recipients, by)
 		},
 		Mirror: func(_ context.Context, run bool) ([]api.MirrorStatus, error) { return mirrorAPI(c, run) },
+		AddMirror: func(_ context.Context, req api.MirrorAdd, kind api.MirrorKind, by string) (api.MirrorAdded, error) {
+			return addMirrorAPI(c, req, kind, by)
+		},
+		RemoveMirror: func(_ context.Context, id, by string) (string, error) { return removeMirrorAPI(c, id, by) },
 		StartUpdates: func(_ context.Context, now bool, by string) (func(io.Writer) error, error) {
 			return startUpdates(applyCtx, c, now, by)
 		},

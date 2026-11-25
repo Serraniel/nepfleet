@@ -243,6 +243,8 @@ Every secret is encrypted to the age keys in `fleet.yaml`. If you lose the priva
   - `nepfleet mirror` fetches origin and pushes its branches and all tags to every mirror. A clone that is behind still publishes the current state.
   - It never force-pushes and never deletes. A mirror with commits of its own makes it fail rather than be overwritten.
   - Run it from a timer, or after pushing.
+  - **From the app:** Sync → Repository mirrors adds one. For an SSH URL, the server makes an ed25519 deploy key and shows its public half. Add it to the forge as a deploy key with write access, then push. The private half is stored encrypted in `fleet.secret.yaml` as `MIRROR_<ID>_SSH_KEY`, where the ID is the first 12 hex digits of the URL's SHA-256. The forge's host key is trusted on first use and kept in the state directory (`mirror_known_hosts`).
+  - **Credentials:** a URL never holds a password or token, because fleet.yaml isn't encrypted. An https mirror signs in with a token the app stores as `MIRROR_<ID>_HTTP_AUTH` (`user:token`), or with the host's git credential helper. A mirror without a stored key or token uses the host's own SSH keys.
 
 `nepfleet doctor` warns while it knows of no copy of the key (including when a recorded copy has been moved away), when the key comes from `SOPS_AGE_KEY` and cannot be checked, and while the repository has no mirror or this host has not mirrored yet.
 

@@ -963,6 +963,59 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: The scope isn't admin }
         "503": { description: Another operation runs; try again }
+  /api/v1/mirror/remotes:
+    post:
+      tags: [server]
+      operationId: addMirror
+      summary: Add a mirror to spec.mirrors (admin scope)
+      description: >-
+        For an SSH URL the server makes an ed25519 deploy key and stores its
+        private half encrypted in fleet.secret.yaml; only the public half is
+        returned, to add to the forge with write access. An https token is
+        stored the same way. fleet.yaml and fleet.secret.yaml are committed
+        together. It doesn't push: POST /api/v1/mirror does, once the forge
+        has the key. People need a recent passkey check.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MirrorAdd" }
+      responses:
+        "201":
+          description: The mirror and the commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MirrorAdded" }
+        "400": { description: Not the expected body }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin; or `{\"verify\": true}`" }
+        "409": { description: "fleet.yaml or fleet.secret.yaml has uncommitted changes, or another change runs" }
+        "422": { description: "Not a URL the app adds (credentials in it, plain http, git://), a token for a non-https URL, or a mirror already" }
+  /api/v1/mirror/remotes/{id}:
+    delete:
+      tags: [server]
+      operationId: removeMirror
+      summary: Remove a mirror from spec.mirrors (admin scope)
+      description: >-
+        Removes the deploy key or token the app stored for it too, in one
+        commit. The mirror's repository and the key on the forge stay. People
+        need a recent passkey check.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^[0-9a-f]{12}$" } }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [commit]
+                properties:
+                  commit: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin; or `{\"verify\": true}`" }
+        "404": { description: No mirror with that ID }
+        "409": { description: "Uncommitted changes, or another change runs" }
   /api/v1/stacks/{name}/match:
     get:
       tags: [stacks]
@@ -1699,11 +1752,30 @@ components:
         recipients: { type: array, items: { type: string }, maxItems: 10, description: "age1… or ssh-ed25519/ssh-rsa public keys" }
     MirrorStatus:
       type: object
-      required: [url]
+      required: [id, url, auth]
       properties:
+        id: { type: string, description: "The mirror in the API: the first 12 hex digits of its URL's SHA-256" }
         url: { type: string, description: Without passwords or tokens }
         ok: { type: string, format: date-time, description: The last successful push }
         error: { type: string, description: Why the last push failed }
+        auth:
+          type: string
+          enum: [deploy-key, token, host]
+          description: "How the push signs in: a deploy key or token the app stored, or the host's own SSH keys and credential helper"
+        publicKey: { type: string, description: "The deploy key's public half (ssh-ed25519 …), to add to the forge with write access" }
+    MirrorAdd:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, description: "ssh://…, user@host:path, https://… or a local path (file://…); never with a password or token in it" }
+        token: { type: string, description: "For https only: stored encrypted and sent as HTTP basic auth" }
+        user: { type: string, description: "The user name that goes with token (default git)" }
+    MirrorAdded:
+      type: object
+      required: [mirror, commit]
+      properties:
+        mirror: { $ref: "#/components/schemas/MirrorStatus" }
+        commit: { type: string }
     TemplateMatches:
       type: object
       required: [matches]
@@ -1806,7 +1878,7 @@ components:
         status: { type: string, enum: [ok, warn, fail] }
         detail: { type: string }
         fix: { type: string }
-        action: { type: string, enum: [dns-records, key-backup], description: "A fix the app can start: dns-records is POST /api/v1/dns-records, key-backup is POST /api/v1/key/backup (which records the copy)" }
+        action: { type: string, enum: [dns-records, key-backup, mirror], description: "A fix the app can start: dns-records is POST /api/v1/dns-records, key-backup is POST /api/v1/key/backup (which records the copy), mirror is the mirror setup (POST /api/v1/mirror/remotes, then POST /api/v1/mirror)" }
     NotifyRoute:
       type: object
       required: [channels, events, stacks]

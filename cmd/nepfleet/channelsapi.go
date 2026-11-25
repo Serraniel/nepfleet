@@ -60,7 +60,7 @@ func removeChannelAPI(c common, name, by string) (string, error) {
 
 // changeChannels runs change on fleet.yaml and the fleet's secrets, and
 // commits both; on any failure both files are as they were. change reports
-// whether the secrets changed.
+// whether the secrets changed. Mirrors use it too.
 func changeChannels(c common, by, msg string, change func(e *env, secrets map[string]string) (bool, error)) (string, error) {
 	if !apiMu.TryLock() {
 		return "", api.ErrBusy
@@ -122,7 +122,7 @@ func changeChannels(c common, by, msg string, change func(e *env, secrets map[st
 	if err := commitAs(e.fleet.Dir, apiAuthor(by), msg, paths...); err != nil {
 		_, _ = gitOut(e.fleet.Dir, append([]string{"reset", "-q", "--"}, paths...)...)
 		restore()
-		return "", errors.Join(errors.New("committing the channel"), err)
+		return "", errors.Join(errors.New("committing "+strings.Join(paths, " and ")), err)
 	}
 	head, err := gitOut(e.fleet.Dir, "rev-parse", "HEAD")
 	return strings.TrimSpace(head), err
