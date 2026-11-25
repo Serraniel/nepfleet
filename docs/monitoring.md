@@ -14,7 +14,7 @@ Install the `prometheus` template, then the `grafana` template.
 
 - **`prometheus`** scrapes itself, this host (node-exporter), and every service with a `nepfleet.metrics.port` label on the ingress network, labelled with `stack` and `service`. It isn't published, as it has no login.
 - **`grafana`** has Prometheus as its data source, at `http://prometheus:9090` by default. It has no dashboards yet, so import what you need.
-- **`beszel`** is the lighter choice for host and container metrics, with history and alerts. Each watched host runs an agent, which the hub's Add System dialog explains.
+- **`beszel`** is the lighter choice for host and container metrics, with history and alerts. Each watched host runs a `beszel-agent` stack. It pairs with a hub in the same fleet by itself: in the agent's stack.yaml, take `TOKEN` from the hub's `AGENT_TOKEN` secret and `PAIR_PASSWORD` from its `PAIR_PASSWORD` secret (`{from: <hub stack>, secret: …}`). The agent then shows up in the hub under the host's name. A hub outside the fleet still works with `KEY` and `TOKEN` copied from its Add System dialog.
 
 Templates declare what they expose with `supports.metrics` and [labels](spec/template.md). Not many do yet.
 
