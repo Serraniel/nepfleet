@@ -131,6 +131,63 @@
             "null"
           ]
         },
+        "mail": {
+          "additionalProperties": false,
+          "description": "Mail is the SMTP server stacks send mail through, as the built-ins ${NEPFLEET_SMTP_*} (docs/mail.md).",
+          "properties": {
+            "from": {
+              "description": "From is the sender address, e.g. \"NepFleet <fleet@example.org>\".",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "host": {
+              "description": "Host is the SMTP server's host name or IP address.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "passwordSecret": {
+              "description": "PasswordSecret names the key in fleet.secret.yaml holding the password.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "port": {
+              "description": "Port defaults to 587 for starttls, 465 for tls and 25 for none.",
+              "type": "integer"
+            },
+            "tls": {
+              "default": "starttls",
+              "description": "TLS: starttls upgrades a plain connection (port 587), tls connects with TLS from the start (port 465), none sends in plain text (a relay on the same network).",
+              "enum": [
+                "",
+                "starttls",
+                "tls",
+                "none"
+              ],
+              "type": "string"
+            },
+            "user": {
+              "description": "User logs in to the server; empty sends without logging in.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "required": [
+            "host"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "mirrors": {
           "description": "Mirrors are git URLs of second remotes the fleet repository is pushed to (nepfleet mirror), so it survives the loss of its main remote.",
           "items": {

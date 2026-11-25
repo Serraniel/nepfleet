@@ -538,6 +538,10 @@ func TestEditingNeedsRecentVerification(t *testing.T) {
 		SetSecret: func(context.Context, string, string, *string, string) (string, error) {
 			saved++
 			return "c2", nil
+		},
+		SetMail: func(context.Context, MailUpdate, string) (string, error) {
+			saved++
+			return "c3", nil
 		}})
 	session := l.setup()
 	edit := `{"files":{"compose.yaml":"services: {}\n"},"base":{}}`
@@ -552,6 +556,10 @@ func TestEditingNeedsRecentVerification(t *testing.T) {
 	rec = l.do(http.MethodPut, "/api/v1/stacks/web/secrets/KEY", `{"value":"v"}`, session, testOrigin)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) || saved != 1 {
 		t.Errorf("setting a secret with an old sign-in: %d %s (saved %d)", rec.Code, rec.Body, saved)
+	}
+	rec = l.do(http.MethodPut, "/api/v1/mail", `{"host":"smtp.example.test","password":"v"}`, session, testOrigin)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) || saved != 1 {
+		t.Errorf("setting the mail password with an old sign-in: %d %s (saved %d)", rec.Code, rec.Body, saved)
 	}
 	rec = l.do(http.MethodPost, "/api/v1/tokens", `{"name":"ci","scope":"admin","days":1}`, session, testOrigin)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"verify":true`) {
