@@ -129,7 +129,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	dir, err := e.writeNewStack(tpl, *source, name, *target, *access, *port, values, secretVals)
+	dir, err := e.writeNewStack(tpl, *source, name, *target, *access, *port, values, secretVals, nil)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func newStackValues(f *fleet.Fleet, tpl *template.Template, given map[string]str
 
 // writeNewStack writes stack.yaml and the encrypted secrets, and checks that the
 // stack renders; on any failure nothing stays written.
-func (e *env) writeNewStack(tpl *template.Template, source, name, target, access string, port int, values, secretVals map[string]string) (string, error) {
+func (e *env) writeNewStack(tpl *template.Template, source, name, target, access string, port int, values, secretVals map[string]string, signOn *api.NewStackSignOn) (string, error) {
 	dir := e.newStackDir(tpl, name)
 	stack := map[string]any{
 		"apiVersion": "nepfleet/v1alpha1",
@@ -248,6 +248,16 @@ func (e *env) writeNewStack(tpl *template.Template, source, name, target, access
 	}
 	if access == "port" {
 		stack["spec"].(map[string]any)["access"] = map[string]any{"mode": "port", "port": port}
+	}
+	if signOn != nil && signOn.Mode != "" {
+		so := map[string]string{"mode": signOn.Mode}
+		if signOn.Issuer != "" {
+			so["issuer"] = signOn.Issuer
+		}
+		if signOn.ClientID != "" {
+			so["clientID"] = signOn.ClientID
+		}
+		stack["spec"].(map[string]any)["signOn"] = so
 	}
 	raw, err := yaml.Marshal(stack)
 	if err != nil {
@@ -399,10 +409,24 @@ func newStackAPI(c common, req api.NewStack, by string) (api.NewStackResult, err
 	if err != nil {
 		return api.NewStackResult{}, api.InvalidError{Reason: err.Error()}
 	}
+	if so := req.SignOn; so != nil {
+		if err := checkStackSignOn(e, name, tpl, so.Mode); err != nil {
+			return api.NewStackResult{}, err
+		}
+		if so.Mode == fleet.SignOnCustom {
+			if so.ClientSecret == "" {
+				return api.NewStackResult{}, api.InvalidError{Reason: "custom sign-on needs the client secret"}
+			}
+			if secrets == nil {
+				secrets = map[string]string{}
+			}
+			secrets[template.OIDCClientSecret] = so.ClientSecret
+		}
+	}
 	if st, _ := gitOut(e.fleet.Dir, "status", "--porcelain", "--", relTo(e.fleet.Dir, e.newStackDir(tpl, name))); strings.TrimSpace(st) != "" {
 		return api.NewStackResult{}, api.ErrStackExists
 	}
-	dir, err := e.writeNewStack(tpl, req.Source, name, req.Target, req.Access, port, values, secrets)
+	dir, err := e.writeNewStack(tpl, req.Source, name, req.Target, req.Access, port, values, secrets, req.SignOn)
 	if err != nil {
 		return api.NewStackResult{}, api.InvalidError{Reason: cleanReason(err, e.fleet.Dir)}
 	}

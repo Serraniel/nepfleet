@@ -15,6 +15,8 @@ The provider is a stack in the same fleet. [Pocket ID](https://pocket-id.org) is
        provider: pocket-id   # the stack's name
    ```
 
+   The app does the same under Features, Sign-on, and sets a stack's mode on its page ([API](api.md): `/api/v1/signon`, `/api/v1/stacks/{name}/signon`).
+
 3. **Apply the stacks.** Every stack whose template supports sign-on now uses it. Their plans show the client they get.
 
 ## Per stack: integrated, custom or none
