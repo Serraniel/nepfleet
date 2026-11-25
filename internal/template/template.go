@@ -73,6 +73,9 @@ type Spec struct {
 	// BotCheck says how the web UI works behind Anubis, when a stack turns
 	// on spec.botCheck.
 	BotCheck *BotCheck `yaml:"botCheck"`
+	// OIDC declares sign-on through OpenID Connect: NepFleet registers a
+	// client for each stack in the fleet's provider (docs/sign-on.md).
+	OIDC *OIDC `yaml:"oidc"`
 }
 
 // BotCheck is what a template knows about putting Anubis in front of it.
@@ -430,6 +433,7 @@ func (t *Template) Validate() error {
 	} else if t.Dir != "" {
 		errs = append(errs, t.checkCompose(declared)...)
 	}
+	errs = append(errs, t.checkOIDC(declared)...)
 	for _, f := range s.Files {
 		if !local(f.Src) || !local(f.Dest) {
 			bad("spec.files %q -> %q: paths must stay inside the template", f.Src, f.Dest)

@@ -57,6 +57,8 @@ type Input struct {
 	// MailPassword is the fleet's SMTP password (spec.mail.passwordSecret),
 	// for ${NEPFLEET_SMTP_PASSWORD}; only loaded for stacks that use it.
 	MailPassword string
+	// OIDC is the stack's sign-on (NEPFLEET_OIDC_*); nil without.
+	OIDC *OIDC
 }
 
 // APINetwork is the network NepFleet's API joins, as "nepfleet", for the
@@ -116,6 +118,7 @@ func Render(in Input) (*Output, error) {
 		"NEPFLEET_API_NETWORK":       APINetwork,
 	}
 	mailEnv(in, env, out)
+	addOIDC(in, env, out)
 	// The keys that hold a built-in; a plain stack's value of the same name
 	// replaces it.
 	builtin := map[string]bool{"NEPFLEET_URL": true}

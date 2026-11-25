@@ -94,6 +94,8 @@ type Spec struct {
 	// Mail is the SMTP server stacks send mail through, as the built-ins
 	// ${NEPFLEET_SMTP_*} (docs/mail.md).
 	Mail *Mail `yaml:"mail"`
+	// SignOn names the fleet's identity provider (docs/sign-on.md).
+	SignOn *SignOnSpec `yaml:"signOn"`
 }
 
 // NotifyChannel is one notification destination.
@@ -258,6 +260,8 @@ type StackSpec struct {
 	Snapshot string `yaml:"snapshot" schema:"enum=auto|off;default=auto"`
 	// SnapshotExclude lists mount paths in the containers never copied.
 	SnapshotExclude []string `yaml:"snapshotExclude"`
+	// SignOn: how the stack's users sign in (docs/sign-on.md).
+	SignOn *SignOn `yaml:"signOn"`
 }
 
 // BotCheck is a stack's Anubis settings.
@@ -457,6 +461,9 @@ func Load(dir string) (*Fleet, error) {
 	if err := checkEgress(f.Spec.Egress); err != nil {
 		return nil, fmt.Errorf("fleet.yaml: spec.egress: %w", err)
 	}
+	if err := checkFleetSignOn(f.Spec.SignOn); err != nil {
+		return nil, err
+	}
 	for i := range f.Spec.UptimeKuma {
 		k := &f.Spec.UptimeKuma[i]
 		if k.RollingUpdates == "" {
@@ -575,6 +582,9 @@ func loadStack(dir string) (*Stack, error) {
 	}
 	if err := checkEgress(s.Spec.Egress); err != nil {
 		bad("spec.egress: %v", err)
+	}
+	if err := checkSignOn(s.Spec.SignOn); err != nil {
+		bad("%v", err)
 	}
 	if b := s.Spec.BotCheck; b != nil {
 		if b.Difficulty == 0 {

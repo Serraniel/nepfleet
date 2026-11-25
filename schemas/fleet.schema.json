@@ -407,6 +407,24 @@
             "null"
           ]
         },
+        "signOn": {
+          "additionalProperties": false,
+          "description": "SignOn names the fleet's identity provider (docs/sign-on.md).",
+          "properties": {
+            "provider": {
+              "description": "Provider names the stack that runs the provider (a Pocket ID stack).",
+              "pattern": "^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "storage": {
           "additionalProperties": {
             "additionalProperties": false,

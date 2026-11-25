@@ -30,6 +30,9 @@ type Entry struct {
 	// say what it will create; values never appear in the index.
 	Generate []Generate `json:"generate"`
 	Volumes  []Volume   `json:"volumes"`
+	// OIDC: the template can sign in through the fleet's identity
+	// provider (integrated sign-on).
+	OIDC *OIDC `json:"oidc,omitempty"`
 	// Migrations lists the from → to pairs a template can migrate.
 	Migrations []MigrationRef `json:"migrations"`
 }
@@ -61,7 +64,7 @@ func Index(root string, ts []*Template) (*Catalogue, error) {
 		e := Entry{
 			Metadata: t.Metadata, Path: filepath.ToSlash(rel), Version: t.Spec.Version,
 			Images: nonNil(t.Spec.Images), Supports: t.Spec.Supports,
-			Inputs: nonNil(t.Spec.Inputs), Generate: nonNil(t.Spec.Generate), Volumes: nonNil(t.Spec.Volumes), Migrations: []MigrationRef{},
+			Inputs: nonNil(t.Spec.Inputs), Generate: nonNil(t.Spec.Generate), Volumes: nonNil(t.Spec.Volumes), OIDC: t.Spec.OIDC, Migrations: []MigrationRef{},
 		}
 		for _, m := range t.Spec.Migrations {
 			e.Migrations = append(e.Migrations, MigrationRef{m.From, m.To, m.Description, m.Backup, m.Rollback})
