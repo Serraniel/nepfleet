@@ -139,7 +139,8 @@ func TestInContainer(t *testing.T) {
 	if c := cs["Port 80"]; c.Status != Warn || !strings.Contains(c.Fix, "ss -ltn") {
 		t.Errorf("port 80 in a container: %+v", c)
 	}
-	if c := cs["Disk"]; c.Status != Warn || !strings.Contains(c.Detail, "inside the container") {
+	// No helper image to probe with: informational, not a warning.
+	if c := cs["Disk"]; c.Status != OK || !strings.Contains(c.Detail, "not checked") || !strings.Contains(c.Fix, "df -h /var/lib/docker") {
 		t.Errorf("disk in a container: %+v", c)
 	}
 
