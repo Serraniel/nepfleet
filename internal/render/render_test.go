@@ -571,6 +571,31 @@ func TestMailBuiltins(t *testing.T) {
 	}
 }
 
+// The TLS mode as switches, for apps that take a boolean per mode.
+func TestMailTLSSwitches(t *testing.T) {
+	f, tpl := setup(t)
+	write(t, filepath.Join(tpl.Dir, "compose.yaml"), "services:\n  web:\n    image: nginx:1.29\n    environment:\n"+
+		"      D: '${DOMAIN}'\n      I: '${SMTP_TLS:-${NEPFLEET_SMTP_IMPLICIT_TLS:-false}}'\n      S: '${NEPFLEET_SMTP_STARTTLS}'\n")
+	for tls, want := range map[string][2]string{
+		"starttls": {"false", "true"},
+		"":         {"false", "true"}, // as loaded without tls; Load fills in starttls
+		"tls":      {"true", "false"},
+		"none":     {"false", "false"},
+		"unset":    {"", ""},
+	} {
+		f.Spec.Mail = &fleet.Mail{Host: "smtp.example.test", TLS: tls}
+		if tls == "unset" {
+			f.Spec.Mail = nil
+		}
+		out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl})
+		must(t, err)
+		env := EnvValues(out.Files[EnvFile])
+		if got := [2]string{env["NEPFLEET_SMTP_IMPLICIT_TLS"], env["NEPFLEET_SMTP_STARTTLS"]}; got != want {
+			t.Errorf("tls %q: implicit, starttls = %v, want %v", tls, got, want)
+		}
+	}
+}
+
 func TestDockerGIDBuiltin(t *testing.T) {
 	f, tpl := setup(t)
 	out, err := Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, DockerGID: "972"})

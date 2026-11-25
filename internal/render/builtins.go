@@ -39,6 +39,15 @@ func mailEnv(in Input, env map[string]string, out *Output) {
 	env["NEPFLEET_SMTP_PASSWORD"] = in.MailPassword
 	env["NEPFLEET_SMTP_FROM"] = m.From
 	env["NEPFLEET_SMTP_TLS"] = m.TLS
+	// The same as switches, for apps that take a boolean per mode (Rails'
+	// SMTP_TLS, SMTP_ENABLE_STARTTLS): Compose can't map values.
+	implicit, starttls := "", ""
+	if m.Host != "" {
+		implicit = strconv.FormatBool(m.TLS == "tls")
+		starttls = strconv.FormatBool(m.TLS == "starttls" || m.TLS == "")
+	}
+	env["NEPFLEET_SMTP_IMPLICIT_TLS"] = implicit
+	env["NEPFLEET_SMTP_STARTTLS"] = starttls
 	out.Secret["NEPFLEET_SMTP_PASSWORD"] = true
 }
 

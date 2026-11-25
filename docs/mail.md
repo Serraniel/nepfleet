@@ -42,6 +42,8 @@ Stacks get the settings as built-ins. All are empty when the fleet has no `spec.
 | `NEPFLEET_SMTP_PASSWORD` | the password; masked in plans and output |
 | `NEPFLEET_SMTP_FROM` | `from` |
 | `NEPFLEET_SMTP_TLS` | `starttls`, `tls` or `none` |
+| `NEPFLEET_SMTP_IMPLICIT_TLS` | `true` for `tls` (TLS from the start), else `false` |
+| `NEPFLEET_SMTP_STARTTLS` | `true` for `starttls`, else `false` |
 
 A template keeps its own SMTP inputs and uses the built-ins as their fallback. Compose fills `${A:-${B}}` with `B` when `A` is empty, so a value set on the stack wins:
 
@@ -56,7 +58,7 @@ environment:
 ```
 
 - **No input defaults.** An input's `default` is a fixed value: it can't name a built-in, and an input with a default is never empty, so the fallback never applies. Leave `default` off the SMTP inputs and say in the input's description that the fleet's mail settings apply when it is empty.
-- **The app's own TLS words.** Apps name TLS modes differently (`force_tls`, `true`, `ssl`). Compose can't translate values, so a template whose app needs other words keeps an enum input for it, or fixes the value in the compose file.
+- **The app's own TLS words.** Apps name TLS modes differently (`force_tls`, `true`, `ssl`), and Compose can't translate values. Apps with one switch per mode (Rails apps: `SMTP_TLS`, `SMTP_ENABLE_STARTTLS`) take `NEPFLEET_SMTP_IMPLICIT_TLS` and `NEPFLEET_SMTP_STARTTLS`, which are `true` or `false` (empty without mail settings, so give them a default: `${SMTP_TLS:-${NEPFLEET_SMTP_IMPLICIT_TLS:-false}}`). A template whose app needs other words keeps an enum input for it, or fixes the value in the compose file.
 - **The password reaches only stacks that ask.** NepFleet reads it only for stacks whose files mention `NEPFLEET_SMTP_PASSWORD`, and like every built-in it is written to a stack's `.env` only when its files use it. A plain stack that loads all of `.env` (`env_file: .env`) doesn't get it unless it mentions it.
 - **Changing the settings** changes the stacks that use them: they apply again (or show a pending plan, with `apply: manual`).
 
