@@ -23,6 +23,10 @@ import (
 // "Create the sites' DNS records" option fixes (api.SetDNSRecords).
 const DNSRecordsAction = "dns-records"
 
+// KeyBackupAction is the doctor's action on a Key copy warning that a backup
+// through POST /api/v1/key/backup clears: that records the copy.
+const KeyBackupAction = "key-backup"
+
 // zoneRe is a DNS zone as the Caddy template's DNS_ZONE takes it.
 var zoneRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
@@ -173,7 +177,8 @@ func dnsRecordsFixable(e *env) bool {
 
 // doctorAction is the fix the app can start for a check, or "": for a domain
 // that doesn't resolve, Caddy's DNS records, when this host's Caddy can keep
-// them. Worked out once per doctor run.
+// them; for a key without a known copy, a backup. Worked out once per doctor
+// run.
 func doctorAction(c common) func(doctor.Check) string {
 	fixable := false
 	if e, err := c.open(); err == nil {
@@ -182,6 +187,11 @@ func doctorAction(c common) func(doctor.Check) string {
 	return func(ch doctor.Check) string {
 		if fixable && ch.Name == "DNS" && ch.Status == doctor.Fail {
 			return DNSRecordsAction
+		}
+		// Only when no copy is known: with the key from the environment, a
+		// backup of the key file wouldn't clear the warning.
+		if ch.Name == "Key copy" && ch.Status == doctor.Warn && ch.Detail == noKeyCopy {
+			return KeyBackupAction
 		}
 		return ""
 	}

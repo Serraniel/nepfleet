@@ -114,6 +114,33 @@ func TestMirrorNeverDeletesOrRewinds(t *testing.T) {
 	}
 }
 
+// The app offers a backup only for the warning a backup clears.
+func TestKeyCopyAction(t *testing.T) {
+	_, clone, _ := fleetClone(t)
+	state := t.TempDir()
+	c := common{fleetDir: clone, stateDir: state, host: "h"}
+	e, err := c.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := doctorAction(c)
+	keyCopy := func(fromEnv string) doctor.Check {
+		for _, ch := range backupChecks(e, state, fromEnv) {
+			if ch.Name == "Key copy" {
+				return ch
+			}
+		}
+		t.Fatal("no Key copy check")
+		return doctor.Check{}
+	}
+	if got := action(keyCopy("")); got != KeyBackupAction {
+		t.Errorf("no copy known: action %q, want %q", got, KeyBackupAction)
+	}
+	if got := action(keyCopy("SOPS_AGE_KEY")); got != "" {
+		t.Errorf("key from the environment: action %q, want none", got)
+	}
+}
+
 func TestKeyBackupTarget(t *testing.T) {
 	_, clone, _ := fleetClone(t)
 	outside := t.TempDir()

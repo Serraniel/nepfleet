@@ -20,7 +20,7 @@ type DoctorCheck struct {
 	Detail string `json:"detail"`
 	Fix    string `json:"fix,omitempty"`
 	// Action names a fix the app can start: dns-records (POST
-	// /api/v1/dns-records).
+	// /api/v1/dns-records), key-backup (POST /api/v1/key/backup).
 	Action string `json:"action,omitempty"`
 }
 

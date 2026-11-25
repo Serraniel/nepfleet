@@ -242,6 +242,10 @@ func writeState(dir, name string, raw []byte) error {
 	return os.WriteFile(filepath.Join(dir, name), raw, 0o600)
 }
 
+// noKeyCopy is the Key copy warning the app offers a backup for
+// (KeyBackupAction).
+const noKeyCopy = "no copy of the age key is known: losing it loses every secret"
+
 // backupChecks report whether the age key and the fleet repository exist
 // somewhere else: losing the key loses every secret.
 func backupChecks(e *env, stateDir, keyFromEnv string) []doctor.Check {
@@ -263,7 +267,7 @@ func backupChecks(e *env, stateDir, keyFromEnv string) []doctor.Check {
 	case rec != nil && keyMatches(rec.PublicKey):
 		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.OK, Detail: fmt.Sprintf("copied %s to %s (%s)", rec.Created.Format("2006-01-02"), rec.File, rec.Method)})
 	default:
-		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.Warn, Detail: "no copy of the age key is known: losing it loses every secret",
+		out = append(out, doctor.Check{Name: "Key copy", Status: doctor.Warn, Detail: noKeyCopy,
 			Fix: "nepfleet key backup --out /media/usb/nepfleet-key.age (or add a second recipient to fleet.yaml)"})
 	}
 	state := mirrorState{}
