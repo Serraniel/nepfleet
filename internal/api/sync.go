@@ -31,6 +31,13 @@ type SyncStatus struct {
 	Applied []string `json:"applied,omitempty"`
 	Failed  []string `json:"failed,omitempty"`
 	Pending []string `json:"pending,omitempty"`
+	// Remote says whether the fleet repository has a git remote at all
+	// (nil: unknown). Without one there is nothing to sync from: changes
+	// made on the server apply from there. RemoteURL is the remote sync
+	// uses, for display, without credentials (empty when it can't be shown
+	// safely).
+	Remote    *bool  `json:"remote,omitempty"`
+	RemoteURL string `json:"remoteUrl,omitempty"`
 }
 
 // maxWebhookBody bounds what a forge may send.
@@ -65,11 +72,18 @@ func webhookSigned(r *http.Request, body []byte, secret string) bool {
 
 func registerSync(mux *http.ServeMux, o Options, l *limiter) {
 	mux.HandleFunc("GET /api/v1/sync", requireAuth(o, l, auth.ScopeRead, func(w http.ResponseWriter, _ *http.Request) {
-		if o.SyncStatus == nil {
-			writeJSON(w, SyncStatus{})
-			return
+		var st SyncStatus
+		if o.SyncStatus != nil {
+			st = o.SyncStatus()
 		}
-		writeJSON(w, o.SyncStatus())
+		// Asked even with sync off: it's what tells a fleet that lives on
+		// this server only from one that could sync but doesn't.
+		if o.FleetRemote != nil {
+			if url, ok, err := o.FleetRemote(); err == nil {
+				st.Remote, st.RemoteURL = &ok, url
+			}
+		}
+		writeJSON(w, st)
 	}))
 	trigger := func(w http.ResponseWriter) {
 		if o.SyncNow == nil {

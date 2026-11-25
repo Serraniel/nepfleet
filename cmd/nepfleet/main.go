@@ -393,6 +393,7 @@ func serve(args []string, stderr io.Writer) error {
 		SyncStatus:     syncStatus,
 		SyncNow:        syncNow,
 		SyncSecret:     os.Getenv("NEPFLEET_SYNC_SECRET"),
+		FleetRemote:    func() (string, bool, error) { return fleetRemote(*fleetDir) },
 		Stacks: func() ([]api.StackInfo, error) {
 			// Without Docker, stacks are listed without a state.
 			cs, _ := composeContainers(context.Background())

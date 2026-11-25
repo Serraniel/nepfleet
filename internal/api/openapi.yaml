@@ -1858,6 +1858,17 @@ components:
         applied: { type: array, items: { type: string } }
         failed: { type: array, items: { type: string } }
         pending: { type: array, items: { type: string } }
+        remote:
+          type: boolean
+          description: >-
+            Whether the fleet repository has a git remote, sync on or off. False: it lives
+            on this server only, and there is nothing to sync from. Left out when the server
+            can't tell.
+        remoteUrl:
+          type: string
+          description: >-
+            The remote sync uses, for display: without user name, password or token, query
+            or fragment. Left out when it can't be shown safely.
     NewStack:
       type: object
       required: [template]

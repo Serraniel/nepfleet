@@ -155,6 +155,9 @@ type Options struct {
 	SyncStatus func() SyncStatus
 	SyncNow    func()
 	SyncSecret string
+	// FleetRemote says whether the fleet repository has a git remote, and
+	// its URL without credentials ("" when it can't be shown safely).
+	FleetRemote func() (url string, ok bool, err error)
 	// NewStack creates and commits a stack from a template, without applying
 	// it. Errors: ErrStackExists, InvalidError, ErrBusy.
 	NewStack func(ctx context.Context, req NewStack, by string) (NewStackResult, error)

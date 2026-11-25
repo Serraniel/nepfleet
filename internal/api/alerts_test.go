@@ -331,8 +331,29 @@ func TestSyncEndpoints(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+read)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"commit":"abc"`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"commit":"abc"`) || strings.Contains(rec.Body.String(), `"remote"`) {
 		t.Errorf("status: %d %s", rec.Code, rec.Body)
+	}
+	// Whether there is a remote is told with sync off, too; unknown is left out.
+	get := func(o Options) string {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sync", nil)
+		req.Header.Set("Authorization", "Bearer "+read)
+		Handler(o).ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+	off := Options{Tokens: store}
+	off.FleetRemote = func() (string, bool, error) { return "", false, nil }
+	if got := get(off); !strings.Contains(got, `"enabled":false`) || !strings.Contains(got, `"remote":false`) {
+		t.Errorf("no remote: %s", got)
+	}
+	off.FleetRemote = func() (string, bool, error) { return "https://git.example.test/f.git", true, nil }
+	if got := get(off); !strings.Contains(got, `"remote":true,"remoteUrl":"https://git.example.test/f.git"`) {
+		t.Errorf("remote: %s", got)
+	}
+	off.FleetRemote = func() (string, bool, error) { return "", false, errors.New("not a git repository") }
+	if got := get(off); strings.Contains(got, `"remote"`) {
+		t.Errorf("unknown: %s", got)
 	}
 }
 

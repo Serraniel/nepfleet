@@ -100,3 +100,48 @@ func TestSyncPending(t *testing.T) {
 		t.Errorf("second round: %+v", st)
 	}
 }
+
+func TestFleetRemote(t *testing.T) {
+	dir := t.TempDir()
+	tgit(t, dir, "init", "-q")
+	if url, ok, err := fleetRemote(dir); err != nil || ok || url != "" {
+		t.Errorf("no remote: %q %v %v", url, ok, err)
+	}
+	tgit(t, dir, "remote", "add", "backup", "https://user:tok3n@git.example.test/b.git")
+	if url, ok, err := fleetRemote(dir); err != nil || !ok || url != "https://git.example.test/b.git" {
+		t.Errorf("one remote: %q %v %v", url, ok, err)
+	}
+	// origin wins over the others, and the branch's upstream over origin.
+	tgit(t, dir, "remote", "add", "origin", "git@git.example.test:fleet/infra.git")
+	if url, _, _ := fleetRemote(dir); url != "git@git.example.test:fleet/infra.git" {
+		t.Errorf("origin: %q", url)
+	}
+	branch := tgit(t, dir, "symbolic-ref", "--short", "HEAD")
+	tgit(t, dir, "config", "branch."+branch+".remote", "backup")
+	if url, _, _ := fleetRemote(dir); url != "https://git.example.test/b.git" {
+		t.Errorf("upstream: %q", url)
+	}
+	if _, _, err := fleetRemote(filepath.Join(dir, "missing")); err == nil {
+		t.Error("no repository: no error")
+	}
+}
+
+func TestDisplayRemote(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://git.example.test/fleet.git":               "https://git.example.test/fleet.git",
+		"https://oauth2:secret@git.example.test/fleet.git": "https://git.example.test/fleet.git",
+		"https://tok@git.example.test/f.git?x=secret#frag": "https://git.example.test/f.git",
+		"ssh://git@git.example.test:2222/fleet.git":        "ssh://git.example.test:2222/fleet.git",
+		"git@git.example.test:fleet.git":                   "git@git.example.test:fleet.git",
+		"git.example.test:fleet.git":                       "git.example.test:fleet.git",
+		"user:secret@git.example.test:fleet.git":           "",
+		"/srv/git/fleet.git":                               "/srv/git/fleet.git",
+		"file:///srv/git/fleet.git":                        "file:///srv/git/fleet.git",
+		"https://%zz@host/x":                               "",
+		"something odd":                                    "",
+	} {
+		if got := displayRemote(raw); got != want {
+			t.Errorf("%s: %q, want %q", raw, got, want)
+		}
+	}
+}
