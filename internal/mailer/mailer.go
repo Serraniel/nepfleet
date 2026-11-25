@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -41,10 +42,16 @@ func Send(ctx context.Context, m fleet.Mail, password string, msg Message) error
 	return err
 }
 
+// SettingsError means the message or the settings are wrong: nothing was
+// sent, nor tried.
+type SettingsError struct{ Reason string }
+
+func (e SettingsError) Error() string { return e.Reason }
+
 func send(ctx context.Context, m fleet.Mail, password string, msg Message) error {
 	to, err := mail.ParseAddress(msg.To)
 	if err != nil || strings.ContainsAny(msg.To, "\r\n") {
-		return fmt.Errorf("%q is not a mail address", msg.To)
+		return SettingsError{fmt.Sprintf("%q is not a mail address", msg.To)}
 	}
 	from := m.From
 	if from == "" {
@@ -52,10 +59,13 @@ func send(ctx context.Context, m fleet.Mail, password string, msg Message) error
 	}
 	sender, err := mail.ParseAddress(from)
 	if err != nil {
-		return errors.New("set a sender address (from) in the mail settings")
+		return SettingsError{"set a sender address (from) in the mail settings"}
 	}
 	if strings.ContainsAny(msg.Subject, "\r\n") {
-		return errors.New("the subject must be one line")
+		return SettingsError{"the subject must be one line"}
+	}
+	if m.User != "" && password != "" && m.TLS == "none" {
+		return SettingsError{"a password is never sent without TLS: use starttls or tls"}
 	}
 	tlsMode := m.TLS
 	if tlsMode == "" {
@@ -88,7 +98,7 @@ func send(ctx context.Context, m fleet.Mail, password string, msg Message) error
 		return fmt.Errorf("%s: %w", addr, err)
 	}
 	defer func() { _ = c.Close() }()
-	if err := c.Hello("localhost"); err != nil {
+	if err := c.Hello(heloName(m, sender.Address)); err != nil {
 		return err
 	}
 	if tlsMode == "starttls" {
@@ -124,6 +134,22 @@ func send(ctx context.Context, m fleet.Mail, password string, msg Message) error
 		return err
 	}
 	return c.Quit()
+}
+
+// heloName is the name NepFleet greets the server with. Servers may refuse
+// one that isn't a fully qualified name, so: spec.mail.helo, else this
+// machine's name when it is one, else the sender's domain, which exists.
+func heloName(m fleet.Mail, sender string) string {
+	if m.Helo != "" {
+		return m.Helo
+	}
+	if h, err := os.Hostname(); err == nil && fleet.ValidHelo(h) && strings.Contains(h, ".") {
+		return h
+	}
+	if _, domain, ok := strings.Cut(sender, "@"); ok && fleet.ValidHelo(domain) {
+		return domain
+	}
+	return "localhost"
 }
 
 // compose writes the message with CRLF line ends, as SMTP wants.

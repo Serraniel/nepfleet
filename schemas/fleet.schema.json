@@ -143,6 +143,14 @@
                 "boolean"
               ]
             },
+            "helo": {
+              "description": "Helo is the name NepFleet's test mail greets the server with (EHLO); empty: the machine's name if it is fully qualified, else the sender's domain.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
             "host": {
               "description": "Host is the SMTP server's host name or IP address.",
               "minLength": 1,

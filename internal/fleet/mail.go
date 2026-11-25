@@ -30,7 +30,16 @@ type Mail struct {
 	// with TLS from the start (port 465), none sends in plain text (a relay
 	// on the same network).
 	TLS string `yaml:"tls" schema:"enum=starttls|tls|none;default=starttls"`
+	// Helo is the name NepFleet's test mail greets the server with (EHLO);
+	// empty: the machine's name if it is fully qualified, else the sender's
+	// domain.
+	Helo string `yaml:"helo"`
 }
+
+var heloRe = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+
+// ValidHelo reports whether s can be an EHLO name: a host name.
+func ValidHelo(s string) bool { return len(s) <= 253 && heloRe.MatchString(s) }
 
 // MailTLS are the values of spec.mail.tls.
 var MailTLS = []string{"starttls", "tls", "none"}
@@ -66,6 +75,8 @@ func CheckMail(m Mail) error {
 		return fmt.Errorf("passwordSecret %q is not a key name", m.PasswordSecret)
 	case m.PasswordSecret != "" && m.User == "":
 		return errors.New("a password needs a user")
+	case m.Helo != "" && !ValidHelo(m.Helo):
+		return fmt.Errorf("helo %q is not a host name", m.Helo)
 	}
 	if m.From != "" {
 		// It goes into mail headers: one address, nothing that ends a line.
@@ -120,6 +131,7 @@ func SetMail(dir string, m Mail) error {
 		put("passwordSecret", m.PasswordSecret)
 		put("from", m.From)
 		put("tls", m.TLS)
+		put("helo", m.Helo)
 		mapPut(spec, "mail", n)
 		return nil
 	}, func(f *Fleet) error {

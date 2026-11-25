@@ -5,8 +5,10 @@ package mailer
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net"
 	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 
@@ -99,6 +101,34 @@ func TestSendRefuses(t *testing.T) {
 	// No sender.
 	if err := Send(ctx, fleet.Mail{Host: "127.0.0.1", Port: 1}, "", Message{To: "a@example.test"}); err == nil || !strings.Contains(err.Error(), "sender") {
 		t.Errorf("no sender: %v", err)
+	}
+}
+
+func TestHeloName(t *testing.T) {
+	if got := heloName(fleet.Mail{Helo: "mx.example.test"}, "f@example.org"); got != "mx.example.test" {
+		t.Errorf("set: %s", got)
+	}
+	got := heloName(fleet.Mail{}, "f@example.org")
+	if h, _ := os.Hostname(); strings.Contains(h, ".") && fleet.ValidHelo(h) {
+		if got != h {
+			t.Errorf("hostname %s: %s", h, got)
+		}
+	} else if got != "example.org" {
+		t.Errorf("the sender's domain: %s", got)
+	}
+	if got := heloName(fleet.Mail{}, "f@[1.2.3.4]"); got == "[1.2.3.4]" {
+		t.Errorf("not a host name: %s", got)
+	}
+}
+
+func TestSettingsErrors(t *testing.T) {
+	err := Send(context.Background(), fleet.Mail{Host: "127.0.0.1", Port: 1}, "", Message{To: "a@example.test"})
+	if !errors.As(err, new(SettingsError)) {
+		t.Errorf("no sender: %v", err)
+	}
+	err = Send(context.Background(), fleet.Mail{Host: "127.0.0.1", Port: 1, From: "f@example.test"}, "", Message{To: "a@example.test"})
+	if errors.As(err, new(SettingsError)) {
+		t.Errorf("a failed connection is not a settings error: %v", err)
 	}
 }
 
