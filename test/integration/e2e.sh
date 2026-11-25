@@ -44,7 +44,8 @@ grep -q "setup-broke" <<<"$out" || fail "run-once failure without its log: $out"
 grep -q "rolled back" <<<"$out" || fail "no rollback on a failing run-once service"
 
 # seed is a run-once service that worker waits for (service_completed_successfully).
-seed() { printf 'services:\n  web:\n    image: nginx:1.29-alpine\n  seed:\n    image: nginx:1.29-alpine\n    entrypoint: ["sh", "-c", "%s"]\n  worker:\n    image: nginx:1.29-alpine\n    depends_on: {seed: {condition: service_completed_successfully}}\n' "$1" > stacks/web/compose.yaml; }
+# Keeps web and setup: dropping a service is a destructive change.
+seed() { printf 'services:\n  web:\n    image: nginx:1.29-alpine\n  setup:\n    image: nginx:1.29-alpine\n    restart: "no"\n    entrypoint: ["true"]\n  seed:\n    image: nginx:1.29-alpine\n    entrypoint: ["sh", "-c", "%s"]\n  worker:\n    image: nginx:1.29-alpine\n    depends_on: {seed: {condition: service_completed_successfully}}\n' "$1" > stacks/web/compose.yaml; }
 seed "echo seed-done" && git commit -qam "seed before worker"
 "$NF" apply --yes --state "$T/state" --wait 30s web | grep -q '✓ applied' || fail "apply with a completed dependency"
 [ "$(docker compose -p web ps --format '{{.Service}}' worker)" = worker ] || fail "worker not running after its seed completed"
