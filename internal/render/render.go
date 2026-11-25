@@ -77,6 +77,10 @@ type Output struct {
 	// Keep are files written only when missing from the working directory:
 	// the app owns them once it runs (see template.File.Keep).
 	Keep map[string]bool
+	// UnusedBuiltins are the built-ins left out of the env file because
+	// nothing uses them, with their values: an env file an earlier NepFleet
+	// wrote with them is no different (deploy.PlanStack).
+	UnusedBuiltins map[string]string
 	// Secret names, for masking in plans and logs.
 	Secret map[string]bool
 	// secretValues are the values of Secret, for MaskSecrets.
@@ -198,7 +202,7 @@ func Render(in Input) (*Output, error) {
 	}
 	out.Files[ComposeFile] = compose
 	out.collectSecretValues(env)
-	unusedBuiltins(env, builtin, out.Files)
+	out.UnusedBuiltins = unusedBuiltins(env, builtin, out.Files)
 	envFile, err := dotenv(env)
 	if err != nil {
 		return nil, err

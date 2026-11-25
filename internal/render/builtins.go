@@ -6,6 +6,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -40,52 +41,126 @@ func referenced(files map[string][]byte) map[string]bool {
 
 // unusedBuiltins removes from env the built-ins nothing in the rendered files
 // refers to, so a built-in NepFleet adds changes only the stacks that ask
-// for it. builtin names the keys that hold a built-in (not a stack value of
-// the same name). A compose file that passes .env itself to containers
-// (env_file: .env) keeps them all: they reach the containers.
-func unusedBuiltins(env map[string]string, builtin map[string]bool, files map[string][]byte) {
-	if loadsEnvFile(files[ComposeFile]) {
-		return
+// for it, and returns them with their values. builtin names the keys that
+// hold a built-in (not a stack value of the same name).
+func unusedBuiltins(env map[string]string, builtin map[string]bool, files map[string][]byte) map[string]string {
+	use := composeUse(files)
+	if use.all {
+		return nil
 	}
 	refs := referenced(files)
+	dropped := map[string]string{}
 	for k := range builtin {
-		if !refs[k] {
+		if v, ok := env[k]; ok && !refs[k] && !use.passthrough[k] {
+			dropped[k] = v
 			delete(env, k)
 		}
 	}
+	return dropped
 }
 
-// loadsEnvFile reports a service with env_file: .env.
-func loadsEnvFile(compose []byte) bool {
-	var doc struct {
-		Services map[string]struct {
-			EnvFile any `yaml:"env_file"`
-		} `yaml:"services"`
-	}
-	if yaml.Unmarshal(compose, &doc) != nil {
-		return true // can't tell: keep everything
-	}
-	isEnv := func(p any) bool {
-		switch v := p.(type) {
-		case string:
-			return path.Clean(v) == EnvFile
-		case map[string]any:
-			s, _ := v["path"].(string)
-			return path.Clean(s) == EnvFile
+// envUse is what compose takes from .env besides ${NAME} references.
+type envUse struct {
+	// all: a service loads .env itself (env_file: .env), or a compose file
+	// can't be read, so every variable may reach a container.
+	all bool
+	// passthrough: environment entries without a value ([TZ] or {TZ: }),
+	// which compose fills from .env.
+	passthrough map[string]bool
+}
+
+// composeService is the part of a service that takes variables from .env.
+type composeService struct {
+	EnvFile     any            `yaml:"env_file"`
+	Environment any            `yaml:"environment"`
+	Extends     map[string]any `yaml:"extends"`
+}
+
+// composeUse reads compose.yaml and the rendered compose files it includes
+// or extends (include:, extends.file). Files outside the rendered stack (an
+// absolute path, ../) can't be seen; their own ${NAME} references can't
+// either, so such stacks should not rely on built-ins through them.
+func composeUse(files map[string][]byte) envUse {
+	use := envUse{passthrough: map[string]bool{}}
+	queue := []string{ComposeFile}
+	seen := map[string]bool{}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		if seen[name] {
+			continue
 		}
-		return false
-	}
-	for _, s := range doc.Services {
-		switch v := s.EnvFile.(type) {
-		case string:
-			if isEnv(v) {
-				return true
+		seen[name] = true
+		raw, ok := files[name]
+		if !ok {
+			continue
+		}
+		var doc struct {
+			Include  []any                     `yaml:"include"`
+			Services map[string]composeService `yaml:"services"`
+		}
+		if yaml.Unmarshal(raw, &doc) != nil {
+			use.all = true
+			return use
+		}
+		dir := path.Dir(name)
+		rel := func(p string) string { return path.Join(dir, p) }
+		for _, inc := range doc.Include {
+			for _, p := range paths(inc, "path") {
+				queue = append(queue, rel(p))
 			}
-		case []any:
-			if slices.ContainsFunc(v, isEnv) {
-				return true
+		}
+		for _, s := range doc.Services {
+			if slices.ContainsFunc(paths(s.EnvFile, "path"), func(p string) bool { return rel(p) == EnvFile }) {
+				use.all = true
+				return use
+			}
+			for _, k := range passthrough(s.Environment) {
+				use.passthrough[k] = true
+			}
+			if f, ok := s.Extends["file"].(string); ok {
+				queue = append(queue, rel(f))
 			}
 		}
 	}
-	return false
+	return use
+}
+
+// paths reads a compose path entry: a string, a map with key, or a list of
+// either (key's value may itself be a list, as include's path).
+func paths(v any, key string) []string {
+	switch v := v.(type) {
+	case string:
+		return []string{v}
+	case map[string]any:
+		return paths(v[key], key)
+	case []any:
+		var out []string
+		for _, e := range v {
+			out = append(out, paths(e, key)...)
+		}
+		return out
+	}
+	return nil
+}
+
+// passthrough lists environment entries without a value: [NAME] in a list,
+// NAME: (null) in a map.
+func passthrough(env any) []string {
+	var out []string
+	switch env := env.(type) {
+	case []any:
+		for _, e := range env {
+			if s, ok := e.(string); ok && !strings.Contains(s, "=") {
+				out = append(out, strings.TrimSpace(s))
+			}
+		}
+	case map[string]any:
+		for k, v := range env {
+			if v == nil {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
 }

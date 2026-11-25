@@ -455,6 +455,34 @@ func TestOnlyUsedBuiltins(t *testing.T) {
 		t.Errorf("env_file: .env must keep all built-ins: %v", env)
 	}
 
+	// Compose fills environment entries without a value from .env: those
+	// are used, in a list and in a map, here or in an included file.
+	for name, compose := range map[string]string{
+		"list": "services:\n  web:\n    image: nginx:1.29\n    environment: [TZ, 'X=1', ' NEPFLEET_STACK']\n",
+		"map":  "services:\n  web:\n    image: nginx:1.29\n    environment:\n      TZ:\n      NEPFLEET_STACK: null\n      X: ''\n", "included": "include: [files/more.yaml]\nservices:\n  web:\n    image: nginx:1.29\n",
+	} {
+		write(t, filepath.Join(tpl.Dir, "compose.yaml"), compose)
+		tpl.Spec.Files = []template.File{{Src: "files/app.conf", Dest: "files/more.yaml"}}
+		write(t, filepath.Join(tpl.Dir, "files/app.conf"), "services:\n  more:\n    image: nginx:1.29\n    environment: [TZ, NEPFLEET_STACK]\n")
+		out, err = Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl})
+		must(t, err)
+		env := EnvValues(out.Files[EnvFile])
+		if env["TZ"] != "Europe/Berlin" || env["NEPFLEET_STACK"] != "myapp" {
+			t.Errorf("%s: passed-through built-ins dropped: %v\n%s", name, env, out.Files[ComposeFile])
+		}
+		if _, ok := out.UnusedBuiltins["TZ"]; ok || out.UnusedBuiltins["NEPFLEET_API_URL"] != DefaultAPIURL {
+			t.Errorf("%s: UnusedBuiltins = %v", name, out.UnusedBuiltins)
+		}
+	}
+	// A service that loads .env itself, through extends, gets every built-in.
+	write(t, filepath.Join(tpl.Dir, "compose.yaml"), "services:\n  web:\n    extends: {file: files/more.yaml, service: more}\n")
+	write(t, filepath.Join(tpl.Dir, "files/app.conf"), "services:\n  more:\n    image: nginx:1.29\n    env_file: ../.env\n")
+	out, err = Render(Input{Fleet: f, Stack: stack(map[string]string{"DOMAIN": "app.example.org"}), Template: tpl, DockerGID: "972"})
+	must(t, err)
+	if env := EnvValues(out.Files[EnvFile]); env["NEPFLEET_DOCKER_GID"] != "972" || len(out.UnusedBuiltins) != 0 {
+		t.Errorf("env_file: .env through extends must keep all built-ins: %v", env)
+	}
+
 	// A plain stack's own value of a built-in's name is a value: kept.
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, ComposeFile), "services:\n  web:\n    image: nginx:1.29\n")
