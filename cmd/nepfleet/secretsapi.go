@@ -38,6 +38,11 @@ func secretKeys(c common, stack string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return secretFileKeys(path)
+}
+
+// secretFileKeys lists an encrypted file's keys; none when there's no file.
+func secretFileKeys(path string) ([]string, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // a path inside the fleet repository
 	if errors.Is(err, os.ErrNotExist) {
 		return []string{}, nil
