@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -52,11 +53,60 @@ var commitWaitDelay = 10 * time.Second
 // leave index.lock and block later commits); only one that ignores it is
 // killed.
 func commitAs(dir, author, msg string, paths ...string) error {
+	return committer{author: author}.commit(dir, msg, paths...)
+}
+
+// committer is who a commit names. An empty author is git's own identity.
+type committer struct {
+	author string
+	// env is added to git's environment: the committer, when git has none.
+	env []string
+}
+
+// The identity of the server's own commits, for a CLI where git has none.
+// compose.yaml gives the server's container the same committer.
+const (
+	serverCommitterName  = "NepFleet"
+	serverCommitterEmail = "nepfleet@localhost"
+)
+
+// cliCommitter is whoever runs the CLI, as git's config names them. Without
+// one (inside the container, say), the commit names the server's identity
+// instead of failing.
+func cliCommitter(dir string) committer {
+	_, aerr := gitOut(dir, "var", "GIT_AUTHOR_IDENT")
+	_, cerr := gitOut(dir, "var", "GIT_COMMITTER_IDENT")
+	if aerr == nil && cerr == nil {
+		return committer{}
+	}
+	return committer{
+		author: apiAuthor(reconcileAuthor),
+		env:    []string{"GIT_COMMITTER_NAME=" + serverCommitterName, "GIT_COMMITTER_EMAIL=" + serverCommitterEmail},
+	}
+}
+
+// as is " as <author>" for messages, empty for git's own identity.
+func (w committer) as() string {
+	if w.author == "" {
+		return ""
+	}
+	return " as " + w.author
+}
+
+// commit commits paths in the repository at dir; see commitAs.
+func (w committer) commit(dir, msg string, paths ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
 	defer cancel()
-	args := append([]string{"commit", "--quiet", "--author", author, "-m", msg, "--"}, paths...)
+	args := []string{"commit", "--quiet"}
+	if w.author != "" {
+		args = append(args, "--author", w.author)
+	}
+	args = append(append(args, "-m", msg, "--"), paths...)
 	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // fixed arguments
 	cmd.Dir = dir
+	if len(w.env) > 0 {
+		cmd.Env = append(os.Environ(), w.env...)
+	}
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = commitWaitDelay
 	out, err := cmd.CombinedOutput()
@@ -191,6 +241,13 @@ func startRollback(ctx context.Context, c common, stack, commit string, confirm 
 // generated secrets), so an API change is always a commit. A problem only warns:
 // the stack is applied, and the files are there to commit by hand.
 func commitAPIApply(c common, stack, by string, log io.Writer) {
+	recordApply(c, stack, committer{author: apiAuthor(by)}, log)
+}
+
+// recordApply commits a stack's lock.yaml and secrets when an apply changed
+// them, and nothing else. Outside a git repository there is nothing to do:
+// the apply already said what to commit.
+func recordApply(c common, stack string, w committer, log io.Writer) {
 	e, err := c.open()
 	if err != nil {
 		fmt.Fprintf(log, "⚠ not committed: %v\n", err)
@@ -216,9 +273,36 @@ func commitAPIApply(c common, stack, by string, log io.Writer) {
 		fmt.Fprintf(log, "⚠ not committed: %v\n", err)
 		return
 	}
-	if err := commitAs(e.fleet.Dir, apiAuthor(by), fmt.Sprintf("chore(%s): record the apply", stack), paths...); err != nil {
+	if err := w.commit(e.fleet.Dir, fmt.Sprintf("chore(%s): record the apply", stack), paths...); err != nil {
+		// Unstaged again: the files stay as they are, to commit by hand.
+		_, _ = gitOut(e.fleet.Dir, append([]string{"reset", "-q", "--"}, paths...)...)
 		fmt.Fprintf(log, "⚠ not committed: %v\n", err)
 		return
 	}
-	fmt.Fprintf(log, "committed %s as %s\n", strings.Join(paths, ", "), apiAuthor(by))
+	fmt.Fprintf(log, "committed %s%s\n", strings.Join(paths, ", "), w.as())
+}
+
+// inGitRepo reports whether dir is inside a git working tree.
+func inGitRepo(dir string) bool {
+	out, err := gitOut(dir, "rev-parse", "--is-inside-work-tree")
+	return err == nil && strings.TrimSpace(out) == "true"
+}
+
+// stackDirDirty reports whether git has uncommitted changes under rel.
+func stackDirDirty(dir, rel string) bool {
+	st, _ := gitOut(dir, "status", "--porcelain", "--", rel)
+	return strings.TrimSpace(st) != ""
+}
+
+// commitNewStack commits a stack directory just written, and only it. On a
+// failure nothing stays staged; the files are the caller's to keep or remove.
+func commitNewStack(dir, rel, name, tplName string, w committer) error {
+	if _, err := gitOut(dir, "add", "--", rel); err != nil {
+		return err
+	}
+	if err := w.commit(dir, "feat("+name+"): new stack from "+tplName, rel); err != nil {
+		_, _ = gitOut(dir, "reset", "-q", "--", rel)
+		return err
+	}
+	return nil
 }

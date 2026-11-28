@@ -47,6 +47,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	target := fs.String("target", "local", "spec.target of the new stack")
 	access := fs.String("access", "domain", "how the web UI is reached: domain (Caddy) or port (a LAN port of the host)")
 	port := fs.Int("port", 0, "with --access port: the host port (default: the lowest free one in the host's range)")
+	noCommit := fs.Bool("no-commit", false, "write the stack without committing it")
 	set := setFlags{}
 	fs.Var(set, "set", "input value KEY=VALUE (repeatable); missing inputs are asked for. Prefer the prompt for secrets: --set ends up in shell history")
 	pos, err := parseInterspersed(fs, args)
@@ -54,7 +55,7 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if len(pos) < 1 || len(pos) > 2 {
-		return errors.New("usage: nepfleet new <template> [stack-name] [--set KEY=VALUE]")
+		return errors.New("usage: nepfleet new <template> [stack-name] [--set KEY=VALUE] [--no-commit]")
 	}
 	if !fleet.ValidName(pos[0]) {
 		return fmt.Errorf("%q is not a template name", pos[0])
@@ -86,6 +87,12 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	}
 	if *port, err = e.newStackChecks(tpl, name, *target, *access, *port); err != nil {
 		return err
+	}
+	// Committed only when there's a repository, and never along with
+	// changes that were already there.
+	commit := !*noCommit && inGitRepo(e.fleet.Dir)
+	if rel := relTo(e.fleet.Dir, e.newStackDir(tpl, name)); commit && stackDirDirty(e.fleet.Dir, rel) {
+		return fmt.Errorf("%s has uncommitted changes; commit or discard them first", rel)
 	}
 	interactive := term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // file descriptors fit in int
 	in := bufio.NewReader(os.Stdin)
@@ -133,14 +140,25 @@ func cmdNew(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "\nwrote %s\n", relTo(e.fleet.Dir, dir))
+	rel := relTo(e.fleet.Dir, dir)
+	fmt.Fprintf(stdout, "\nwrote %s\n", rel)
 	if *access == "port" {
 		fmt.Fprintf(stdout, "reached on port %d of %s\n", *port, e.targetHost(*target))
 	}
 	if len(secretVals) > 0 {
-		fmt.Fprintf(stdout, "secrets stored encrypted in %s\n", filepath.Join(relTo(e.fleet.Dir, dir), fleet.SecretsFile))
+		fmt.Fprintf(stdout, "secrets stored encrypted in %s\n", filepath.Join(rel, fleet.SecretsFile))
 	}
-	fmt.Fprintf(stdout, "next: nepfleet plan %s, then commit\n", name)
+	if !commit {
+		fmt.Fprintf(stdout, "next: nepfleet plan %s, then commit %s\n", name, rel)
+		return nil
+	}
+	// The files stay on a failure: the answers given are not lost.
+	w := cliCommitter(e.fleet.Dir)
+	if err := commitNewStack(e.fleet.Dir, rel, name, tpl.Metadata.Name, w); err != nil {
+		return fmt.Errorf("%s is written but not committed: %w", rel, err)
+	}
+	fmt.Fprintf(stdout, "committed %s%s\n", rel, w.as())
+	fmt.Fprintf(stdout, "next: nepfleet plan %s\n", name)
 	return nil
 }
 
@@ -423,21 +441,14 @@ func newStackAPI(c common, req api.NewStack, by string) (api.NewStackResult, err
 			secrets[template.OIDCClientSecret] = so.ClientSecret
 		}
 	}
-	if st, _ := gitOut(e.fleet.Dir, "status", "--porcelain", "--", relTo(e.fleet.Dir, e.newStackDir(tpl, name))); strings.TrimSpace(st) != "" {
+	if stackDirDirty(e.fleet.Dir, relTo(e.fleet.Dir, e.newStackDir(tpl, name))) {
 		return api.NewStackResult{}, api.ErrStackExists
 	}
 	dir, err := e.writeNewStack(tpl, req.Source, name, req.Target, req.Access, port, values, secrets, req.SignOn)
 	if err != nil {
 		return api.NewStackResult{}, api.InvalidError{Reason: cleanReason(err, e.fleet.Dir)}
 	}
-	rel := relTo(e.fleet.Dir, dir)
-	if _, err := gitOut(e.fleet.Dir, "add", "--", rel); err != nil {
-		_ = os.RemoveAll(dir)
-		return api.NewStackResult{}, err
-	}
-	msg := "feat(" + name + "): new stack from " + tpl.Metadata.Name
-	if err := commitAs(e.fleet.Dir, apiAuthor(by), msg, rel); err != nil {
-		_, _ = gitOut(e.fleet.Dir, "reset", "-q", "--", rel)
+	if err := commitNewStack(e.fleet.Dir, relTo(e.fleet.Dir, dir), name, tpl.Metadata.Name, committer{author: apiAuthor(by)}); err != nil {
 		_ = os.RemoveAll(dir)
 		return api.NewStackResult{}, err
 	}

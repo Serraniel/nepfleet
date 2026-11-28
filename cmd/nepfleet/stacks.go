@@ -614,7 +614,13 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runApply(ctx, c, fs.Args(), applyOptions{yes: *yes, confirm: confirm, wait: *wait, noLock: *noLock, noSnapshot: *noSnapshot, updateLock: *updateLock}, stdout, stderr)
+	o := applyOptions{yes: *yes, confirm: confirm, wait: *wait, noLock: *noLock, noSnapshot: *noSnapshot, updateLock: *updateLock}
+	// What the apply wrote is committed, as the server does: a host's server
+	// would see an uncommitted lock.yaml as drift.
+	o.record = func(name string) {
+		recordApply(c, name, cliCommitter(c.fleetDir), stdout)
+	}
+	return runApply(ctx, c, fs.Args(), o, stdout, stderr)
 }
 
 // applyOptions are the flags of nepfleet apply, for the CLI and the API.
@@ -629,6 +635,9 @@ type applyOptions struct {
 	// noProgress leaves out the per-phase step lines, for a job that counts
 	// its own steps (updates: stacks of total).
 	noProgress bool
+	// record, if set, is called at the end for each stack whose lock.yaml or
+	// secrets the apply wrote, to commit them.
+	record func(name string)
 }
 
 // lockStack keeps one apply per stack on this host, whether from the CLI or
@@ -664,6 +673,13 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 		fmt.Fprintf(stdout, "⚠ notifications: %v\n", nerr) // never blocks an apply
 	}
 	var errs []error
+	// wrote: the stacks this apply wrote files of (lock.yaml, secrets), in order.
+	var wrote []string
+	note := func(name string) {
+		if !slices.Contains(wrote, name) {
+			wrote = append(wrote, name)
+		}
+	}
 	unlock := func() {}
 	defer func() { unlock() }()
 	for _, s := range stacks {
@@ -710,6 +726,7 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 				if err := savePin(s.Dir, p.pin); err != nil {
 					errs = append(errs, err)
 				} else {
+					note(name)
 					fmt.Fprintf(stdout, "%s: template pinned to %s; commit %s\n", name, p.plan.Template, filepath.Join(s.Dir, lock.File))
 				}
 			}
@@ -744,6 +761,7 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 				errs = append(errs, fmt.Errorf("%s: saving generated secrets: %w", name, err))
 				continue
 			}
+			note(name)
 			fmt.Fprintf(stdout, "%s: generated secrets saved; commit %s\n", name, filepath.Join(s.Dir, fleet.SecretsFile))
 		}
 		// The client exists before the stack starts, with the secret it
@@ -816,6 +834,7 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			if serr := opts.Lock.Save(s.Dir); serr != nil {
 				errs = append(errs, serr)
 			} else {
+				note(name)
 				fmt.Fprintf(stdout, "%s: image digests pinned; commit %s\n", name, filepath.Join(s.Dir, lock.File))
 			}
 		}
@@ -823,6 +842,7 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			if perr := savePin(s.Dir, p.pin); perr != nil {
 				errs = append(errs, perr)
 			} else {
+				note(name)
 				fmt.Fprintf(stdout, "%s: template pinned to %s; commit %s\n", name, p.plan.Template, filepath.Join(s.Dir, lock.File))
 			}
 		}
@@ -844,6 +864,11 @@ func runApply(ctx context.Context, c common, names []string, o applyOptions, std
 			}
 			e.emit(notifier, stdout, notify.Event{Name: "apply.succeeded", Severity: notify.Info, Stack: name,
 				Title: name + " applied", Message: fmt.Sprintf("%s is updated and healthy.%s", name, changeSummary(p.plan))})
+		}
+	}
+	if o.record != nil {
+		for _, name := range wrote {
+			o.record(name)
 		}
 	}
 	return errors.Join(errs...)
