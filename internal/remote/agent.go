@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -67,29 +68,63 @@ func AgentReachable(sock string) bool {
 // StartAgent runs an ssh-agent on a socket in dir, which only the owner may use,
 // until stop is called.
 func StartAgent(dir string) (sock string, stop func(), err error) {
+	sock, _, stop, err = StartOwnAgent(dir)
+	return sock, stop, err
+}
+
+// AdoptAgent is the stop of an agent a process before this one started, and
+// handed on with exec (so it is still this process's child): StartOwnAgent's
+// pid and socket.
+func AdoptAgent(sock string, pid int) func() {
+	return func() {
+		// Only while its socket answers: a pid of an agent that's gone may
+		// belong to something else by now.
+		if p, err := os.FindProcess(pid); err == nil && AgentReachable(sock) {
+			_ = p.Kill()
+			_, _ = p.Wait() // fails unless it's our child; the kill is what counts
+			_ = os.Remove(sock)
+			_ = os.Remove(filepath.Join(filepath.Dir(sock), "ssh-agent.pid"))
+		}
+	}
+}
+
+// StartOwnAgent is StartAgent, also saying the agent's pid, for AdoptAgent.
+func StartOwnAgent(dir string) (sock string, pid int, stop func(), err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", nil, err
+		return "", 0, nil, err
 	}
 	sock = filepath.Join(dir, "ssh-agent.sock")
-	// Left by a daemon that ended without stopping it (killed): keep using it,
-	// rather than leave it running with keys nobody can reach.
+	pidFile := filepath.Join(dir, "ssh-agent.pid")
+	// Left by a daemon that ended without stopping it (killed, or its
+	// handover failed): keep using it, rather than leave it running with keys
+	// nobody can reach, and stop it when done, as if it were ours.
 	if AgentReachable(sock) {
-		return sock, func() {}, nil
+		raw, _ := os.ReadFile(pidFile) //nolint:gosec // our own directory
+		if n, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && n > 0 {
+			return sock, n, AdoptAgent(sock, n), nil
+		}
+		return sock, 0, func() {}, nil
 	}
 	_ = os.Remove(sock)
 	cmd := exec.Command("ssh-agent", "-D", "-a", sock) //nolint:gosec // a fixed program, our own socket path
 	cmd.Stdout, cmd.Stderr = nil, nil
 	if err := cmd.Start(); err != nil {
-		return "", nil, fmt.Errorf("starting ssh-agent: %w", err)
+		return "", 0, nil, fmt.Errorf("starting ssh-agent: %w", err)
 	}
 	for range 50 {
 		if AgentReachable(sock) {
-			return sock, func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait(); _ = os.Remove(sock) }, nil
+			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
+			return sock, cmd.Process.Pid, func() {
+				_ = cmd.Process.Kill()
+				_, _ = cmd.Process.Wait()
+				_ = os.Remove(sock)
+				_ = os.Remove(pidFile)
+			}, nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	_ = cmd.Process.Kill()
-	return "", nil, errors.New("ssh-agent didn't start")
+	return "", 0, nil, errors.New("ssh-agent didn't start")
 }
 
 // identityFiles are the keys ssh would offer to t, from `ssh -G`, and the

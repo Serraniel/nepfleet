@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Serraniel/nepfleet/internal/api"
@@ -201,8 +202,25 @@ func (s *Server) listenHTTP(addr string, origins []string) error {
 	if err != nil {
 		return err
 	}
-	lc := net.ListenConfig{}
-	l, err := lc.Listen(context.Background(), "tcp", addr)
+	var l net.Listener
+	if s.inheritedHTTP != nil && s.inheritedHTTPAddr == addr {
+		// The port of the daemon before: it stayed open over the handover.
+		l = s.inheritedHTTP
+	} else {
+		lc := net.ListenConfig{}
+		l, err = lc.Listen(context.Background(), "tcp", addr)
+	}
+	if s.inheritedHTTP != nil {
+		if l != s.inheritedHTTP {
+			_ = s.inheritedHTTP.Close()
+		}
+		s.inheritedHTTP, s.inheritedHTTPAddr = nil, ""
+	}
+	if errors.Is(err, syscall.EADDRINUSE) {
+		// Only one daemon runs at a time (nepfleet control holds a lock), so
+		// it's someone else.
+		return fmt.Errorf("another program uses %s; stop it, or choose another address with nepfleet control http", addr)
+	}
 	if err != nil {
 		return err
 	}
@@ -214,10 +232,11 @@ func (s *Server) listenHTTP(addr string, origins []string) error {
 	// a page holding the token can't add its own origin.
 	allowed := func() []string { return *s.httpOrigins.Load() }
 	srv := &http.Server{Handler: guard(s.Handler(), addr, token, allowed), ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
-	s.httpSrv, s.httpAddr = srv, addr
+	s.httpSrv, s.httpAddr, s.httpL = srv, addr, l
+	kept := keptListener{l, s}
 	go func() {
 		// Serve closes l on the way out, also if srv was closed first.
-		if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(kept); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("control: http: %v", err)
 		}
 	}()
@@ -266,7 +285,21 @@ func (s *Server) stopHTTP() {
 	s.httpMu.Lock()
 	defer s.httpMu.Unlock()
 	if s.httpSrv != nil {
+		if s.handingOff.Load() {
+			// Requests running (an apply's log, say) finish first, bounded.
+			ctx, cancel := context.WithTimeout(context.Background(), handoffGrace)
+			_ = s.httpSrv.Shutdown(ctx)
+			cancel()
+		}
 		_ = s.httpSrv.Close()
-		s.httpSrv, s.httpAddr = nil, ""
+		if s.handingOff.Load() {
+			// Still open (keptListener), for the next daemon.
+			s.keptHTTP, s.keptHTTPAddr = s.httpL, s.httpAddr
+		}
+		s.httpSrv, s.httpAddr, s.httpL = nil, "", nil
+	}
+	if s.inheritedHTTP != nil {
+		_ = s.inheritedHTTP.Close()
+		s.inheritedHTTP, s.inheritedHTTPAddr = nil, ""
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,11 +19,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/Serraniel/nepfleet"
 	"github.com/Serraniel/nepfleet/internal/control"
+	"github.com/Serraniel/nepfleet/internal/flock"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
 
@@ -67,10 +70,40 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	if fs.NArg() > 0 {
 		return errors.New("usage: nepfleet control [--http ADDR --allowed-origins URLS] | control http ADDR --allowed-origins URLS | control status | control restart | control token")
 	}
-	l, err := control.Listen(controlSocket())
+	if err := os.MkdirAll(controlDir(), 0o700); err != nil {
+		return err
+	}
+	// The binary this daemon runs: watched for updates, and run on a restart.
+	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
+	// A handover from the daemon before (an update, or nepfleet control
+	// restart): its lock, socket and port carry on, so no client is refused.
+	h, err := adoptHandoff()
+	if err != nil {
+		return err
+	}
+	var lock *os.File
+	var l net.Listener
+	if h != nil {
+		lock, l = h.lock, h.sock
+	} else {
+		// One daemon at a time. Held until this process exits, so a restart
+		// knows when the old daemon has let go of everything, its port too.
+		lock, err = flock.Hold(controlLock(), false)
+		if errors.Is(err, flock.ErrHeld) {
+			return control.ErrRunning
+		}
+		if err != nil {
+			return err
+		}
+		if l, err = control.Listen(controlSocket()); err != nil {
+			_ = lock.Close()
+			return err
+		}
+	}
+	defer func() { _ = lock.Close() }()
 	defer func() { _ = l.Close() }()
 	s := &control.Server{Dir: controlDir(), Version: version, Commit: commit, Connector: remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}, Probe: func(ctx context.Context, t remote.Target) (*remote.Report, error) {
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -112,24 +145,68 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	if err := s.Load(); err != nil {
 		return err
 	}
-	// Keys with a passphrase need an agent: the session's, or our own.
-	if !remote.AgentReachable(os.Getenv("SSH_AUTH_SOCK")) {
-		sock, stopAgent, err := remote.StartAgent(controlDir())
+	// Keys with a passphrase need an agent: the session's, or our own. Our own
+	// outlives a handover, keys and all: the next daemon adopts it.
+	next := handoff{AuthSock: os.Getenv("SSH_AUTH_SOCK")}
+	switch {
+	case h != nil && h.AgentPID != 0 && remote.AgentReachable(h.AgentSock):
+		// The daemon before had its own agent, with the keys unlocked in it:
+		// keep that one, even if the session's agent can be reached by now.
+		next.AgentSock, next.AgentPID = h.AgentSock, h.AgentPID
+		_ = os.Setenv("SSH_AUTH_SOCK", h.AgentSock)
+		defer remote.AdoptAgent(h.AgentSock, h.AgentPID)()
+	case !remote.AgentReachable(next.AuthSock):
+		sock, pid, stopAgent, err := remote.StartOwnAgent(controlDir())
 		if err != nil {
 			fmt.Fprintf(stderr, "nepfleet control: no SSH agent (%v); keys with a passphrase can't be unlocked\n", err)
 		} else {
+			if pid == 0 && h != nil && h.AgentPID != 0 && h.AgentSock == sock {
+				pid, stopAgent = h.AgentPID, remote.AdoptAgent(sock, h.AgentPID)
+			}
+			next.AgentSock, next.AgentPID = sock, pid
 			_ = os.Setenv("SSH_AUTH_SOCK", sock)
-			defer stopAgent()
+			defer stopAgent() // not on a handover: exec runs no deferred calls
 		}
 	}
-	if exe, err := os.Executable(); err == nil {
-		s.Keys = control.Keys{Askpass: exe, Unlock: func(r *http.Request, path, passphrase, askpass string) error {
-			return remote.Unlock(r.Context(), path, passphrase, askpass, remote.KeyLifetime)
-		}}
+	s.Keys = control.Keys{Askpass: exe, Unlock: func(r *http.Request, path, passphrase, askpass string) error {
+		return remote.Unlock(r.Context(), path, passphrase, askpass, remote.KeyLifetime)
+	}}
+	// Serve ends on a signal, POST /v1/stop, or a handover; a failed handover
+	// serves again, so each round has its own context.
+	var stopServe atomic.Pointer[context.CancelFunc]
+	s.Stop = func() {
+		if stop := stopServe.Load(); stop != nil {
+			(*stop)()
+		}
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	s.Stop = stop
+	var handingOff atomic.Bool
+	if canHandOff {
+		s.Restart = func() error {
+			// Only into a binary that runs and can take over: anything else
+			// would end this daemon instead.
+			if b, err := probeBuild(context.Background(), exe); err != nil || b.handoff < 1 {
+				return control.ErrNoHandoff
+			}
+			if err := s.TryStop(); err != nil {
+				return err
+			}
+			s.HandOff()
+			handingOff.Store(true)
+			s.Stop()
+			return nil
+		}
+	}
+	// Automatic: also waits for requests through tunnels (an event stream, an
+	// apply's log) to end.
+	restartWhenIdle := func() error {
+		if n := s.Proxying(); n > 0 {
+			return fmt.Errorf("%w: %d requests through tunnels run", control.ErrBusy, n)
+		}
+		return s.Restart()
+	}
+	if h != nil && h.port != nil {
+		s.InheritHTTP(h.port, h.Addr)
+	}
 	if *httpAddr != "" {
 		// Before listening on the socket's clients: a bad flag stops the start.
 		if err := os.MkdirAll(controlDir(), 0o700); err != nil {
@@ -140,8 +217,29 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprintf(stderr, "nepfleet control also on http://%s (token: nepfleet control token)\n", *httpAddr)
 	}
-	fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
-	return s.Serve(ctx, l)
+	if h != nil {
+		fmt.Fprintf(stderr, "nepfleet control restarted in place, now %s (%s)\n", version, commit)
+	} else {
+		fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
+	}
+	for {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		stopServe.Store(&stop)
+		if canHandOff {
+			go watchExecutable(ctx, exe, watchEvery(), restartWhenIdle)
+		}
+		err := s.Serve(ctx, l)
+		stop()
+		if !handingOff.Load() {
+			return err
+		}
+		// Gone on success; on failure (the binary missing mid-update, say)
+		// this daemon carries on, with its listeners, tunnels and agent.
+		err = execHandoff(exe, next, lock, s)
+		log.Printf("control: restarting into the nepfleet installed now failed, so this daemon carries on: %v", err)
+		handingOff.Store(false)
+		s.ResumeAfterHandoff(err)
+	}
 }
 
 func splitOrigins(s string) []string {
@@ -218,11 +316,64 @@ func controlCall(ctx context.Context, method, path string, body, out any) error 
 	return json.NewDecoder(res.Body).Decode(out)
 }
 
+// controlLock is held by the running daemon for its whole life; the system
+// drops it when the process exits, after its port and tunnels are gone.
+func controlLock() string { return filepath.Join(controlDir(), "control.lock") }
+
+// controlLockHeld tells whether a daemon still holds controlLock.
+func controlLockHeld() bool {
+	unlock, err := flock.Lock(controlLock(), false)
+	if err != nil {
+		return errors.Is(err, flock.ErrHeld)
+	}
+	unlock()
+	return false
+}
+
+// lockControlStart serializes starting the daemon: concurrent commands (the
+// app runs several at once) share one start instead of racing for the socket.
+func lockControlStart(ctx context.Context) (func(), error) {
+	if err := os.MkdirAll(controlDir(), 0o700); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(controlDir(), "start.lock")
+	for {
+		unlock, err := flock.Lock(path, false)
+		if !errors.Is(err, flock.ErrHeld) {
+			return unlock, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for another start of the control daemon: %w", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 // ensureControl starts the daemon if it isn't running. It keeps running after
 // this command ends, with its output in a log file.
 func ensureControl(ctx context.Context) error {
 	if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
 		return nil
+	}
+	unlock, err := lockControlStart(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return startControlLocked(ctx)
+}
+
+// startControlLocked starts the daemon unless one answers; the caller holds the
+// start lock.
+func startControlLocked(ctx context.Context) error {
+	// Another command may have started it while this one waited for the lock.
+	if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
+		return nil
+	}
+	// A daemon that is stopping still holds its port: start after it's gone.
+	if err := waitControlGone(ctx, 0); err != nil {
+		return err
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -243,7 +394,9 @@ func ensureControl(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting the control daemon: %w", err)
 	}
-	_ = cmd.Process.Release()
+	// Reaped when it ends, should this process still run then: a zombie would
+	// look like a daemon that never stops.
+	go func() { _ = cmd.Wait() }()
 	for range 50 {
 		if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
 			return nil

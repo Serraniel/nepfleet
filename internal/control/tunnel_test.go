@@ -33,6 +33,7 @@ type fakeRemote struct {
 	forwards int
 	cut      chan struct{} // closing it drops the connection once
 	events   []events.Event
+	hold     chan struct{} // /api/v1/slow answers once it's closed
 }
 
 func (f *fakeRemote) MintToken(context.Context, remote.Target, string, string) (remote.Token, error) {
@@ -63,6 +64,9 @@ func (f *fakeRemote) Forward(ctx context.Context, _ remote.Target, socket string
 		return err
 	}
 	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/slow" && f.hold != nil {
+			<-f.hold
+		}
 		if r.URL.Path == "/api/v1/events" {
 			after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 			f.mu.Lock()
@@ -109,7 +113,7 @@ func TestTunnels(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	f := &fakeRemote{cut: make(chan struct{})}
+	f := &fakeRemote{cut: make(chan struct{}), hold: make(chan struct{})}
 	var running atomic.Bool // NepFleet on the remote
 	s := &Server{Dir: dir, Connector: f, RetryAfter: 10 * time.Millisecond, PollEvery: 10 * time.Millisecond,
 		Probe: func(_ context.Context, tg remote.Target) (*remote.Report, error) {
@@ -168,6 +172,16 @@ func TestTunnels(t *testing.T) {
 	}
 	if rec := do(http.MethodGet, "/v1/remotes/nas/api/%2e%2e/%2e%2e/healthz", ""); rec.Code == http.StatusOK {
 		t.Errorf("an encoded .. must not leave /api/: %s", rec.Body)
+	}
+	// A request running through the tunnel (an event stream, an apply's log)
+	// counts, so an automatic restart waits for it.
+	done := make(chan struct{})
+	go func() { do(http.MethodGet, "/v1/remotes/nas/api/v1/slow", ""); close(done) }()
+	waitFor(t, "the request in flight", func() bool { return s.Proxying() == 1 })
+	close(f.hold)
+	<-done
+	if n := s.Proxying(); n != 0 {
+		t.Errorf("still counted after it ended: %d", n)
 	}
 	if rec := do(http.MethodGet, "/v1/remotes", ""); strings.Contains(rec.Body.String(), "nft_") {
 		t.Errorf("the token must not reach clients: %s", rec.Body)
@@ -240,6 +254,15 @@ func TestTunnels(t *testing.T) {
 	waitFor(t, "the error", func() bool { return strings.Contains(state().TunnelError, "no nepfleet") })
 	if rec := do(http.MethodGet, "/v1/remotes/nas/api/v1/stacks", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("proxy while down: %d", rec.Code)
+	}
+	// Down for a locked key (after a daemon restart, say): a page loading
+	// through the proxy learns which key, and asks for its passphrase.
+	f.mu.Lock()
+	f.mintErr = &remote.LockedKeyError{Keys: []string{"/home/me/.ssh/id_rsa"}}
+	f.mu.Unlock()
+	waitFor(t, "the locked key", func() bool { return len(state().LockedKeys) > 0 })
+	if rec := do(http.MethodGet, "/v1/remotes/nas/api/v1/stacks", ""); rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"lockedKeys":["/home/me/.ssh/id_rsa"]`) {
+		t.Errorf("proxy while the key is locked: %d %s", rec.Code, rec.Body)
 	}
 	if rec := do(http.MethodDelete, "/v1/remotes/nas", ""); rec.Code != http.StatusNoContent {
 		t.Errorf("remove: %d", rec.Code)
