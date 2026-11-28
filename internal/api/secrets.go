@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/Serraniel/nepfleet/internal/auth"
 )
@@ -67,6 +68,13 @@ func registerSecrets(mux *http.ServeMux, o Options, l *limiter) {
 		key := r.PathValue("key")
 		if !secretKey.MatchString(key) || key == "sops" {
 			http.Error(w, "a key is a variable name: letters, digits and _, not starting with a digit (and not sops)", http.StatusBadRequest)
+			return
+		}
+		// A mirror's deploy key or token decides what pushes the whole fleet
+		// repository can reach: only the mirror endpoints (admin, a passkey)
+		// change it.
+		if stack == "" && strings.HasPrefix(key, MirrorSecretPrefix) {
+			http.Error(w, "MIRROR_* secrets belong to the mirrors; change them with /api/v1/mirror/remotes", http.StatusForbidden)
 			return
 		}
 		t, _ := TokenFrom(r.Context())

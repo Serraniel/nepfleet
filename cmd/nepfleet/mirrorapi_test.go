@@ -3,11 +3,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Serraniel/nepfleet/internal/api"
 	"github.com/Serraniel/nepfleet/internal/fleet"
@@ -43,12 +46,22 @@ func TestMirrorSetupAPI(t *testing.T) {
 	if _, err := addMirrorAPI(c, api.MirrorAdd{URL: bare}, api.MirrorLocal, "ci"); !errors.As(err, new(api.InvalidError)) {
 		t.Errorf("adding it twice: %v", err)
 	}
-	st, err := mirrorAPI(c, true)
+	// The fleet repository's own hooks don't run: what's in it doesn't get
+	// to execute on a push.
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := filepath.Join(dir, ".git", "hooks", "pre-push")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 1\n"), 0o700); err != nil { //nolint:gosec // a test hook
+		t.Fatal(err)
+	}
+	st, err := mirrorAPI(t.Context(), c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if m := findMirror(t, st, api.MirrorID(bare)); m.OK.IsZero() || m.Error != "" {
 		t.Errorf("first push: %+v", m)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the fleet repository's pre-push hook ran")
 	}
 	branch := strings.TrimSpace(tgit(t, dir, "branch", "--show-current"))
 	if got, want := strings.TrimSpace(tgit(t, bare, "rev-parse", "refs/heads/"+branch)), strings.TrimSpace(tgit(t, dir, "rev-parse", "HEAD")); got != want {
@@ -82,7 +95,7 @@ func TestMirrorSetupAPI(t *testing.T) {
 	old := mirrorSSH
 	mirrorSSH = fake
 	t.Cleanup(func() { mirrorSSH = old })
-	st, err = mirrorAPI(c, true)
+	st, err = mirrorAPI(t.Context(), c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +114,28 @@ func TestMirrorSetupAPI(t *testing.T) {
 		t.Errorf("the key file stayed: %v", left)
 	}
 
+	// A forge that never answers doesn't hold the push (and the API lock):
+	// the context ends it, and the key file goes all the same.
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nsleep 60\n"), 0o700); err != nil { //nolint:gosec // a test program
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	start := time.Now()
+	st, err = mirrorAPI(ctx, c, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 20*time.Second {
+		t.Errorf("a stalled push took %s", took)
+	}
+	if m := findMirror(t, st, api.MirrorID(sshURL)); m.Error == "" {
+		t.Errorf("a stalled push: %+v", m)
+	}
+	if left, _ := filepath.Glob(filepath.Join(c.stateDir, "mirror-key-*")); len(left) != 0 {
+		t.Errorf("the key file stayed after a stalled push: %v", left)
+	}
+
 	// An https mirror with a token: stored encrypted, never in fleet.yaml.
 	const httpsURL = "https://git.example.test/me/fleet.git"
 	added, err = addMirrorAPI(c, api.MirrorAdd{URL: httpsURL, Token: "tok3n"}, api.MirrorHTTPS, "ci")
@@ -111,7 +146,10 @@ func TestMirrorSetupAPI(t *testing.T) {
 		t.Fatal("fleet.yaml holds the token")
 	}
 	e, _ := c.open()
-	if env, done, err := newMirrorSecrets(e).pushEnv(c.stateDir, httpsURL); err != nil || !strings.Contains(strings.Join(env, "\n"), "GIT_CONFIG_VALUE_0=Authorization: Basic ") {
+	// The header goes only to the mirror's URL.
+	if env, done, err := newMirrorSecrets(e).pushEnv(c.stateDir, httpsURL); err != nil ||
+		!strings.Contains(strings.Join(env, "\n"), "GIT_CONFIG_VALUE_0=Authorization: Basic ") ||
+		!slices.Contains(env, "GIT_CONFIG_KEY_0=http."+httpsURL+".extraHeader") {
 		t.Errorf("https push env: %v %v", env, err)
 	} else {
 		done()
@@ -138,6 +176,34 @@ func TestMirrorSetupAPI(t *testing.T) {
 	}
 	if st := tgit(t, dir, "status", "--porcelain"); strings.TrimSpace(st) != "" {
 		t.Errorf("left uncommitted: %s", st)
+	}
+}
+
+// serve's start removes key files a dead push left, not one in use.
+func TestSweepMirrorKeys(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	stale, fresh := filepath.Join(dir, "mirror-key-1"), filepath.Join(dir, "mirror-key-2")
+	other := filepath.Join(dir, "mirror.json")
+	for _, f := range []string{stale, fresh, other} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := now.Add(-time.Hour)
+	for _, f := range []string{stale, other} {
+		if err := os.Chtimes(f, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sweepMirrorKeys(dir, now)
+	if _, err := os.Stat(stale); err == nil {
+		t.Error("a stale key file stayed")
+	}
+	for _, f := range []string{fresh, other} {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("%s went: %v", filepath.Base(f), err)
+		}
 	}
 }
 

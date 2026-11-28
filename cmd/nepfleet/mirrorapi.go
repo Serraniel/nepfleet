@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -34,11 +35,11 @@ var mirrorSSH = "ssh"
 // A mirror's secrets in fleet.secret.yaml, named by its ID: the deploy key
 // the app made (OpenSSH PEM), or "user:token" for an https mirror.
 func mirrorKeySecret(u string) string {
-	return "MIRROR_" + strings.ToUpper(api.MirrorID(u)) + "_SSH_KEY"
+	return api.MirrorSecretPrefix + strings.ToUpper(api.MirrorID(u)) + "_SSH_KEY"
 }
 
 func mirrorAuthSecret(u string) string {
-	return "MIRROR_" + strings.ToUpper(api.MirrorID(u)) + "_HTTP_AUTH"
+	return api.MirrorSecretPrefix + strings.ToUpper(api.MirrorID(u)) + "_HTTP_AUTH"
 }
 
 // newDeployKey makes an ed25519 key: the private half as OpenSSH PEM, the
@@ -183,6 +184,22 @@ func (m *mirrorSecrets) auth(u string) string {
 	return "host"
 }
 
+// staleKey is how old a deploy key file is before serve's start takes it
+// for left behind: older than any push (a CLI nepfleet mirror from a timer
+// may be using a newer one right now).
+const staleKey = 10 * time.Minute
+
+// sweepMirrorKeys removes deploy key files a push left behind when its
+// process died during it.
+func sweepMirrorKeys(stateDir string, now time.Time) {
+	left, _ := filepath.Glob(filepath.Join(stateDir, "mirror-key-*"))
+	for _, f := range left {
+		if fi, err := os.Lstat(f); err == nil && now.Sub(fi.ModTime()) > staleKey {
+			_ = os.Remove(f)
+		}
+	}
+}
+
 // pushEnv is the environment git pushes to u with: the deploy key (in a file
 // only the push reads, removed by done) or the token the app stored, or
 // nothing more for a mirror that uses the host's own credentials. Never a
@@ -217,8 +234,9 @@ func (m *mirrorSecrets) pushEnv(stateDir, u string) (env []string, done func(), 
 		return nil, done, err
 	} else if ok {
 		// In the environment, which only this user can read, rather than in
-		// the URL or on the command line.
-		return append(env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader",
+		// the URL or on the command line; and only for this URL, so no
+		// other host gets it (redirects are off as well, see mirrorGit).
+		return append(env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http."+u+".extraHeader",
 			"GIT_CONFIG_VALUE_0=Authorization: Basic "+base64.StdEncoding.EncodeToString([]byte(auth))), done, nil
 	}
 	return env, done, nil

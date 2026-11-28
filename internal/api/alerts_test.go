@@ -461,6 +461,9 @@ func TestSecretEndpoints(t *testing.T) {
 		{"GET", "/api/v1/secrets", tok[auth.ScopeAdmin], "", 200},
 		{"PUT", "/api/v1/secrets/FLEET_KEY", tok[auth.ScopeEdit], `{"value":"s"}`, 403},
 		{"PUT", "/api/v1/secrets/FLEET_KEY", tok[auth.ScopeAdmin], `{"value":"s"}`, 200},
+		// A mirror's key or token changes only through the mirror endpoints.
+		{"PUT", "/api/v1/secrets/MIRROR_0123456789AB_SSH_KEY", tok[auth.ScopeAdmin], `{"value":"s"}`, 403},
+		{"DELETE", "/api/v1/secrets/MIRROR_0123456789AB_HTTP_AUTH", tok[auth.ScopeAdmin], "", 403},
 	} {
 		rec := do(c.method, c.path, c.token, c.body)
 		if rec.Code != c.want {
