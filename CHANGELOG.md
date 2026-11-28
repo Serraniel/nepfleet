@@ -1,5 +1,97 @@
 # Changelog
 
+## [0.4.0](https://github.com/Serraniel/nepfleet/compare/v0.3.4...v0.4.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* stacks take updates by themselves unless they opt out ([#392](https://github.com/Serraniel/nepfleet/issues/392))
+* stacks apply by themselves unless they opt into review ([#388](https://github.com/Serraniel/nepfleet/issues/388))
+
+### Features
+
+* add and remove notification channels over the API ([#343](https://github.com/Serraniel/nepfleet/issues/343)) ([dd86c68](https://github.com/Serraniel/nepfleet/commit/dd86c689ebf2cfd1b7291f3777f797643e169aa9))
+* alerts from shoutrrr URLs, and NEPFLEET_API_HOST ([#338](https://github.com/Serraniel/nepfleet/issues/338)) ([26923ac](https://github.com/Serraniel/nepfleet/commit/26923ac982d0fcbfa05c96f704efb4a7a065d118))
+* an edge channel for testing main before a release ([#372](https://github.com/Serraniel/nepfleet/issues/372)) ([c668307](https://github.com/Serraniel/nepfleet/commit/c668307fef6bc1968e79ba1110129dd95d5e5063))
+* **api:** a stack's containers, and restart, stop or start a service ([#363](https://github.com/Serraniel/nepfleet/issues/363)) ([2362106](https://github.com/Serraniel/nepfleet/commit/236210620284a1a62f37e1d597bff56e6b7240eb))
+* **api:** a stack's inputs, and setting several in one commit ([#398](https://github.com/Serraniel/nepfleet/issues/398)) ([38503fc](https://github.com/Serraniel/nepfleet/commit/38503fc1cd5d7a1783f26f0e151ef035904e7cff))
+* **api:** follow a container's logs as they come ([#377](https://github.com/Serraniel/nepfleet/issues/377)) ([08e7208](https://github.com/Serraniel/nepfleet/commit/08e720887dfc94e1b12a74595cf15cc63b27712b))
+* **api:** read and replace notification routes ([#378](https://github.com/Serraniel/nepfleet/issues/378)) ([477ffa7](https://github.com/Serraniel/nepfleet/commit/477ffa72da41cb46d72a93633286925edcdc13b9))
+* **api:** read and set sign-on for the fleet and its stacks ([#417](https://github.com/Serraniel/nepfleet/issues/417)) ([f138ba9](https://github.com/Serraniel/nepfleet/commit/f138ba98d28edda1af784a36d85d95a8ebf5f656))
+* **api:** say whether the fleet repository has a remote ([#407](https://github.com/Serraniel/nepfleet/issues/407)) ([33efdcf](https://github.com/Serraniel/nepfleet/commit/33efdcf002eb20e968f4e673981e72fa52cb971b))
+* **api:** set up repository mirrors with deploy keys ([#418](https://github.com/Serraniel/nepfleet/issues/418)) ([aac71f3](https://github.com/Serraniel/nepfleet/commit/aac71f315189cec043125010946a7409a382464f))
+* **api:** templates list which of them run on the server's host ([#365](https://github.com/Serraniel/nepfleet/issues/365)) ([40812fb](https://github.com/Serraniel/nepfleet/commit/40812fbb2b256c90b4780f409e1025831d85f060))
+* **api:** the last lines of a stack's container logs ([#364](https://github.com/Serraniel/nepfleet/issues/364)) ([04dfb84](https://github.com/Serraniel/nepfleet/commit/04dfb84035efbcd77ba5cb462b9268b5daaba1e5))
+* applies report their phase, for progress bars ([#341](https://github.com/Serraniel/nepfleet/issues/341)) ([bae3330](https://github.com/Serraniel/nepfleet/commit/bae333055a9f4ec98915ab76127e949197bf6797))
+* check for disk space before updating a host ([#380](https://github.com/Serraniel/nepfleet/issues/380)) ([30421cb](https://github.com/Serraniel/nepfleet/commit/30421cb8fb00db38dee8ff98faf59c54f39509ea))
+* **cli:** new and apply commit what they write, like the API ([#424](https://github.com/Serraniel/nepfleet/issues/424)) ([57ffc3e](https://github.com/Serraniel/nepfleet/commit/57ffc3ed2fb59282a6ef2cc98b4b1ba2ecdcfc30))
+* **control:** Arch news since a machine's last upgrade ([#360](https://github.com/Serraniel/nepfleet/issues/360)) ([108f730](https://github.com/Serraniel/nepfleet/commit/108f7309678e6dc63c19a51e197764d806599752))
+* **control:** check a machine's pending host updates over SSH ([#359](https://github.com/Serraniel/nepfleet/issues/359)) ([fc52af8](https://github.com/Serraniel/nepfleet/commit/fc52af87427de0268469dfa5a9abbf7a2b3c599b))
+* **control:** one daemon, restarts in place after updates, keys kept ([#426](https://github.com/Serraniel/nepfleet/issues/426)) ([cc025c7](https://github.com/Serraniel/nepfleet/commit/cc025c79b3eed6ba35cdbc24b78e5b0d254c04f8))
+* **control:** restart the daemon after nepfleet is updated ([#382](https://github.com/Serraniel/nepfleet/issues/382)) ([1979cb6](https://github.com/Serraniel/nepfleet/commit/1979cb64cf3e4a068e1a557847c519455bf59df4))
+* **control:** setup jobs report their current step ([#353](https://github.com/Serraniel/nepfleet/issues/353)) ([2340ba1](https://github.com/Serraniel/nepfleet/commit/2340ba16560942c28314419baca8e198ec6fc3d7))
+* **doctor:** check that each stack's domain resolves ([#354](https://github.com/Serraniel/nepfleet/issues/354)) ([db6694a](https://github.com/Serraniel/nepfleet/commit/db6694a45af6f7db7d5bfba31000eedc7bb6b411))
+* **doctor:** offer a key backup on the Key copy warning ([#410](https://github.com/Serraniel/nepfleet/issues/410)) ([9084276](https://github.com/Serraniel/nepfleet/commit/90842766da95f323e8878e993e6899db57689dee))
+* fix domains that don't resolve by letting Caddy keep the DNS records ([#374](https://github.com/Serraniel/nepfleet/issues/374)) ([f15adac](https://github.com/Serraniel/nepfleet/commit/f15adac770dd4c98872440a5fa0b5925810e5b29))
+* **fleet:** fleet-wide mail settings for templates ([#412](https://github.com/Serraniel/nepfleet/issues/412)) ([56ccd6e](https://github.com/Serraniel/nepfleet/commit/56ccd6e0aba78362d3f521f67e2926575c769eaa))
+* git sync can require commits signed by allowed SSH keys ([#349](https://github.com/Serraniel/nepfleet/issues/349)) ([5e889ac](https://github.com/Serraniel/nepfleet/commit/5e889acb38b08e6b1772666942fb30d56faa136e))
+* input help that depends on another input's value ([#340](https://github.com/Serraniel/nepfleet/issues/340)) ([5fcbb0a](https://github.com/Serraniel/nepfleet/commit/5fcbb0a83449a858b89206040eafd3a725832561))
+* installs and updates verify the server image's signature ([#346](https://github.com/Serraniel/nepfleet/issues/346)) ([445717d](https://github.com/Serraniel/nepfleet/commit/445717db999429513cbdcdf12a82a963a3868aad))
+* **notify:** record each channel's last delivery and serve it ([#414](https://github.com/Serraniel/nepfleet/issues/414)) ([ab930f3](https://github.com/Serraniel/nepfleet/commit/ab930f3db93866f3953c053fd310cc4fda78d0f1))
+* **remote:** a host update on Arch brings the update checkers ([#383](https://github.com/Serraniel/nepfleet/issues/383)) ([d9e3fa1](https://github.com/Serraniel/nepfleet/commit/d9e3fa1c98f76be1f3f2cfc29449c56607733ce8))
+* **remote:** reboot a machine and verify it comes back ([#362](https://github.com/Serraniel/nepfleet/issues/362)) ([aae48ab](https://github.com/Serraniel/nepfleet/commit/aae48ab9f5457a31d8c8eec98cd53ceb41dd9265))
+* **remote:** repair a half-done install from the doctor's findings ([#356](https://github.com/Serraniel/nepfleet/issues/356)) ([0e7c1b5](https://github.com/Serraniel/nepfleet/commit/0e7c1b50e1c3fe3fc57af4db43f235523b52cfce))
+* **remote:** turn off SSH password logins as a reviewed plan ([#366](https://github.com/Serraniel/nepfleet/issues/366)) ([0e76d32](https://github.com/Serraniel/nepfleet/commit/0e76d323df1732a874a2f86c779bb3920bf4aba2))
+* **remote:** update a machine's packages as a reviewed plan ([#361](https://github.com/Serraniel/nepfleet/issues/361)) ([bbf8dc9](https://github.com/Serraniel/nepfleet/commit/bbf8dc9fac659b368a9d3e55eb1103c53b32b2a4))
+* **render:** SMTP TLS mode as true/false built-ins ([#416](https://github.com/Serraniel/nepfleet/issues/416)) ([d9eefa6](https://github.com/Serraniel/nepfleet/commit/d9eefa69c487ae7bc0a3befa882aba82ed52f9b1))
+* restore and updates jobs report their step, for progress bars ([#352](https://github.com/Serraniel/nepfleet/issues/352)) ([cbecec6](https://github.com/Serraniel/nepfleet/commit/cbecec620110c13d2d2fdb1491d89ff522f5237e))
+* run nepfleet doctor on a machine from the control daemon ([#342](https://github.com/Serraniel/nepfleet/issues/342)) ([afa56ca](https://github.com/Serraniel/nepfleet/commit/afa56cad64c5c0d6bc6ac0b123f9206f458ff7ac))
+* **serve:** stacks move to newer templates of the same major by themselves ([#390](https://github.com/Serraniel/nepfleet/issues/390)) ([29e2eb0](https://github.com/Serraniel/nepfleet/commit/29e2eb086a54c08397ec8dccab64f8c1735f70b9))
+* **signon:** integrated sign-on through a Pocket ID stack in the fleet ([#413](https://github.com/Serraniel/nepfleet/issues/413)) ([e366b6e](https://github.com/Serraniel/nepfleet/commit/e366b6eadb3ad740dcc728980f51938f26c4a366))
+* stacks apply by themselves unless they opt into review ([#388](https://github.com/Serraniel/nepfleet/issues/388)) ([b121422](https://github.com/Serraniel/nepfleet/commit/b1214221cb1d140d6048ce5f165733ae52196d79))
+* stacks get NepFleet's API address and their own notify token ([#336](https://github.com/Serraniel/nepfleet/issues/336)) ([19810e2](https://github.com/Serraniel/nepfleet/commit/19810e2d6e3c3e7428e91951ed3af3c6d6eb7e16))
+* stacks take updates by themselves unless they opt out ([#392](https://github.com/Serraniel/nepfleet/issues/392)) ([57bcc1b](https://github.com/Serraniel/nepfleet/commit/57bcc1b5b92e84634da9d87b5ef40c87520f7e73))
+* start a machine's stopped NepFleet from the doctor ([#345](https://github.com/Serraniel/nepfleet/issues/345)) ([b9c1785](https://github.com/Serraniel/nepfleet/commit/b9c1785e8b736bfaff2fdde9e714ecb80dac0cd8))
+* **sync:** accept commits signed by listed OpenPGP keys ([#358](https://github.com/Serraniel/nepfleet/issues/358)) ([7c48fcf](https://github.com/Serraniel/nepfleet/commit/7c48fcf6b05a1cc30e7a7787937794b7ca0f282f))
+* **template:** generate a bcrypt hash of another value ([#391](https://github.com/Serraniel/nepfleet/issues/391)) ([43bacbf](https://github.com/Serraniel/nepfleet/commit/43bacbfc7fc6fbe64c75e4cb17ea948cccd6ecdc))
+* templates get the host's docker group ID as NEPFLEET_DOCKER_GID ([#335](https://github.com/Serraniel/nepfleet/issues/335)) ([3ba4725](https://github.com/Serraniel/nepfleet/commit/3ba4725121ce3b4a825ee4d8e2ce5f86e5719e42))
+* update a machine's NepFleet to the app's version, as a reviewed plan ([#344](https://github.com/Serraniel/nepfleet/issues/344)) ([0f9eac3](https://github.com/Serraniel/nepfleet/commit/0f9eac3cd1fb7ab600c34083284e5ae6356303fc))
+
+
+### Bug Fixes
+
+* **api:** bound commits and template fetches; refuse edits that break dependants ([#355](https://github.com/Serraniel/nepfleet/issues/355)) ([fc136c0](https://github.com/Serraniel/nepfleet/commit/fc136c01639bd6afcf9a4f6b52bae18bcd9718ae))
+* **api:** taking image updates over the API no longer fails as a changed plan ([#389](https://github.com/Serraniel/nepfleet/issues/389)) ([a7d41bc](https://github.com/Serraniel/nepfleet/commit/a7d41bc6f0bb6f06760a2fbf6ae97803f3f6edd4))
+* **control:** the app's port allows PUT and PATCH ([#394](https://github.com/Serraniel/nepfleet/issues/394)) ([8a3da09](https://github.com/Serraniel/nepfleet/commit/8a3da09dee217695580f086e6102f31599437a37))
+* **deploy:** let run-once services finish instead of failing apply ([#405](https://github.com/Serraniel/nepfleet/issues/405)) ([ce569c4](https://github.com/Serraniel/nepfleet/commit/ce569c41b6e3fb42cf4b84c829c95625bb1e3acc))
+* **deps:** gorilla/websocket with a random mask key (GO-2026-6278) ([#401](https://github.com/Serraniel/nepfleet/issues/401)) ([9408daa](https://github.com/Serraniel/nepfleet/commit/9408daa51f608a8ca6a2b5b2e17127f95f4e5f60))
+* **doctor:** measure Docker's disk from inside the container ([#403](https://github.com/Serraniel/nepfleet/issues/403)) ([726ae5c](https://github.com/Serraniel/nepfleet/commit/726ae5c427d18360ddaebb2683b84cff145add5e))
+* **events:** relayed events keep the time they happened ([#420](https://github.com/Serraniel/nepfleet/issues/420)) ([46a5c5a](https://github.com/Serraniel/nepfleet/commit/46a5c5a7855ae25e3beb25574d7e559adcbcbe3a))
+* **mail:** fairer test limit, user-less settings, a real EHLO name ([#415](https://github.com/Serraniel/nepfleet/issues/415)) ([87ee0d3](https://github.com/Serraniel/nepfleet/commit/87ee0d30dcd7b7c96fef99adc1d52ad5d037e92e))
+* **mirror:** keep mirror credentials out of reach of other paths ([#421](https://github.com/Serraniel/nepfleet/issues/421)) ([6b731b4](https://github.com/Serraniel/nepfleet/commit/6b731b4fcf2b5b96cf779db7174199a05f379b07))
+* **packaging:** never build an old main when updating the clone failed ([#425](https://github.com/Serraniel/nepfleet/issues/425)) ([bc5a03b](https://github.com/Serraniel/nepfleet/commit/bc5a03bb201c693a597004478ab8a0690ec1d8c8))
+* refuse an older signed server image under a newer tag ([#348](https://github.com/Serraniel/nepfleet/issues/348)) ([7a6850d](https://github.com/Serraniel/nepfleet/commit/7a6850d7bbab2b4b0d7164044ab357e4336c51b1))
+* **remote:** ask only for the passphrase of a key the machine accepts ([#327](https://github.com/Serraniel/nepfleet/issues/327)) ([448956f](https://github.com/Serraniel/nepfleet/commit/448956fe32bb462c20f9ab1fd3f331a65afb36f7))
+* **remote:** say whether a host updates check is fresh ([#376](https://github.com/Serraniel/nepfleet/issues/376)) ([a088656](https://github.com/Serraniel/nepfleet/commit/a0886569012073f1bd457acb51edc67fbd2ceaa0))
+* render shows swarm stacks as docker stack gets them; apply creates the API network ([#339](https://github.com/Serraniel/nepfleet/issues/339)) ([35ab07e](https://github.com/Serraniel/nepfleet/commit/35ab07e36e33cfd58bed35ace344b12005bab3d4))
+* **render:** keep value-less environment entries in flow style ([#409](https://github.com/Serraniel/nepfleet/issues/409)) ([9e70eaf](https://github.com/Serraniel/nepfleet/commit/9e70eaf75e2211f0c8abba6074c307ed92d63e8a))
+* **render:** write only the built-ins a stack uses ([#406](https://github.com/Serraniel/nepfleet/issues/406)) ([58d3568](https://github.com/Serraniel/nepfleet/commit/58d356809cf975afae994b5ea60592896ba5f0c0))
+* swarm accepts templates with one-shots and depends_on conditions ([#337](https://github.com/Serraniel/nepfleet/issues/337)) ([b9a520f](https://github.com/Serraniel/nepfleet/commit/b9a520fa46593760b2509b1dc79536819e0e596c))
+* **swarm:** deploys refused the compose project name; bound the wait ([#368](https://github.com/Serraniel/nepfleet/issues/368)) ([db890ae](https://github.com/Serraniel/nepfleet/commit/db890ae47424f18896adf8d1e25be8cfe12d6445))
+* **swarm:** drop compose profiles from the swarm form ([#371](https://github.com/Serraniel/nepfleet/issues/371)) ([80f3307](https://github.com/Serraniel/nepfleet/commit/80f3307f31ca3120bf865ef6c98002ff85e04b8f))
+* **swarm:** keep services with local volumes on the node that has them ([#367](https://github.com/Serraniel/nepfleet/issues/367)) ([a6e2faf](https://github.com/Serraniel/nepfleet/commit/a6e2faf123a49356ccf75be210055b336aaabd7b))
+* **swarm:** one-shots run as swarm jobs ([#370](https://github.com/Serraniel/nepfleet/issues/370)) ([2b98744](https://github.com/Serraniel/nepfleet/commit/2b9874458d7097494aa77984df54d77c79f4d5b7))
+* **swarm:** tmpfs as mounts, published ports as numbers ([#369](https://github.com/Serraniel/nepfleet/issues/369)) ([823cba4](https://github.com/Serraniel/nepfleet/commit/823cba42314010f507cc1ac6b7aa9ff0cfdb8061))
+* **template:** a minor template upgrade below 1.0 needs no migration ([#387](https://github.com/Serraniel/nepfleet/issues/387)) ([70405ce](https://github.com/Serraniel/nepfleet/commit/70405cec4442b4fe34e26e4d28b0c00536526e30))
+* Uptime Kuma stacks count as the fleet's Kuma ([#375](https://github.com/Serraniel/nepfleet/issues/375)) ([3f1d661](https://github.com/Serraniel/nepfleet/commit/3f1d661009b125d100cb5def1b2ff83018c0ab67))
+
+
+### Dependencies
+
+* Bump golang from `0a5f7fe` to `70bd7dd` ([#381](https://github.com/Serraniel/nepfleet/issues/381)) ([54300e9](https://github.com/Serraniel/nepfleet/commit/54300e9663c7bcb2efe6b3c9df9e36a310455713))
+* Bump the go group with 2 updates ([#373](https://github.com/Serraniel/nepfleet/issues/373)) ([186c5d3](https://github.com/Serraniel/nepfleet/commit/186c5d31772b7fef375090d1aeeaa83d7cde2ef5))
+* Bump the go group with 2 updates ([#399](https://github.com/Serraniel/nepfleet/issues/399)) ([b4f7698](https://github.com/Serraniel/nepfleet/commit/b4f76985f5fde5e6f44a5aac94fe5e233ac6a51c))
+
 ## [0.3.4](https://github.com/Serraniel/nepfleet/compare/v0.3.3...v0.3.4) (2026-11-14)
 
 
