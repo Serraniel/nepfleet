@@ -34,7 +34,9 @@ A >/dev/null
 A --update-lock | grep 'digests pinned' >/dev/null || fail "--update-lock did not move the pin"
 [ "$(running)" = v2 ] || fail "v2 not running after --update-lock"
 [ "$(grep -o 'sha256:[0-9a-f]*' stacks/$P/lock.yaml)" != "$d1" ] || fail "lock unchanged"
-git commit -qam "v2"
+# apply committed the new pin itself.
+git diff --quiet HEAD -- stacks/$P/lock.yaml || fail "the new pin was not committed"
+git log -1 --format=%s | grep -q "^chore($P): record the apply$" || fail "no record-the-apply commit"
 
 "$NF" rollback --yes --state "$T/state" $P >/dev/null
 [ "$(running)" = v1 ] || fail "rollback did not restore the pinned v1 digest (tag points to v2)"

@@ -25,7 +25,9 @@ git add -A && git commit -qm init
 "$NF" plan --state "$T/state" | grep "HTPASSWD='••••••" >/dev/null || fail "secret not masked in plan"
 "$NF" apply --yes --state "$T/state" | grep -c '✓ applied' | grep -qx 2 || fail "apply"
 grep -q HTTP_SECRET <(SOPS_AGE_KEY_FILE=$T/key.txt sops decrypt stacks/registry/values.secret.yaml) || fail "generated secret not saved"
-git add -A && git commit -qm "lock and generated secrets"
+# apply commits the lock and the generated secrets itself, one commit per stack.
+[ -z "$(git status --porcelain)" ] || fail "apply left files uncommitted: $(git status --porcelain)"
+git log --format=%s | grep -c ': record the apply$' | grep -qx 2 || fail "apply did not commit what it wrote"
 "$NF" plan --state "$T/state" | grep -c 'up to date' | grep -qx 2 || fail "re-plan not empty"
 
 sed -i 's#"http://127.0.0.1/"#"http://127.0.0.1:9/"#' stacks/web/compose.yaml && git commit -qam "break web"

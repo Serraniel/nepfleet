@@ -145,7 +145,7 @@ func TestRecordApplyCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	var log bytes.Buffer
-	recordApply(c, "web", cliCommitter(dir), &log)
+	recordApply(c, "web", cliCommitter, &log)
 	if got := log.String(); got != "committed stacks/web/lock.yaml\n" {
 		t.Errorf("log: %q", got)
 	}
@@ -161,7 +161,7 @@ func TestRecordApplyCLI(t *testing.T) {
 	// Nothing written, nothing committed.
 	head := tgit(t, dir, "rev-parse", "HEAD")
 	log.Reset()
-	recordApply(c, "web", cliCommitter(dir), &log)
+	recordApply(c, "web", cliCommitter, &log)
 	if tgit(t, dir, "rev-parse", "HEAD") != head || log.Len() != 0 {
 		t.Errorf("committed again: %q", log.String())
 	}

@@ -241,13 +241,14 @@ func startRollback(ctx context.Context, c common, stack, commit string, confirm 
 // generated secrets), so an API change is always a commit. A problem only warns:
 // the stack is applied, and the files are there to commit by hand.
 func commitAPIApply(c common, stack, by string, log io.Writer) {
-	recordApply(c, stack, committer{author: apiAuthor(by)}, log)
+	w := committer{author: apiAuthor(by)}
+	recordApply(c, stack, func(string) committer { return w }, log)
 }
 
 // recordApply commits a stack's lock.yaml and secrets when an apply changed
-// them, and nothing else. Outside a git repository there is nothing to do:
-// the apply already said what to commit.
-func recordApply(c common, stack string, w committer, log io.Writer) {
+// them, and nothing else, as who names for the fleet repository. Outside a
+// git repository there is nothing to do: the apply already said what to commit.
+func recordApply(c common, stack string, who func(dir string) committer, log io.Writer) {
 	e, err := c.open()
 	if err != nil {
 		fmt.Fprintf(log, "⚠ not committed: %v\n", err)
@@ -273,6 +274,7 @@ func recordApply(c common, stack string, w committer, log io.Writer) {
 		fmt.Fprintf(log, "⚠ not committed: %v\n", err)
 		return
 	}
+	w := who(e.fleet.Dir)
 	if err := w.commit(e.fleet.Dir, fmt.Sprintf("chore(%s): record the apply", stack), paths...); err != nil {
 		// Unstaged again: the files stay as they are, to commit by hand.
 		_, _ = gitOut(e.fleet.Dir, append([]string{"reset", "-q", "--"}, paths...)...)

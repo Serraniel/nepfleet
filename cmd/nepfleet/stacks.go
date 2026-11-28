@@ -618,7 +618,7 @@ func cmdApply(args []string, stdout, stderr io.Writer) error {
 	// What the apply wrote is committed, as the server does: a host's server
 	// would see an uncommitted lock.yaml as drift.
 	o.record = func(name string) {
-		recordApply(c, name, cliCommitter(c.fleetDir), stdout)
+		recordApply(c, name, cliCommitter, stdout)
 	}
 	return runApply(ctx, c, fs.Args(), o, stdout, stderr)
 }
