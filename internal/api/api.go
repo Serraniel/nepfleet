@@ -200,6 +200,16 @@ type Options struct {
 	SetMail    func(ctx context.Context, m MailUpdate, by string) (commit string, err error)
 	RemoveMail func(ctx context.Context, by string) (commit string, err error)
 	TestMail   func(ctx context.Context, to string) error
+	// SignOn reads fleet.yaml's spec.signOn and each stack's sign-on mode.
+	// SetSignOn names a provider stack (InvalidError when it isn't one
+	// NepFleet supports), RemoveSignOn clears it (ErrNoSignOn). StackSignOn
+	// and SetStackSignOn read and write a stack's spec.signOn. Writes commit
+	// as by; errors: InvalidError, ErrBusy, ErrUncommitted, ErrNotFound.
+	SignOn         func(ctx context.Context) (SignOnSettings, error)
+	SetSignOn      func(ctx context.Context, provider, by string) (commit string, err error)
+	RemoveSignOn   func(ctx context.Context, by string) (commit string, err error)
+	StackSignOn    func(ctx context.Context, stack string) (StackSignOn, error)
+	SetStackSignOn func(ctx context.Context, stack string, u StackSignOnUpdate, by string) (commit string, err error)
 	// Features are the opt-in system stacks and the stacks providing them.
 	Features func() ([]Feature, error)
 	// SecretKeys lists the keys of a stack's encrypted values, or of the
@@ -420,6 +430,7 @@ func Handler(o Options) http.Handler {
 	registerFeatures(mux, o, l)
 	registerChannels(mux, o, l)
 	registerMail(mux, o, l)
+	registerSignOn(mux, o, l)
 	registerRoutes(mux, o, l)
 	registerTokens(mux, o, l)
 	registerSBOM(mux, o, l)

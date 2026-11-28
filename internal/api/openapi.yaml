@@ -636,6 +636,105 @@ paths:
         "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
         "404": { description: No mail settings }
         "409": { description: "Another operation runs, or the files have uncommitted changes on the server" }
+  /api/v1/signon:
+    get:
+      tags: [server]
+      operationId: signOn
+      summary: The fleet's sign-on provider, the stacks that could be one, and how stacks sign in
+      description: >-
+        Lists only the stacks the token may read. Stacks are those whose template supports
+        sign-on (spec.oidc), or that set a mode in stack.yaml.
+      responses:
+        "200":
+          description: The settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignOnSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { description: "No fleet, or another operation runs" }
+    put:
+      tags: [server]
+      operationId: setSignOn
+      summary: Name the fleet's sign-on provider, a stack in the fleet (admin scope)
+      description: >-
+        Writes fleet.yaml's spec.signOn.provider and commits it. The stack must run a template
+        NepFleet can register clients in (`kinds`). Stacks whose template supports sign-on
+        and that set no mode use it on their next apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignOnUpdate" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "400": { description: Not a stack name }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "409": { description: "Another operation runs, or fleet.yaml has uncommitted changes on the server" }
+        "422": { description: "No such stack, not a supported provider, or the provider already; the reason" }
+    delete:
+      tags: [server]
+      operationId: removeSignOn
+      summary: Remove the fleet's sign-on provider (admin scope)
+      description: >-
+        Stacks that default to integrated fall back to none; ones that set integrated fail to
+        plan until they change it. Their clients stay in the provider.
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't admin, or `{\"verify\": true}`" }
+        "404": { description: No provider }
+        "409": { description: "Another operation runs, or fleet.yaml has uncommitted changes on the server" }
+  /api/v1/stacks/{name}/signon:
+    get:
+      tags: [stacks]
+      operationId: stackSignOn
+      summary: How a stack's users sign in
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The stack's sign-on
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StackSignOn" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [stacks]
+      operationId: setStackSignOn
+      summary: Set how a stack's users sign in (edit scope)
+      description: >-
+        Writes stack.yaml's spec.signOn and commits it, without applying; mode "" removes it, so
+        the default applies. For custom, store the client secret first with
+        PUT /api/v1/stacks/{name}/secrets/NEPFLEET_OIDC_CLIENT_SECRET: the stack doesn't plan without it.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StackSignOnUpdate" }
+      responses:
+        "200":
+          description: The commit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretResult" }
+        "400": { description: Not a mode, or a value with a quote or line break }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "The scope isn't edit, or `{\"verify\": true}`" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Another operation runs, or stack.yaml has uncommitted changes on the server" }
+        "422": { description: "The template doesn't support sign-on, integrated without a provider, or custom without issuer or client ID; the reason" }
   /api/v1/mail/test:
     post:
       tags: [server]
@@ -2059,6 +2158,56 @@ components:
         access: { type: string, enum: [domain, port], description: "Behind Caddy (default), or a LAN port" }
         port: { type: integer, description: "For access port; 0 picks a free one" }
         values: { type: object, additionalProperties: { type: string }, description: "The template's inputs; secret ones are stored encrypted" }
+        signOn: { $ref: "#/components/schemas/NewStackSignOn" }
+    NewStackSignOn:
+      type: object
+      description: stack.yaml's spec.signOn; leave it out for the default.
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [integrated, custom, none] }
+        issuer: { type: string, description: The provider's issuer URL (custom) }
+        clientID: { type: string, description: The client's ID at the provider (custom) }
+        clientSecret: { type: string, maxLength: 1024, description: "Custom: stored encrypted as NEPFLEET_OIDC_CLIENT_SECRET, never returned" }
+    SignOnSettings:
+      type: object
+      required: [provider, kinds, candidates, stacks]
+      properties:
+        provider: { type: string, description: "The provider stack; empty without one" }
+        kinds: { type: array, items: { type: string }, description: Templates NepFleet can register clients in }
+        candidates: { type: array, items: { type: string }, description: Stacks running one of kinds }
+        stacks:
+          type: array
+          items: { $ref: "#/components/schemas/StackSignOnMode" }
+    StackSignOnMode:
+      type: object
+      required: [name, mode, explicit]
+      properties:
+        name: { type: string }
+        mode: { type: string, enum: [integrated, custom, none], description: The mode in effect }
+        explicit: { type: boolean, description: "stack.yaml sets the mode; otherwise it's the default" }
+    SignOnUpdate:
+      type: object
+      required: [provider]
+      properties:
+        provider: { type: string, description: A stack's name }
+    StackSignOn:
+      type: object
+      required: [supported, mode, set, provider]
+      properties:
+        supported: { type: boolean, description: "The stack's template supports sign-on (spec.oidc)" }
+        mode: { type: string, enum: [integrated, custom, none], description: The mode in effect }
+        set: { type: string, enum: ["", integrated, custom, none], description: "stack.yaml's own mode; empty for the default" }
+        issuer: { type: string }
+        clientID: { type: string }
+        provider: { type: string, description: "The fleet's provider stack; empty without one" }
+        secretSet: { type: boolean, description: "NEPFLEET_OIDC_CLIENT_SECRET is stored; only for tokens that may edit the stack" }
+    StackSignOnUpdate:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: ["", integrated, custom, none], description: "Empty removes spec.signOn: the default applies" }
+        issuer: { type: string }
+        clientID: { type: string }
     NewStackResult:
       type: object
       required: [name, commit]

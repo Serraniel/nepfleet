@@ -3,9 +3,12 @@
 package fleet
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // SignOnSpec is fleet.yaml spec.signOn: the fleet's identity provider,
@@ -82,4 +85,39 @@ func SignOnMode(f *Fleet, s *Stack, oidc bool) string {
 		return SignOnIntegrated
 	}
 	return SignOnNone
+}
+
+// SetSignOnProvider writes fleet.yaml's spec.signOn.provider, keeping the
+// rest of the file and its comments. Whether the stack is one NepFleet can
+// use as a provider is the caller's to check.
+func SetSignOnProvider(dir, provider string) error {
+	if err := checkFleetSignOn(&SignOnSpec{Provider: provider}); err != nil {
+		return err
+	}
+	return editFleet(dir, func(spec *yaml.Node) error {
+		n := &yaml.Node{Kind: yaml.MappingNode}
+		mapPut(n, "provider", &yaml.Node{Kind: yaml.ScalarNode, Value: provider})
+		mapPut(spec, "signOn", n)
+		return nil
+	}, func(f *Fleet) error {
+		if f.Spec.SignOn == nil || f.Spec.SignOn.Provider != provider {
+			return errors.New("the sign-on provider isn't there after writing it")
+		}
+		return nil
+	})
+}
+
+// RemoveSignOn deletes spec.signOn; it reports whether there was one.
+func RemoveSignOn(dir string) (bool, error) {
+	found := false
+	err := editFleet(dir, func(spec *yaml.Node) error {
+		found = mapDelete(spec, "signOn")
+		return nil
+	}, func(f *Fleet) error {
+		if f.Spec.SignOn != nil {
+			return errors.New("the sign-on provider is still there after removing it")
+		}
+		return nil
+	})
+	return found, err
 }

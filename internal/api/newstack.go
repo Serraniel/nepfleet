@@ -28,6 +28,17 @@ type NewStack struct {
 	// Values are the template's inputs. Secret ones are stored encrypted and
 	// never returned.
 	Values map[string]string `json:"values,omitempty"`
+	// SignOn sets stack.yaml's spec.signOn; leave it out for the default.
+	SignOn *NewStackSignOn `json:"signOn,omitempty"`
+}
+
+// NewStackSignOn is a new stack's sign-on. ClientSecret (custom) is stored
+// encrypted as NEPFLEET_OIDC_CLIENT_SECRET and never returned.
+type NewStackSignOn struct {
+	Mode         string `json:"mode"`
+	Issuer       string `json:"issuer,omitempty"`
+	ClientID     string `json:"clientID,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
 }
 
 // NewStackResult is the stack created, committed, not yet applied.
@@ -59,6 +70,13 @@ func registerNewStack(mux *http.ServeMux, o Options, l *limiter) {
 		if err := dec.Decode(&req); err != nil || req.Template == "" || len(req.Values) > 200 {
 			http.Error(w, `send {"template": "<name>", "name", "target", "access", "port", "values": {"INPUT": "value"}}`, http.StatusBadRequest)
 			return
+		}
+		if so := req.SignOn; so != nil {
+			if !slices.Contains(signOnModes, so.Mode) || envUnsafe(so.Issuer) || envUnsafe(so.ClientID) ||
+				envUnsafe(so.ClientSecret) || len(so.ClientSecret) > 1024 {
+				http.Error(w, `signOn: send {"mode": "integrated|custom|none", "issuer", "clientID", "clientSecret"}, without quotes or line breaks`, http.StatusBadRequest)
+				return
+			}
 		}
 		// A token limited to some stacks creates only those.
 		name := req.Name

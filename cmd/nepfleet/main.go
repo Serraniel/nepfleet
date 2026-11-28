@@ -466,7 +466,30 @@ func serve(args []string, stderr io.Writer) error {
 			}
 			return commit, err
 		},
-		TestMail:   func(ctx context.Context, to string) error { return testMailAPI(ctx, c, to) },
+		TestMail: func(ctx context.Context, to string) error { return testMailAPI(ctx, c, to) },
+		SignOn:   func(context.Context) (api.SignOnSettings, error) { return signOnAPI(c) },
+		SetSignOn: func(_ context.Context, provider, by string) (string, error) {
+			commit, err := setSignOnAPI(c, provider, by)
+			if err == nil && reconcile != nil {
+				reconcile.Now() // auto stacks register their clients
+			}
+			return commit, err
+		},
+		RemoveSignOn: func(_ context.Context, by string) (string, error) {
+			commit, err := removeSignOnAPI(c, by)
+			if err == nil && reconcile != nil {
+				reconcile.Now()
+			}
+			return commit, err
+		},
+		StackSignOn: func(_ context.Context, stack string) (api.StackSignOn, error) { return stackSignOnAPI(c, stack) },
+		SetStackSignOn: func(_ context.Context, stack string, u api.StackSignOnUpdate, by string) (string, error) {
+			commit, err := setStackSignOnAPI(c, stack, u, by)
+			if err == nil && reconcile != nil {
+				reconcile.Now()
+			}
+			return commit, err
+		},
 		SecretKeys: func(_ context.Context, stack string) ([]string, error) { return secretKeys(c, stack) },
 		SetSecret: func(ctx context.Context, stack, key string, value *string, by string) (string, error) {
 			// Waits for a running apply rather than refusing at once.
