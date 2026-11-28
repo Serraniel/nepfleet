@@ -113,8 +113,9 @@ nepfleet control status
 nepfleet control restart         # after updating nepfleet: run the version installed now
 ```
 
-- **After an update:** the daemon keeps running the binary it started with. `nepfleet control restart` stops it and starts the one installed now; tunnels and the app's port come back by themselves. It waits until the old daemon has exited and let go of its port before it starts the new one. It refuses while a setup runs, as stopping would cut it off halfway. Keys unlocked for NepFleet live in the daemon, so after a restart they must be unlocked again.
-- **One daemon:** only one daemon runs at a time (it holds `control.lock` in its directory). Commands that start it on demand take turns, so several at once start it once. The daemon's `GET /v1/info` says its `version` and `commit`, and `POST /v1/stop` stops it (`409` while a setup runs).
+- **After an update:** the daemon notices that its binary changed (a package update) and restarts into the new one by itself, once no setup runs. On Linux and macOS it does so in place: same process, and its socket, the app's port and its SSH agent stay open, so calls meanwhile wait instead of failing, and unlocked keys stay unlocked. Tunnels reconnect. `nepfleet control restart` does the same on request; it refuses while a setup runs, as stopping would cut it off halfway.
+- **Windows, and older daemons:** `nepfleet control restart` stops the daemon, waits until it has exited and let go of its port, and starts the one installed now. Keys unlocked for NepFleet lived in the old daemon's agent, so they must be unlocked again.
+- **One daemon:** only one daemon runs at a time (it holds `control.lock` in its directory). Commands that start it on demand take turns, so several at once start it once. The daemon's `GET /v1/info` says its `version`, `commit` and `api` level (2 and up restart in place), `POST /v1/restart` restarts it in place (`501` where it can't), and `POST /v1/stop` stops it (both `409` while a setup runs).
 - **Access:** a Unix socket that only you can open, in a private directory (`~/.local/state/nepfleet/control`). It refuses a directory that others can enter.
 - **Checks:** it only probes when you add or refresh a remote, because each probe shows up in the remote's auth log.
 - **To start it at login:** run `nepfleet control` from a systemd user unit.

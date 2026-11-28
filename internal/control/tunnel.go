@@ -397,6 +397,17 @@ func (s *Server) apiProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state, _ := t.status(); state != TunnelUp {
+		t.mu.Lock()
+		locked := slices.Clone(t.locked)
+		t.mu.Unlock()
+		if len(locked) > 0 {
+			// Clients ask for the passphrase, as when a check needs it.
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error":      fmt.Sprintf("%s is %s: its SSH key is locked; unlock it for NepFleet", name, state),
+				"lockedKeys": locked,
+			})
+			return
+		}
 		fail(w, http.StatusServiceUnavailable, name+" is "+state)
 		return
 	}

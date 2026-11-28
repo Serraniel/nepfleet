@@ -66,6 +66,9 @@ type Server struct {
 	// Stop, if set, ends Serve: POST /v1/stop calls it, so the next start runs
 	// the binary installed now.
 	Stop func()
+	// Restart, if set, hands over to the binary installed now (POST
+	// /v1/restart); ErrBusy while a setup runs.
+	Restart func() error
 	// Connector, if set, lets the daemon keep tunnels to remotes.
 	Connector Connector
 	// Setup prepares remotes and installs NepFleet on them, for clients.
@@ -92,6 +95,15 @@ type Server struct {
 	httpSrv     *http.Server
 	httpAddr    string
 	httpOrigins atomic.Pointer[[]string]
+
+	// The handover to the binary installed now (handoff.go).
+	handingOff        atomic.Bool
+	sockL             net.Listener
+	httpL             net.Listener
+	keptHTTP          net.Listener
+	keptHTTPAddr      string
+	inheritedHTTP     net.Listener
+	inheritedHTTPAddr string
 }
 
 // Load reads the state, or starts empty.
@@ -137,9 +149,10 @@ func (s *Server) save() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/info", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"version": s.Version, "commit": s.Commit, "pid": os.Getpid(), "started": s.started})
+		writeJSON(w, http.StatusOK, map[string]any{"version": s.Version, "commit": s.Commit, "pid": os.Getpid(), "started": s.started, "api": APILevel})
 	})
 	mux.HandleFunc("POST /v1/stop", s.stop)
+	mux.HandleFunc("POST /v1/restart", s.restart)
 	mux.HandleFunc("GET /v1/remotes", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -414,7 +427,8 @@ func Listen(socket string) (net.Listener, error) {
 func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 	srv := &http.Server{Handler: s.SocketHandler(), ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(l) }()
+	s.sockL = l
+	go func() { errc <- srv.Serve(keptListener{l, s}) }()
 	s.startSavedHTTP()
 	defer s.stopHTTP()
 	s.startSaved()

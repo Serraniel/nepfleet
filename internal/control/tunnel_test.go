@@ -241,6 +241,15 @@ func TestTunnels(t *testing.T) {
 	if rec := do(http.MethodGet, "/v1/remotes/nas/api/v1/stacks", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("proxy while down: %d", rec.Code)
 	}
+	// Down for a locked key (after a daemon restart, say): a page loading
+	// through the proxy learns which key, and asks for its passphrase.
+	f.mu.Lock()
+	f.mintErr = &remote.LockedKeyError{Keys: []string{"/home/me/.ssh/id_rsa"}}
+	f.mu.Unlock()
+	waitFor(t, "the locked key", func() bool { return len(state().LockedKeys) > 0 })
+	if rec := do(http.MethodGet, "/v1/remotes/nas/api/v1/stacks", ""); rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"lockedKeys":["/home/me/.ssh/id_rsa"]`) {
+		t.Errorf("proxy while the key is locked: %d %s", rec.Code, rec.Body)
+	}
 	if rec := do(http.MethodDelete, "/v1/remotes/nas", ""); rec.Code != http.StatusNoContent {
 		t.Errorf("remove: %d", rec.Code)
 	}

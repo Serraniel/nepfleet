@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -71,20 +72,37 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	if err := os.MkdirAll(controlDir(), 0o700); err != nil {
 		return err
 	}
-	// One daemon at a time. Held until this process exits, so a restart knows
-	// when the old daemon has let go of everything, its port too.
-	unlock, err := flock.Lock(controlLock(), false)
-	if errors.Is(err, flock.ErrHeld) {
-		return control.ErrRunning
-	}
+	// The binary this daemon runs: watched for updates, and run on a restart.
+	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	l, err := control.Listen(controlSocket())
+	// A handover from the daemon before (an update, or nepfleet control
+	// restart): its lock, socket and port carry on, so no client is refused.
+	h, err := adoptHandoff()
 	if err != nil {
 		return err
 	}
+	var lock *os.File
+	var l net.Listener
+	if h != nil {
+		lock, l = h.lock, h.sock
+	} else {
+		// One daemon at a time. Held until this process exits, so a restart
+		// knows when the old daemon has let go of everything, its port too.
+		lock, err = flock.Hold(controlLock(), false)
+		if errors.Is(err, flock.ErrHeld) {
+			return control.ErrRunning
+		}
+		if err != nil {
+			return err
+		}
+		if l, err = control.Listen(controlSocket()); err != nil {
+			_ = lock.Close()
+			return err
+		}
+	}
+	defer func() { _ = lock.Close() }()
 	defer func() { _ = l.Close() }()
 	s := &control.Server{Dir: controlDir(), Version: version, Commit: commit, Connector: remote.SSH{ConfigFile: os.Getenv("NEPFLEET_SSH_CONFIG")}, Probe: func(ctx context.Context, t remote.Target) (*remote.Report, error) {
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -126,24 +144,44 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	if err := s.Load(); err != nil {
 		return err
 	}
-	// Keys with a passphrase need an agent: the session's, or our own.
-	if !remote.AgentReachable(os.Getenv("SSH_AUTH_SOCK")) {
-		sock, stopAgent, err := remote.StartAgent(controlDir())
+	// Keys with a passphrase need an agent: the session's, or our own. Our own
+	// outlives a handover, keys and all: the next daemon adopts it.
+	next := handoff{AuthSock: os.Getenv("SSH_AUTH_SOCK")}
+	if !remote.AgentReachable(next.AuthSock) {
+		sock, pid, stopAgent, err := remote.StartOwnAgent(controlDir())
 		if err != nil {
 			fmt.Fprintf(stderr, "nepfleet control: no SSH agent (%v); keys with a passphrase can't be unlocked\n", err)
 		} else {
+			if pid == 0 && h != nil && h.AgentPID != 0 && h.AgentSock == sock {
+				pid, stopAgent = h.AgentPID, remote.AdoptAgent(sock, h.AgentPID)
+			}
+			next.AgentSock, next.AgentPID = sock, pid
 			_ = os.Setenv("SSH_AUTH_SOCK", sock)
-			defer stopAgent()
+			defer stopAgent() // not on a handover: exec runs no deferred calls
 		}
 	}
-	if exe, err := os.Executable(); err == nil {
-		s.Keys = control.Keys{Askpass: exe, Unlock: func(r *http.Request, path, passphrase, askpass string) error {
-			return remote.Unlock(r.Context(), path, passphrase, askpass, remote.KeyLifetime)
-		}}
-	}
+	s.Keys = control.Keys{Askpass: exe, Unlock: func(r *http.Request, path, passphrase, askpass string) error {
+		return remote.Unlock(r.Context(), path, passphrase, askpass, remote.KeyLifetime)
+	}}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	s.Stop = stop
+	var handingOff atomic.Bool
+	if canHandOff {
+		s.Restart = func() error {
+			if err := s.TryStop(); err != nil {
+				return err
+			}
+			s.HandOff()
+			handingOff.Store(true)
+			stop()
+			return nil
+		}
+		go watchExecutable(ctx, exe, watchEvery(), s.Restart)
+	}
+	if h != nil && h.port != nil {
+		s.InheritHTTP(h.port, h.Addr)
+	}
 	if *httpAddr != "" {
 		// Before listening on the socket's clients: a bad flag stops the start.
 		if err := os.MkdirAll(controlDir(), 0o700); err != nil {
@@ -154,8 +192,16 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprintf(stderr, "nepfleet control also on http://%s (token: nepfleet control token)\n", *httpAddr)
 	}
-	fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
-	return s.Serve(ctx, l)
+	if h != nil {
+		fmt.Fprintf(stderr, "nepfleet control restarted in place, now %s (%s)\n", version, commit)
+	} else {
+		fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
+	}
+	err = s.Serve(ctx, l)
+	if handingOff.Load() {
+		return execHandoff(exe, next, lock, s)
+	}
+	return err
 }
 
 func splitOrigins(s string) []string {

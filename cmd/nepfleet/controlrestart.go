@@ -61,8 +61,14 @@ func cmdControlRestart(stdout io.Writer) error {
 	defer unlock()
 	var old controlInfo
 	if controlCall(ctx, http.MethodGet, "/v1/info", nil, &old) == nil {
-		if err := stopControl(ctx, old); err != nil {
+		inPlace, err := restartInPlace(ctx, old)
+		if err != nil {
 			return err
+		}
+		if !inPlace {
+			if err := stopControl(ctx, old); err != nil {
+				return err
+			}
 		}
 	}
 	if err := startControlLocked(ctx); err != nil {
@@ -74,6 +80,35 @@ func cmdControlRestart(stdout io.Writer) error {
 	}
 	printControlInfo(stdout, info)
 	return nil
+}
+
+// restartInPlace asks the daemon to hand over to the binary installed now: its
+// socket and port stay open, and unlocked keys stay unlocked. False when it
+// can't (older daemons, Windows): then it is stopped and started.
+func restartInPlace(ctx context.Context, old controlInfo) (bool, error) {
+	err := controlCall(ctx, http.MethodPost, "/v1/restart", nil, nil)
+	var ce *controlError
+	if errors.As(err, &ce) && (ce.Status == http.StatusNotFound || ce.Status == http.StatusNotImplemented) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Requests wait in the socket's backlog meanwhile: the answer comes from
+	// the new program, with a new start time.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		var info controlInfo
+		if controlCall(ctx, http.MethodGet, "/v1/info", nil, &info) == nil && info.Started.After(old.Started) {
+			return true, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return false, errors.New("the control daemon did not come back after restarting; see its log")
 }
 
 // stopControl stops the daemon and waits until it's gone. A daemon from before
