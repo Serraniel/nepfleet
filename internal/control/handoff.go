@@ -40,17 +40,17 @@ func (s *Server) ResumeAfterHandoff(why error) {
 	s.Setup.mu.Lock()
 	s.Setup.stopping = false
 	s.Setup.mu.Unlock()
-	clear := func(l net.Listener) {
+	noDeadline := func(l net.Listener) {
 		if d, ok := l.(interface{ SetDeadline(time.Time) error }); ok {
 			_ = d.SetDeadline(time.Time{})
 		}
 	}
 	if s.sockL != nil {
-		clear(s.sockL)
+		noDeadline(s.sockL)
 	}
 	s.httpMu.Lock()
 	if s.keptHTTP != nil {
-		clear(s.keptHTTP)
+		noDeadline(s.keptHTTP)
 		s.inheritedHTTP, s.inheritedHTTPAddr = s.keptHTTP, s.keptHTTPAddr
 		s.keptHTTP, s.keptHTTPAddr = nil, ""
 	}
