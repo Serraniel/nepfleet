@@ -68,7 +68,14 @@ func (s *Store) Add(e Event) (Event, error) {
 	if s.Now != nil {
 		now = s.Now
 	}
-	e.Time = now().UTC().Truncate(time.Millisecond)
+	// An event relayed from a remote keeps the time it happened there, so a
+	// backlog fetched after days offline doesn't all read as just now. A time
+	// in the future (a remote's clock ahead) is cut back to now.
+	t := now().UTC().Truncate(time.Millisecond)
+	if !e.Time.IsZero() && e.Time.Before(t) {
+		t = e.Time.UTC().Truncate(time.Millisecond)
+	}
+	e.Time = t
 	keep := s.Keep
 	if keep <= 0 {
 		keep = defaultKeep

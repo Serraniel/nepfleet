@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestStore(t *testing.T) {
@@ -53,6 +54,21 @@ func TestStore(t *testing.T) {
 	}
 	if got, _ = s.After(3, 10, nil); len(got) != 1 || got[0].Name != "y" {
 		t.Errorf("an event after a torn line must survive: %+v", got)
+	}
+}
+
+func TestAddKeepsPastTime(t *testing.T) {
+	now := time.Date(2026, 11, 28, 9, 51, 7, 0, time.UTC)
+	s := &Store{Dir: t.TempDir(), Now: func() time.Time { return now }}
+	past := now.Add(-6 * 24 * time.Hour)
+	if e, _ := s.Add(Event{Name: "x", Title: "t", Time: past}); !e.Time.Equal(past) {
+		t.Errorf("a relayed event's time: %v, want %v", e.Time, past)
+	}
+	if e, _ := s.Add(Event{Name: "x", Title: "t", Time: now.Add(time.Hour)}); !e.Time.Equal(now) {
+		t.Errorf("a time in the future: %v, want now", e.Time)
+	}
+	if e, _ := s.Add(Event{Name: "x", Title: "t"}); !e.Time.Equal(now) {
+		t.Errorf("no time: %v, want now", e.Time)
 	}
 }
 
