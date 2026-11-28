@@ -120,6 +120,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	keepGoingWhenOutputCloses(args)
 	switch args[0] {
 	case "version", "--version":
+		// --handoff: for a running daemon deciding whether this binary can
+		// take over from it in place; older binaries ignore the flag.
+		if len(args) > 1 && args[1] == "--handoff" && canHandOff && handoffLevel > 0 {
+			fmt.Fprintf(stdout, "nepfleet %s (%s) handoff %d\n", version, commit, handoffLevel)
+			return nil
+		}
 		fmt.Fprintf(stdout, "nepfleet %s (%s)\n", version, commit)
 		return nil
 	case "help", "-h", "--help":

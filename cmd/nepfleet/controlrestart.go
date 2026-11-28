@@ -23,6 +23,8 @@ type controlInfo struct {
 	Commit  string    `json:"commit"`
 	PID     int       `json:"pid"`
 	Started time.Time `json:"started"`
+	// HandoffError is why the last restart in place failed (it carries on).
+	HandoffError string `json:"handoffError"`
 }
 
 // controlError is an error answer of the daemon.
@@ -65,8 +67,11 @@ func cmdControlRestart(stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if !inPlace {
-			if err := stopControl(ctx, old); err != nil {
+		// Not in place: stop it, if it still runs (a failed handover carries
+		// on), and start the one installed now.
+		var still controlInfo
+		if !inPlace && controlCall(ctx, http.MethodGet, "/v1/info", nil, &still) == nil {
+			if err := stopControl(ctx, still); err != nil {
 				return err
 			}
 		}
@@ -84,7 +89,9 @@ func cmdControlRestart(stdout io.Writer) error {
 
 // restartInPlace asks the daemon to hand over to the binary installed now: its
 // socket and port stay open, and unlocked keys stay unlocked. False when it
-// can't (older daemons, Windows): then it is stopped and started.
+// can't (older daemons, Windows, a binary that can't take over), when the
+// handover failed and the daemon carries on, or when the new program ended:
+// then a normal stop and start follows.
 func restartInPlace(ctx context.Context, old controlInfo) (bool, error) {
 	err := controlCall(ctx, http.MethodPost, "/v1/restart", nil, nil)
 	var ce *controlError
@@ -99,8 +106,14 @@ func restartInPlace(ctx context.Context, old controlInfo) (bool, error) {
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		var info controlInfo
-		if controlCall(ctx, http.MethodGet, "/v1/info", nil, &info) == nil && info.Started.After(old.Started) {
+		err := controlCall(ctx, http.MethodGet, "/v1/info", nil, &info)
+		switch {
+		case err == nil && info.Started.After(old.Started):
 			return true, nil
+		case err == nil && info.HandoffError != "":
+			return false, nil
+		case err != nil && processGone(old.PID):
+			return false, nil
 		}
 		select {
 		case <-ctx.Done():
@@ -108,7 +121,7 @@ func restartInPlace(ctx context.Context, old controlInfo) (bool, error) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return false, errors.New("the control daemon did not come back after restarting; see its log")
+	return false, nil
 }
 
 // stopControl stops the daemon and waits until it's gone. A daemon from before

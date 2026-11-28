@@ -185,6 +185,7 @@ func (s *Server) runTunnel(ctx context.Context, t *tunnel, name string, target r
 		case <-time.After(backoff):
 		case <-t.kick:
 			backoff = s.retry()
+			continue // not doubled: the next wait starts short again
 		}
 		backoff = min(backoff*2, time.Minute)
 	}
@@ -441,6 +442,8 @@ func (s *Server) apiProxy(w http.ResponseWriter, r *http.Request) {
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/api/" + r.PathValue("rest")
 	r2.URL.RawPath = ""
+	s.proxying.Add(1)
+	defer s.proxying.Add(-1)
 	t.proxy.ServeHTTP(w, r2)
 }
 

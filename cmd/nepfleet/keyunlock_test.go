@@ -44,15 +44,27 @@ func TestAskpass(t *testing.T) {
 // With testCLIEnv it is nepfleet itself, e.g. the daemon ensureControl starts.
 const testCLIEnv = "NEPFLEET_TEST_CLI"
 
-// With testVersionEnv it reports the version in that file, as another build.
-const testVersionEnv = "NEPFLEET_TEST_VERSION_FILE"
+// With testVersionEnv it reports the version in that file, as another build
+// ("0.1.5 nohandoff": one from before handovers). With testExecEnv a
+// handover execs that path instead (one that fails, for tests).
+const (
+	testVersionEnv = "NEPFLEET_TEST_VERSION_FILE"
+	testExecEnv    = "NEPFLEET_TEST_HANDOFF_EXE"
+)
 
 func TestMain(m *testing.M) {
 	if f := os.Getenv(testVersionEnv); f != "" {
 		if raw, err := os.ReadFile(f); err == nil { //nolint:gosec // the test's own file
-			version = strings.TrimSpace(string(raw))
+			fields := strings.Fields(string(raw))
+			if len(fields) > 0 {
+				version = fields[0]
+			}
+			if len(fields) > 1 && fields[1] == "nohandoff" {
+				handoffLevel = 0
+			}
 		}
 	}
+	handoffExecTarget = os.Getenv(testExecEnv)
 	if os.Getenv(remote.AskpassOnceEnv) != "" || os.Getenv(testCLIEnv) != "" {
 		if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 			os.Exit(1)

@@ -6,12 +6,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -279,6 +281,16 @@ func TestUpdateRestartsInPlace(t *testing.T) {
 		t.Fatalf("restarted for the same build: %+v %v", same, err)
 	}
 
+	// A build from before handovers would ignore what it's handed: left alone.
+	if err := os.WriteFile(versionFile, []byte("0.1.5 nohandoff"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	install()
+	time.Sleep(500 * time.Millisecond)
+	if err := controlCall(ctx, http.MethodGet, "/v1/info", nil, &same); err != nil || !same.Started.Equal(old.Started) || same.Version != "0.1.0" {
+		t.Fatalf("handed over to a build that can't take over: %+v %v", same, err)
+	}
+
 	stop := make(chan struct{})
 	calls, failed, probed := probe(ctx, addr, stop)
 	if err := os.WriteFile(versionFile, []byte("0.2.0"), 0o600); err != nil {
@@ -304,5 +316,103 @@ func TestUpdateRestartsInPlace(t *testing.T) {
 	list.Env = append(os.Environ(), agent)
 	if out, err := list.CombinedOutput(); err != nil || !strings.Contains(string(out), "ED25519") {
 		t.Errorf("the key is gone after the update: %v %s", err, out)
+	}
+	checkLockClosesOnExec(t, now.PID)
+}
+
+// checkLockClosesOnExec: the daemon's lock must close on exec, or every ssh it
+// runs would hold it, and one left behind would keep daemons from starting.
+func checkLockClosesOnExec(t *testing.T, pid int) {
+	t.Helper()
+	fds := fmt.Sprintf("/proc/%d/fd", pid)
+	entries, err := os.ReadDir(fds)
+	if err != nil {
+		t.Skip("no /proc here")
+	}
+	for _, e := range entries {
+		target, err := os.Readlink(filepath.Join(fds, e.Name()))
+		if err != nil || !strings.HasSuffix(target, "control.lock") {
+			continue
+		}
+		info, err := os.ReadFile(fmt.Sprintf("/proc/%d/fdinfo/%s", pid, e.Name())) //nolint:gosec // procfs
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(info), "\n") {
+			if v, ok := strings.CutPrefix(line, "flags:"); ok {
+				flags, err := strconv.ParseInt(strings.TrimSpace(v), 8, 64)
+				if err != nil || flags&0o2000000 == 0 { // O_CLOEXEC
+					t.Errorf("the lock (fd %s) doesn't close on exec: flags %s", e.Name(), strings.TrimSpace(v))
+				}
+				return
+			}
+		}
+	}
+	t.Error("the daemon holds no lock")
+}
+
+// restartWith runs a daemon whose handover execs target instead (or with the
+// version file's contents), then nepfleet control restart, and says the daemon
+// before and after.
+func restartWith(t *testing.T, target, versionLine string) (before, after controlInfo, log string) {
+	t.Helper()
+	dir := controlTestDir(t)
+	if target != "" {
+		t.Setenv(testExecEnv, target)
+	}
+	if versionLine != "" {
+		f := filepath.Join(dir, "version")
+		if err := os.WriteFile(f, []byte(versionLine), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(testVersionEnv, f)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := ensureControl(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := controlCall(ctx, http.MethodGet, "/v1/info", nil, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdControlRestart(io.Discard); err != nil {
+		t.Fatalf("restart: %v\n%s", err, controlLog(t, dir))
+	}
+	if err := controlCall(ctx, http.MethodGet, "/v1/info", nil, &after); err != nil {
+		t.Fatal(err)
+	}
+	return before, after, controlLog(t, dir)
+}
+
+// A handover whose exec fails (the binary gone mid-update) leaves the daemon
+// serving; the restart then stops and starts it.
+func TestFailedHandoverCarriesOn(t *testing.T) {
+	before, after, log := restartWith(t, "/nonexistent/nepfleet", "")
+	if !strings.Contains(log, "this daemon carries on") {
+		t.Errorf("no failed handover:\n%s", log)
+	}
+	if after.PID == before.PID {
+		t.Errorf("not restarted after the failed handover: %+v\n%s", after, log)
+	}
+}
+
+// A new program that ends at once (it can't take over after all): the restart
+// starts a daemon normally.
+func TestHandoverToAnEndingProgramFallsBack(t *testing.T) {
+	f, err := exec.LookPath("false")
+	if err != nil {
+		t.Skip("no false here")
+	}
+	before, after, log := restartWith(t, f, "")
+	if after.PID == before.PID {
+		t.Errorf("no daemon after the new program ended: %+v\n%s", after, log)
+	}
+}
+
+// Restarting into a binary from before handovers stops and starts instead.
+func TestRestartIntoOldBinaryStopsAndStarts(t *testing.T) {
+	before, after, log := restartWith(t, "", "0.3.0 nohandoff")
+	if strings.Contains(log, "restarted in place") || after.PID == before.PID {
+		t.Errorf("not stopped and started: %+v\n%s", after, log)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -76,24 +77,32 @@ func StartAgent(dir string) (sock string, stop func(), err error) {
 // pid and socket.
 func AdoptAgent(sock string, pid int) func() {
 	return func() {
+		// Only while its socket answers: a pid of an agent that's gone may
+		// belong to something else by now.
 		if p, err := os.FindProcess(pid); err == nil && AgentReachable(sock) {
 			_ = p.Kill()
-			_, _ = p.Wait()
+			_, _ = p.Wait() // fails unless it's our child; the kill is what counts
 			_ = os.Remove(sock)
+			_ = os.Remove(filepath.Join(filepath.Dir(sock), "ssh-agent.pid"))
 		}
 	}
 }
 
-// StartOwnAgent is StartAgent, also saying the agent's pid (0 when it reuses an
-// agent left in dir), for AdoptAgent.
+// StartOwnAgent is StartAgent, also saying the agent's pid, for AdoptAgent.
 func StartOwnAgent(dir string) (sock string, pid int, stop func(), err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", 0, nil, err
 	}
 	sock = filepath.Join(dir, "ssh-agent.sock")
-	// Left by a daemon that ended without stopping it (killed): keep using it,
-	// rather than leave it running with keys nobody can reach.
+	pidFile := filepath.Join(dir, "ssh-agent.pid")
+	// Left by a daemon that ended without stopping it (killed, or its
+	// handover failed): keep using it, rather than leave it running with keys
+	// nobody can reach, and stop it when done, as if it were ours.
 	if AgentReachable(sock) {
+		raw, _ := os.ReadFile(pidFile) //nolint:gosec // our own directory
+		if n, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && n > 0 {
+			return sock, n, AdoptAgent(sock, n), nil
+		}
 		return sock, 0, func() {}, nil
 	}
 	_ = os.Remove(sock)
@@ -104,7 +113,13 @@ func StartOwnAgent(dir string) (sock string, pid int, stop func(), err error) {
 	}
 	for range 50 {
 		if AgentReachable(sock) {
-			return sock, cmd.Process.Pid, func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait(); _ = os.Remove(sock) }, nil
+			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
+			return sock, cmd.Process.Pid, func() {
+				_ = cmd.Process.Kill()
+				_, _ = cmd.Process.Wait()
+				_ = os.Remove(sock)
+				_ = os.Remove(pidFile)
+			}, nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

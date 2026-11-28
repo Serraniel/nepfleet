@@ -6,7 +6,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -56,6 +55,12 @@ func adoptHandoff() (*handoff, error) {
 	if err := flock.Adopt(h.lock); err != nil {
 		return nil, fmt.Errorf("the daemon before passed on no lock: %w", err)
 	}
+	// Closed on exec again: every ssh, git or docker this daemon runs would
+	// otherwise hold the lock too, and one left behind by a crash would keep
+	// any daemon from starting.
+	if err := closeOnExec(h.lock, true); err != nil {
+		return nil, err
+	}
 	var err error
 	if h.sock, err = inherit(h.Sock, "control.sock"); err != nil {
 		return nil, err
@@ -78,26 +83,78 @@ func inherit(fd int, name string) (net.Listener, error) {
 	return l, nil
 }
 
+// rawFd is f's descriptor number. Not f.Fd(): that switches the descriptor
+// to blocking, and for a listener's duplicate also the listener itself (they
+// share the open file), which then hangs if this daemon has to carry on.
+func rawFd(f *os.File) (int, error) {
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	n := -1
+	if err := rc.Control(func(fd uintptr) { n = int(fd) }); err != nil { //nolint:gosec // descriptors fit an int
+		return 0, err
+	}
+	return n, nil
+}
+
+// closeOnExec sets or clears FD_CLOEXEC on f.
+func closeOnExec(f *os.File, on bool) error {
+	fd, err := rawFd(f)
+	if err != nil {
+		return err
+	}
+	flag := 0
+	if on {
+		flag = unix.FD_CLOEXEC
+	}
+	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFD, flag)
+	return err
+}
+
+// handoffExecTarget, when set (tests only), is exec'd instead of the binary.
+var handoffExecTarget string
+
 // execHandoff replaces this process by exe, the binary installed now, after
-// Serve ended for a handover. It returns only on failure.
-func execHandoff(exe string, h handoff, lock *os.File, s *control.Server) error {
+// Serve ended for a handover. It returns only on failure, with this process
+// as it was: the lock closes on exec again, and the listeners stay open in s
+// (control.Server.ResumeAfterHandoff) so the daemon can carry on.
+func execHandoff(exe string, h handoff, lock *os.File, s *control.Server) (err error) {
+	if handoffExecTarget != "" {
+		exe = handoffExecTarget
+	}
 	sock, port, addr, err := s.Listeners()
 	if err != nil {
 		return err
 	}
-	files := []*os.File{lock, sock}
+	files := []*os.File{sock}
 	if port != nil {
 		files = append(files, port)
 	}
-	for _, f := range files {
+	defer func() {
+		// Only reached when exec failed: the duplicates go, the lock stays ours.
+		for _, f := range files {
+			_ = f.Close()
+		}
+		_ = closeOnExec(lock, true)
+	}()
+	for _, f := range append([]*os.File{lock}, files...) {
 		// Duplicates close on exec by default; these must survive it.
-		if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, 0); err != nil {
+		if err := closeOnExec(f, false); err != nil {
 			return err
 		}
 	}
-	h.Lock, h.Sock = int(lock.Fd()), int(sock.Fd()) //nolint:gosec // descriptors fit an int
+	if h.Lock, err = rawFd(lock); err != nil {
+		return err
+	}
+	if h.Sock, err = rawFd(sock); err != nil {
+		return err
+	}
 	if port != nil {
-		h.Port, h.Addr = int(port.Fd()), addr //nolint:gosec // descriptors fit an int
+		if h.Port, err = rawFd(port); err != nil {
+			return err
+		}
+		h.Addr = addr
 	}
 	raw, err := json.Marshal(h)
 	if err != nil {
@@ -113,7 +170,7 @@ func execHandoff(exe string, h handoff, lock *os.File, s *control.Server) error 
 		env = append(env, "SSH_AUTH_SOCK="+h.AuthSock)
 	}
 	err = syscall.Exec(exe, os.Args, env) //nolint:gosec // this program, installed anew
-	return errors.Join(errors.New("starting the updated nepfleet"), err)
+	return fmt.Errorf("starting %s: %w", exe, err)
 }
 
 func hasKey(kv, key string) bool {

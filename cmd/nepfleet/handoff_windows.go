@@ -24,6 +24,8 @@ type handoff struct {
 	sock, port net.Listener
 }
 
+var handoffExecTarget string
+
 func adoptHandoff() (*handoff, error) { return nil, nil }
 
 func execHandoff(string, handoff, *os.File, *control.Server) error {

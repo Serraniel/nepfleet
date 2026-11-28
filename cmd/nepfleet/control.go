@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -147,7 +148,14 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	// Keys with a passphrase need an agent: the session's, or our own. Our own
 	// outlives a handover, keys and all: the next daemon adopts it.
 	next := handoff{AuthSock: os.Getenv("SSH_AUTH_SOCK")}
-	if !remote.AgentReachable(next.AuthSock) {
+	switch {
+	case h != nil && h.AgentPID != 0 && remote.AgentReachable(h.AgentSock):
+		// The daemon before had its own agent, with the keys unlocked in it:
+		// keep that one, even if the session's agent can be reached by now.
+		next.AgentSock, next.AgentPID = h.AgentSock, h.AgentPID
+		_ = os.Setenv("SSH_AUTH_SOCK", h.AgentSock)
+		defer remote.AdoptAgent(h.AgentSock, h.AgentPID)()
+	case !remote.AgentReachable(next.AuthSock):
 		sock, pid, stopAgent, err := remote.StartOwnAgent(controlDir())
 		if err != nil {
 			fmt.Fprintf(stderr, "nepfleet control: no SSH agent (%v); keys with a passphrase can't be unlocked\n", err)
@@ -163,21 +171,38 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	s.Keys = control.Keys{Askpass: exe, Unlock: func(r *http.Request, path, passphrase, askpass string) error {
 		return remote.Unlock(r.Context(), path, passphrase, askpass, remote.KeyLifetime)
 	}}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	s.Stop = stop
+	// Serve ends on a signal, POST /v1/stop, or a handover; a failed handover
+	// serves again, so each round has its own context.
+	var stopServe atomic.Pointer[context.CancelFunc]
+	s.Stop = func() {
+		if stop := stopServe.Load(); stop != nil {
+			(*stop)()
+		}
+	}
 	var handingOff atomic.Bool
 	if canHandOff {
 		s.Restart = func() error {
+			// Only into a binary that runs and can take over: anything else
+			// would end this daemon instead.
+			if b, err := probeBuild(context.Background(), exe); err != nil || b.handoff < 1 {
+				return control.ErrNoHandoff
+			}
 			if err := s.TryStop(); err != nil {
 				return err
 			}
 			s.HandOff()
 			handingOff.Store(true)
-			stop()
+			s.Stop()
 			return nil
 		}
-		go watchExecutable(ctx, exe, watchEvery(), s.Restart)
+	}
+	// Automatic: also waits for requests through tunnels (an event stream, an
+	// apply's log) to end.
+	restartWhenIdle := func() error {
+		if n := s.Proxying(); n > 0 {
+			return fmt.Errorf("%w: %d requests through tunnels run", control.ErrBusy, n)
+		}
+		return s.Restart()
 	}
 	if h != nil && h.port != nil {
 		s.InheritHTTP(h.port, h.Addr)
@@ -197,11 +222,24 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	} else {
 		fmt.Fprintf(stderr, "nepfleet control listening on %s\n", controlSocket())
 	}
-	err = s.Serve(ctx, l)
-	if handingOff.Load() {
-		return execHandoff(exe, next, lock, s)
+	for {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		stopServe.Store(&stop)
+		if canHandOff {
+			go watchExecutable(ctx, exe, watchEvery(), restartWhenIdle)
+		}
+		err := s.Serve(ctx, l)
+		stop()
+		if !handingOff.Load() {
+			return err
+		}
+		// Gone on success; on failure (the binary missing mid-update, say)
+		// this daemon carries on, with its listeners, tunnels and agent.
+		err = execHandoff(exe, next, lock, s)
+		log.Printf("control: restarting into the nepfleet installed now failed, so this daemon carries on: %v", err)
+		handingOff.Store(false)
+		s.ResumeAfterHandoff(err)
 	}
-	return err
 }
 
 func splitOrigins(s string) []string {

@@ -104,6 +104,8 @@ type Server struct {
 	keptHTTPAddr      string
 	inheritedHTTP     net.Listener
 	inheritedHTTPAddr string
+	handoffErr        atomic.Pointer[string]
+	proxying          atomic.Int64
 }
 
 // Load reads the state, or starts empty.
@@ -149,7 +151,7 @@ func (s *Server) save() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/info", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"version": s.Version, "commit": s.Commit, "pid": os.Getpid(), "started": s.started, "api": APILevel})
+		writeJSON(w, http.StatusOK, map[string]any{"version": s.Version, "commit": s.Commit, "pid": os.Getpid(), "started": s.started, "api": APILevel, "handoffError": s.handoffError()})
 	})
 	mux.HandleFunc("POST /v1/stop", s.stop)
 	mux.HandleFunc("POST /v1/restart", s.restart)
@@ -437,7 +439,11 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 	case err := <-errc:
 		return err
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		grace := 5 * time.Second
+		if s.handingOff.Load() {
+			grace = handoffGrace
+		}
+		shutdown, cancel := context.WithTimeout(context.Background(), grace)
 		defer cancel()
 		if err := srv.Shutdown(shutdown); err != nil {
 			log.Printf("control: %v", err)

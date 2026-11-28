@@ -285,6 +285,12 @@ func (s *Server) stopHTTP() {
 	s.httpMu.Lock()
 	defer s.httpMu.Unlock()
 	if s.httpSrv != nil {
+		if s.handingOff.Load() {
+			// Requests running (an apply's log, say) finish first, bounded.
+			ctx, cancel := context.WithTimeout(context.Background(), handoffGrace)
+			_ = s.httpSrv.Shutdown(ctx)
+			cancel()
+		}
 		_ = s.httpSrv.Close()
 		if s.handingOff.Load() {
 			// Still open (keptListener), for the next daemon.

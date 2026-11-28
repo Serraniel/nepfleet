@@ -21,6 +21,52 @@ const APILevel = 2
 // ErrBusy means a setup runs, and stopping would cut it off halfway.
 var ErrBusy = errors.New("a setup runs")
 
+// ErrNoHandoff means the binary installed now can't take over in place (it
+// doesn't run, or is from before handovers): stop and start instead.
+var ErrNoHandoff = errors.New("the nepfleet installed now can't take over in place")
+
+// handoffGrace is how long a handover lets requests running finish.
+const handoffGrace = 10 * time.Second
+
+// Proxying is how many requests run through tunnels now: an automatic
+// restart waits for none, so no event stream or apply is cut off.
+func (s *Server) Proxying() int64 { return s.proxying.Load() }
+
+// ResumeAfterHandoff is for a handover that failed (exec refused): this
+// daemon carries on with the same listeners, which stayed open, and Serve can
+// run again. GET /v1/info says why it failed.
+func (s *Server) ResumeAfterHandoff(why error) {
+	s.handingOff.Store(false)
+	s.Setup.mu.Lock()
+	s.Setup.stopping = false
+	s.Setup.mu.Unlock()
+	clear := func(l net.Listener) {
+		if d, ok := l.(interface{ SetDeadline(time.Time) error }); ok {
+			_ = d.SetDeadline(time.Time{})
+		}
+	}
+	if s.sockL != nil {
+		clear(s.sockL)
+	}
+	s.httpMu.Lock()
+	if s.keptHTTP != nil {
+		clear(s.keptHTTP)
+		s.inheritedHTTP, s.inheritedHTTPAddr = s.keptHTTP, s.keptHTTPAddr
+		s.keptHTTP, s.keptHTTPAddr = nil, ""
+	}
+	s.httpMu.Unlock()
+	msg := why.Error()
+	s.handoffErr.Store(&msg)
+}
+
+// handoffError is why the last handover failed, "" if it didn't.
+func (s *Server) handoffError() string {
+	if p := s.handoffErr.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
 // keptListener stays open when the daemon hands over to the binary installed
 // now: Close then only ends Accept, and the next daemon accepts on it. Clients
 // connecting meanwhile wait in the backlog instead of being refused.
@@ -104,12 +150,17 @@ func (s *Server) restart(w http.ResponseWriter, _ *http.Request) {
 		fail(w, http.StatusNotImplemented, "this daemon can't restart itself here; stop it and start it again")
 		return
 	}
+	empty := ""
+	s.handoffErr.Store(&empty) // a new try
 	if err := s.Restart(); err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, ErrBusy) {
-			code = http.StatusConflict
+		switch {
+		case errors.Is(err, ErrBusy):
+			fail(w, http.StatusConflict, err.Error()+": restart the daemon when it has ended")
+		case errors.Is(err, ErrNoHandoff):
+			fail(w, http.StatusNotImplemented, err.Error())
+		default:
+			fail(w, http.StatusInternalServerError, err.Error())
 		}
-		fail(w, code, err.Error()+": restart the daemon when it has ended")
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
