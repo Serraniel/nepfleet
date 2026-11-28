@@ -354,6 +354,7 @@ func serve(args []string, stderr io.Writer) error {
 		}
 	}
 	c := common{fleetDir: *fleetDir, stateDir: *stateDir, host: *host}
+	sweepMirrorKeys(*stateDir, time.Now())
 	var reconcile *reconciler
 	if *reconcileFlag > 0 {
 		reconcile = newReconciler(c, *reconcileFlag, stderr)
@@ -572,7 +573,7 @@ func serve(args []string, stderr io.Writer) error {
 		KeyBackup: func(ctx context.Context, recipients []string, by string) ([]byte, error) {
 			return keyBackupAPI(ctx, c, recipients, by)
 		},
-		Mirror: func(_ context.Context, run bool) ([]api.MirrorStatus, error) { return mirrorAPI(c, run) },
+		Mirror: func(ctx context.Context, run bool) ([]api.MirrorStatus, error) { return mirrorAPI(ctx, c, run) },
 		AddMirror: func(_ context.Context, req api.MirrorAdd, kind api.MirrorKind, by string) (api.MirrorAdded, error) {
 			return addMirrorAPI(c, req, kind, by)
 		},

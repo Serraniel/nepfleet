@@ -136,11 +136,11 @@ func TestMirrorAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	tgit(t, dir, "commit", "-qam", "mirror", "--no-verify")
-	st, err := mirrorAPI(c, false)
+	st, err := mirrorAPI(t.Context(), c, false)
 	if err != nil || len(st) != 1 || !st[0].OK.IsZero() {
 		t.Fatalf("before: %+v %v", st, err)
 	}
-	st, err = mirrorAPI(c, true)
+	st, err = mirrorAPI(t.Context(), c, true)
 	if err != nil || len(st) != 1 || st[0].OK.IsZero() || st[0].Error != "" {
 		t.Fatalf("after: %+v %v", st, err)
 	}

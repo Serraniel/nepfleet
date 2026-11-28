@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -175,12 +176,18 @@ func cmdMirror(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return runMirror(c, stdout)
+	return runMirror(context.Background(), c, stdout)
 }
 
+// mirrorGit is the config every git run of a mirror push gets: no hooks
+// from the fleet repository, and no redirects that could take a token
+// elsewhere.
+var mirrorGit = []string{"-c", "core.hooksPath=/dev/null", "-c", "http.followRedirects=false"}
+
 // runMirror pushes the fleet repository to every spec.mirrors, as nepfleet
-// mirror, and records how each went.
-func runMirror(c common, stdout io.Writer) error {
+// mirror, and records how each went. ctx ends the git commands: a stalled
+// forge must not hold the API lock forever.
+func runMirror(ctx context.Context, c common, stdout io.Writer) error {
 	e, err := c.open()
 	if err != nil {
 		return err
@@ -194,7 +201,7 @@ func runMirror(c common, stdout io.Writer) error {
 	if _, err := gitOut(dir, "remote", "get-url", "origin"); err == nil {
 		// origin is the truth: a clone that is behind must not publish its
 		// older branches.
-		if _, err := gitOut(dir, "fetch", "--quiet", "origin"); err != nil {
+		if _, err := gitOutEnv(ctx, dir, []string{"GIT_TERMINAL_PROMPT=0"}, append(slices.Clone(mirrorGit), "fetch", "--quiet", "origin")...); err != nil {
 			return err
 		}
 		refs, err := gitOut(dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/")
@@ -216,14 +223,19 @@ func runMirror(c common, stdout io.Writer) error {
 	}
 	var errs []error
 	secrets := newMirrorSecrets(e)
-	for _, m := range mirrors {
+	push := func(m string) error {
 		env, done, err := secrets.pushEnv(c.stateDir, m)
-		if err == nil {
-			// No "git pull" advice: a mirror is not merged into.
-			_, err = gitOutEnv(dir, env, append([]string{"-c", "advice.pushUpdateRejected=false", "push", "--quiet", "--", m}, refspecs...)...)
-			done()
-		}
 		if err != nil {
+			return err
+		}
+		defer done() // the key file goes whatever happens
+		// No "git pull" advice: a mirror is not merged into.
+		args := append(slices.Clone(mirrorGit), "-c", "advice.pushUpdateRejected=false", "push", "--quiet", "--", m)
+		_, err = gitOutEnv(ctx, dir, env, append(args, refspecs...)...)
+		return err
+	}
+	for _, m := range mirrors {
+		if err := push(m); err != nil {
 			hint := "a mirror that has commits of its own is not overwritten"
 			if secrets.auth(m) == "deploy-key" && strings.Contains(err.Error(), "Permission denied") {
 				// Right after adding a mirror, the usual reason; it shows
@@ -247,11 +259,13 @@ func runMirror(c common, stdout io.Writer) error {
 	return errors.Join(errs...)
 }
 
-// gitOutEnv is gitOut with env added to git's environment.
-func gitOutEnv(dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+// gitOutEnv is gitOut with env added to git's environment, stopped when ctx
+// ends.
+func gitOutEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
+	cmd.WaitDelay = 5 * time.Second // ssh may keep the output open
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
@@ -398,7 +412,7 @@ func keyBackupAPI(ctx context.Context, c common, recipients []string, by string)
 
 // mirrorAPI is GET and POST /api/v1/mirror: each mirror's last push, after
 // pushing when run. A failed push is in its status, not an error.
-func mirrorAPI(c common, run bool) ([]api.MirrorStatus, error) {
+func mirrorAPI(ctx context.Context, c common, run bool) ([]api.MirrorStatus, error) {
 	if run {
 		if !apiMu.TryLock() {
 			return nil, api.ErrBusy
@@ -410,7 +424,7 @@ func mirrorAPI(c common, run bool) ([]api.MirrorStatus, error) {
 		return nil, err
 	}
 	if run && len(e.fleet.Spec.Mirrors) > 0 {
-		_ = runMirror(c, io.Discard) // each mirror's outcome is in the state
+		_ = runMirror(ctx, c, io.Discard) // each mirror's outcome is in the state
 	}
 	state := mirrorState{}
 	if raw, err := os.ReadFile(filepath.Join(c.stateDir, mirrorFile)); err == nil {

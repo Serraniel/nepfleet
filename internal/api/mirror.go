@@ -51,6 +51,10 @@ type MirrorAdded struct {
 	Commit string       `json:"commit"`
 }
 
+// MirrorSecretPrefix starts the names of the fleet secrets the app stores
+// for mirrors (MIRROR_<ID>_SSH_KEY, MIRROR_<ID>_HTTP_AUTH).
+const MirrorSecretPrefix = "MIRROR_"
+
 // ErrNoMirror means spec.mirrors has no mirror of that ID.
 var ErrNoMirror = errors.New("no mirror of that ID in fleet.yaml")
 
