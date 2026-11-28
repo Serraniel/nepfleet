@@ -59,6 +59,7 @@ func (s *Server) keyRoutes(mux *http.ServeMux) {
 			fail(w, http.StatusBadRequest, err.Error())
 		default:
 			log.Printf("control: a key was unlocked for %s", remote.KeyLifetime)
+			s.kickLocked()
 			w.WriteHeader(http.StatusNoContent)
 		}
 	})

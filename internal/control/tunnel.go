@@ -53,6 +53,8 @@ type tunnel struct {
 	minted time.Time
 	cancel context.CancelFunc
 	done   chan struct{}
+	// kick ends the wait before the next try: a key was just unlocked.
+	kick chan struct{}
 	// network and socket are the local end: a private Unix socket, or on
 	// Windows a loopback port.
 	network string
@@ -95,7 +97,7 @@ func (s *Server) startTunnel(name, address string) error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t := &tunnel{state: TunnelConnecting, cancel: cancel, done: make(chan struct{}), network: "unix", socket: filepath.Join(dir, name+".sock")}
+	t := &tunnel{state: TunnelConnecting, cancel: cancel, done: make(chan struct{}), kick: make(chan struct{}, 1), network: "unix", socket: filepath.Join(dir, name+".sock")}
 	if runtime.GOOS == "windows" {
 		// Windows' ssh can't forward to a Unix socket: a loopback port, which
 		// other local users could reach, but the remote still wants the token.
@@ -181,6 +183,8 @@ func (s *Server) runTunnel(ctx context.Context, t *tunnel, name string, target r
 		case <-ctx.Done():
 			return
 		case <-time.After(backoff):
+		case <-t.kick:
+			backoff = s.retry()
 		}
 		backoff = min(backoff*2, time.Minute)
 	}
@@ -313,6 +317,24 @@ func tokenLabel(host string) string {
 		b = b[:len(b)-1]
 	}
 	return string(b)
+}
+
+// kickLocked has the tunnels that are down for a locked key try again now,
+// instead of after their wait (up to a minute): a key was just unlocked.
+func (s *Server) kickLocked() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tunnels {
+		t.mu.Lock()
+		locked := len(t.locked) > 0
+		t.mu.Unlock()
+		if locked {
+			select {
+			case t.kick <- struct{}{}:
+			default:
+			}
+		}
+	}
 }
 
 // connect turns a remote's tunnel on, and keeps it on across restarts.
