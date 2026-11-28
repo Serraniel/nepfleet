@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Serraniel/nepfleet/internal/api"
@@ -203,6 +204,11 @@ func (s *Server) listenHTTP(addr string, origins []string) error {
 	}
 	lc := net.ListenConfig{}
 	l, err := lc.Listen(context.Background(), "tcp", addr)
+	if errors.Is(err, syscall.EADDRINUSE) {
+		// Only one daemon runs at a time (nepfleet control holds a lock), so
+		// it's someone else.
+		return fmt.Errorf("another program uses %s; stop it, or choose another address with nepfleet control http", addr)
+	}
 	if err != nil {
 		return err
 	}

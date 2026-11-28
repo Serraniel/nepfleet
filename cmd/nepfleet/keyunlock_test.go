@@ -41,8 +41,11 @@ func TestAskpass(t *testing.T) {
 
 // TestMain lets this test binary stand in for nepfleet as SSH_ASKPASS: ssh-add
 // runs it with its prompt as the only argument, as it runs the real binary.
+// With testCLIEnv it is nepfleet itself, e.g. the daemon ensureControl starts.
+const testCLIEnv = "NEPFLEET_TEST_CLI"
+
 func TestMain(m *testing.M) {
-	if os.Getenv(remote.AskpassOnceEnv) != "" {
+	if os.Getenv(remote.AskpassOnceEnv) != "" || os.Getenv(testCLIEnv) != "" {
 		if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 			os.Exit(1)
 		}

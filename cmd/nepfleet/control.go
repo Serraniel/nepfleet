@@ -23,6 +23,7 @@ import (
 
 	"github.com/Serraniel/nepfleet"
 	"github.com/Serraniel/nepfleet/internal/control"
+	"github.com/Serraniel/nepfleet/internal/flock"
 	"github.com/Serraniel/nepfleet/internal/remote"
 )
 
@@ -67,6 +68,19 @@ func cmdControl(args []string, stdout, stderr io.Writer) error {
 	if fs.NArg() > 0 {
 		return errors.New("usage: nepfleet control [--http ADDR --allowed-origins URLS] | control http ADDR --allowed-origins URLS | control status | control restart | control token")
 	}
+	if err := os.MkdirAll(controlDir(), 0o700); err != nil {
+		return err
+	}
+	// One daemon at a time. Held until this process exits, so a restart knows
+	// when the old daemon has let go of everything, its port too.
+	unlock, err := flock.Lock(controlLock(), false)
+	if errors.Is(err, flock.ErrHeld) {
+		return control.ErrRunning
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	l, err := control.Listen(controlSocket())
 	if err != nil {
 		return err
@@ -218,11 +232,64 @@ func controlCall(ctx context.Context, method, path string, body, out any) error 
 	return json.NewDecoder(res.Body).Decode(out)
 }
 
+// controlLock is held by the running daemon for its whole life; the system
+// drops it when the process exits, after its port and tunnels are gone.
+func controlLock() string { return filepath.Join(controlDir(), "control.lock") }
+
+// controlLockHeld tells whether a daemon still holds controlLock.
+func controlLockHeld() bool {
+	unlock, err := flock.Lock(controlLock(), false)
+	if err != nil {
+		return errors.Is(err, flock.ErrHeld)
+	}
+	unlock()
+	return false
+}
+
+// lockControlStart serializes starting the daemon: concurrent commands (the
+// app runs several at once) share one start instead of racing for the socket.
+func lockControlStart(ctx context.Context) (func(), error) {
+	if err := os.MkdirAll(controlDir(), 0o700); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(controlDir(), "start.lock")
+	for {
+		unlock, err := flock.Lock(path, false)
+		if !errors.Is(err, flock.ErrHeld) {
+			return unlock, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for another start of the control daemon: %w", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 // ensureControl starts the daemon if it isn't running. It keeps running after
 // this command ends, with its output in a log file.
 func ensureControl(ctx context.Context) error {
 	if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
 		return nil
+	}
+	unlock, err := lockControlStart(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return startControlLocked(ctx)
+}
+
+// startControlLocked starts the daemon unless one answers; the caller holds the
+// start lock.
+func startControlLocked(ctx context.Context) error {
+	// Another command may have started it while this one waited for the lock.
+	if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
+		return nil
+	}
+	// A daemon that is stopping still holds its port: start after it's gone.
+	if err := waitControlGone(ctx, 0); err != nil {
+		return err
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -243,7 +310,9 @@ func ensureControl(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting the control daemon: %w", err)
 	}
-	_ = cmd.Process.Release()
+	// Reaped when it ends, should this process still run then: a zombie would
+	// look like a daemon that never stops.
+	go func() { _ = cmd.Wait() }()
 	for range 50 {
 		if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) == nil {
 			return nil

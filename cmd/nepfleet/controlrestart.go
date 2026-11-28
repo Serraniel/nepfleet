@@ -52,13 +52,20 @@ func printControlInfo(w io.Writer, info controlInfo) {
 func cmdControlRestart(stdout io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	// Held from the stop to the start: the app, finding the daemon gone, asks
+	// for a start meanwhile; that waits here and then finds the new daemon.
+	unlock, err := lockControlStart(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	var old controlInfo
 	if controlCall(ctx, http.MethodGet, "/v1/info", nil, &old) == nil {
 		if err := stopControl(ctx, old); err != nil {
 			return err
 		}
 	}
-	if err := ensureControl(ctx); err != nil {
+	if err := startControlLocked(ctx); err != nil {
 		return err
 	}
 	var info controlInfo
@@ -89,13 +96,31 @@ func stopControl(ctx context.Context, info controlInfo) error {
 	case err != nil:
 		return err
 	}
-	for range 150 {
-		if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) != nil {
+	return waitControlGone(ctx, info.PID)
+}
+
+// waitControlGone waits, bounded, until no daemon is left: the socket doesn't
+// answer, the old process has exited, and nobody holds the daemon lock. The
+// socket closes before the daemon has let go of its port and tunnels; the lock
+// goes only with the process (daemons from before the lock: the pid tells).
+func waitControlGone(ctx context.Context, pid int) error {
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if controlCall(ctx, http.MethodGet, "/v1/info", nil, nil) != nil && (pid == 0 || processGone(pid)) && !controlLockHeld() {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		if time.Now().After(deadline) {
+			if pid != 0 {
+				return fmt.Errorf("the control daemon (pid %d) did not stop", pid)
+			}
+			return errors.New("the control daemon did not stop; its socket closed but it still runs")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	return fmt.Errorf("the control daemon (pid %d) did not stop", info.PID)
 }
 
 // checkNoSetup asks an older daemon whether a setup runs on any remote.
