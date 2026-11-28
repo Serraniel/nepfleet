@@ -26,6 +26,24 @@ pkgver() {
   git describe --long --tags --abbrev=7 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
 }
 
+prepare() {
+  cd "$pkgname"
+  # makepkg only warns when updating its clone fails (no network, DNS) and then
+  # builds what it had: an old main that looks new. Build main as it is now,
+  # or not at all.
+  local head remote
+  head=$(git rev-parse HEAD)
+  remote=$(git ls-remote "${url}.git" refs/heads/main | cut -f1)
+  if [[ -z $remote ]]; then
+    error "Couldn't reach ${url}: no network or DNS. Nothing was built; run makepkg again."
+    return 1
+  fi
+  if [[ $head != "$remote" ]]; then
+    error "The source is ${head:0:7}, but main is ${remote:0:7}: updating the clone failed. Run makepkg again."
+    return 1
+  fi
+}
+
 build() {
   cd "$pkgname"
   export CGO_ENABLED=0 GOFLAGS="-trimpath -mod=readonly -modcacherw"
