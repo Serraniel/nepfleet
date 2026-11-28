@@ -215,7 +215,7 @@ Swarm stacks and Portainer follow with their own issues.
 
 ## `lock.yaml`
 
-`apply` pins every image to the digest it runs and writes `stacks/<name>/lock.yaml`; commit it with the stack.
+`apply` pins every image to the digest it runs, writes `stacks/<name>/lock.yaml` and commits it.
 
 - **New images** are locked to what already runs on the host, if anything does. Otherwise they are resolved from the registry. Locking therefore never changes a running image.
 - **A moved tag** (for example `:1` rebuilt upstream) changes nothing until you run `nepfleet apply --update-lock`, which re-resolves every image. That is how image updates become git commits.
@@ -354,5 +354,6 @@ spec:
 ## Rules
 
 - NepFleet commits only what it owns, such as `lock.yaml`, rendered output and imported stacks. Each commit message says why the change was made.
+- **The CLI commits too:** `nepfleet new` commits the new stack directory (`--no-commit` skips it), and `nepfleet apply` commits the `lock.yaml` and secrets it wrote. Other changes in the working tree stay out of the commit. The author is whoever runs it, from git's config; without one (inside the container, for example), the commit names NepFleet, as the server's own commits do. Outside a git repository, both print what to commit.
 - Hand edits are fine. The next `plan` shows exactly what they change.
 - Copying the repository and the age key to a new backend is a complete migration.

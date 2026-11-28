@@ -139,15 +139,17 @@ spec:
   values: {DOMAIN: vault.example.org}
 ```
 
-## 7. Plan, apply, commit
+`nepfleet new` (and `nepfleet enable`) commits the new stack directory and nothing else, as `feat(<name>): new stack from <template>`. Pass `--no-commit` to commit it yourself.
+
+## 7. Plan and apply
 
 ```sh
 nepfleet plan                 # diffs, secrets masked; ⚠ marks destructive changes
 nepfleet apply                # applies; asks first for stacks with apply: manual; waits for health checks
-git add -A && git commit -m "feat: initial fleet" && git push
+git push
 ```
 
-`apply` writes `lock.yaml` (the image digests) and stores generated secrets encrypted. Commit both. If a stack does not become healthy, `apply` restores its previous version automatically. Before it touches a stack, `apply` checks that every image is built for this host's CPU and refuses the stack otherwise. With the `binfmt` system stack installed, images for other architectures run under emulation (slower) and are only reported.
+`apply` writes `lock.yaml` (the image digests) and stores generated secrets encrypted, and commits both as `chore(<name>): record the apply`. Files you changed by hand, such as `fleet.yaml`, are yours to commit. If a stack does not become healthy, `apply` restores its previous version automatically. Before it touches a stack, `apply` checks that every image is built for this host's CPU and refuses the stack otherwise. With the `binfmt` system stack installed, images for other architectures run under emulation (slower) and are only reported.
 
 ## 8. Day two
 

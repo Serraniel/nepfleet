@@ -54,11 +54,11 @@ const usage = `nepfleet - manage Linux hosts and Docker deployments from git
 Usage:
   nepfleet init [dir]                   create a fleet repository
   nepfleet doctor                       check that this host can run what is planned for it
-  nepfleet new <template> [name]        create a stack from a template (asks for its inputs)
+  nepfleet new <template> [name]        create a stack from a template (asks for its inputs) and commit it
   nepfleet enable [feature]             add an opt-in feature (ingress, logs, uptime, dashboard, …) as a system stack; lists them without args
   nepfleet plan [stack...] [--json]     show what apply would change
   nepfleet adopt [stack...]             a new installation takes over what runs, restarting nothing
-  nepfleet apply [stack...]             apply, health-gated, rollsback on failure
+  nepfleet apply [stack...]             apply, health-gated, rolls back on failure; commits lock.yaml
   nepfleet render <stack>               print rendered files (secrets masked)
   nepfleet egress suggest <stack>       an allowlist from what a stack in egress mode log did
   nepfleet sbom [stack...] [--out DIR]what the fleet runs, as CycloneDX (--contents: inside each image, with Syft)
